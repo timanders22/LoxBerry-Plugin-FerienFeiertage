@@ -178,6 +178,22 @@ $fe_host = fe_e(isset($_SERVER['HTTP_HOST']) ? $_SERVER['HTTP_HOST'] : '<loxberr
 .fe-tbl th { background: #f0f0f0; }
 .fe-wrap .fe-btn, .fe-wrap a.fe-btn, .fe-wrap button { text-shadow: none !important; box-shadow: none !important; }
 .fe-wrap a.fe-btn, .fe-wrap a.fe-btn:visited, .fe-wrap a.fe-btn:hover { color: #fff !important; text-decoration: none; }
+
+/* --- Einheitliches Kachel-Raster im Reiter Test (Standard aller Plugins) --- */
+.fe-h3 { color: #4f7d17; font-size: 1.0em; font-weight: 700; margin: 16px 0 2px; text-shadow: none !important; }
+.fe-knopfreihe { display: flex; flex-wrap: wrap; gap: 10px; margin: 10px 0 4px; align-items: stretch; }
+.fe-knopfreihe form { margin: 0; display: flex; }
+.fe-knopfreihe .fe-btn { flex: 0 0 auto; min-width: 250px; text-align: center;
+    display: inline-flex; align-items: center; justify-content: center; line-height: 1.25; }
+.fe-legende { display: flex; flex-wrap: wrap; gap: 14px; margin: 10px 0 2px; font-size: 0.86em; color: #555; }
+.fe-legende span { display: inline-flex; align-items: center; gap: 6px; }
+.fe-punkt { width: 13px; height: 13px; border-radius: 3px; display: inline-block; }
+.fe-btn.fe-b-lesen   { background: #6dac20; }
+.fe-btn.fe-b-technik { background: #546e7a; }
+.fe-btn.fe-b-aktion  { background: #e0620d; }
+.fe-punkt.fe-b-lesen   { background: #6dac20; }
+.fe-punkt.fe-b-technik { background: #546e7a; }
+.fe-punkt.fe-b-aktion  { background: #e0620d; }
 </style>
 <div class="fe-wrap">
 
@@ -527,16 +543,31 @@ f&uuml;r Drittsoftware: <span class="fe-mono">http://<?= $fe_host ?>/plugins/<?=
 <!-- ================= Test ================= -->
 <div class="fe-pane" id="tab-test">
 <h2>Test</h2>
-<p>
-<a class="fe-btn" style="display:inline-block;margin-right:8px;" href="/plugins/<?= fe_e($fe_plugin) ?>/ferien.php" target="_blank">Loxone-Zeile abrufen</a>
-<a class="fe-btn" style="display:inline-block;margin-right:8px;" href="/plugins/<?= fe_e($fe_plugin) ?>/ferien.php?debug=1" target="_blank">Debug (alle Termine)</a>
-<a class="fe-btn" style="display:inline-block;margin-right:8px;background:#607d8b;" href="/plugins/<?= fe_e($fe_plugin) ?>/ferien.php?refresh=1&amp;debug=1" target="_blank">Neu abrufen + Debug</a>
-<a class="fe-btn" style="display:inline-block;background:#607d8b;" href="/plugins/<?= fe_e($fe_plugin) ?>/ferien.php?json=1" target="_blank">JSON-Ansicht</a>
-</p>
-<p>
-<a class="fe-btn" style="display:inline-block;margin-right:8px;background:#e65100;" href="/plugins/<?= fe_e($fe_plugin) ?>/ferien.php?say=1" target="_blank">Test-Ansage</a>
-<a class="fe-btn" style="display:inline-block;background:#e65100;" href="/plugins/<?= fe_e($fe_plugin) ?>/ferien.php?ptest=1" target="_blank">Test-Pushnachricht</a>
-</p>
+<div class="fe-legende">
+<span><i class="fe-punkt fe-b-lesen"></i> Ansehen &mdash; fragt nur ab, ver&auml;ndert nichts</span>
+<span><i class="fe-punkt fe-b-technik"></i> Technische Auskunft &mdash; f&uuml;r die Fehlersuche</span>
+<span><i class="fe-punkt fe-b-aktion"></i> L&ouml;st etwas aus &mdash; sendet oder ver&auml;ndert</span>
+</div>
+
+<h3 class="fe-h3">Ansehen</h3>
+<div class="fe-knopfreihe">
+<a class="fe-btn fe-b-lesen"  href="/plugins/<?= fe_e($fe_plugin) ?>/ferien.php" target="_blank">Loxone-Zeile abrufen</a>
+<a class="fe-btn fe-b-lesen"  href="/plugins/<?= fe_e($fe_plugin) ?>/ferien.php?json=1" target="_blank">JSON-Ansicht</a>
+</div>
+
+<h3 class="fe-h3">Technische Auskunft</h3>
+<div class="fe-knopfreihe">
+<a class="fe-btn fe-b-technik"  href="/plugins/<?= fe_e($fe_plugin) ?>/ferien.php?debug=1" target="_blank">Debug (alle Termine)</a>
+<a class="fe-btn fe-b-technik"  href="/plugins/<?= fe_e($fe_plugin) ?>/ferien.php?refresh=1&amp;debug=1" target="_blank">Neu abrufen + Debug</a>
+</div>
+
+<h3 class="fe-h3">L&ouml;st etwas aus</h3>
+<div class="fe-knopfreihe">
+<a class="fe-btn fe-b-aktion"  href="/plugins/<?= fe_e($fe_plugin) ?>/ferien.php?say=1" target="_blank">Test-Ansage</a>
+<a class="fe-btn fe-b-aktion"  href="/plugins/<?= fe_e($fe_plugin) ?>/ferien.php?ptest=1" target="_blank">Test-Pushnachricht</a>
+</div>
+
+
 </div>
 
 <!-- ================= Brueckentage ================= -->
