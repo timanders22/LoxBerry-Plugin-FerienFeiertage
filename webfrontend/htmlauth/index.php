@@ -115,7 +115,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['save'])) {
     );
     if (!is_dir($fe_cfgdir)) { @mkdir($fe_cfgdir, 0775, true); }
     $fe_json = json_encode($fe_new, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
-    if (@file_put_contents($fe_cfgfile, $fe_json) !== false) {
+    // json_encode liefert bei ungueltigem UTF-8 false, und file_put_contents
+    // schriebe dann eine Datei mit NULL Bytes - und meldete das als Erfolg.
+    if ($fe_json !== false && @file_put_contents($fe_cfgfile, $fe_json) !== false) {
         $fe_saved = true;
         @copy($fe_cfgfile, $fe_bkfile);
         @unlink('/tmp/ferien/state.json');
@@ -149,67 +151,67 @@ if ($fe_frame) { LBWeb::lbheader('Ferien und Feiertage', 'https://wiki.loxberry.
 $fe_host = fe_e(isset($_SERVER['HTTP_HOST']) ? $_SERVER['HTTP_HOST'] : '<loxberry-ip>');
 ?>
 <style>
-.fe-wrap { max-width: 940px; margin: 0 auto; font-family: -apple-system, 'Segoe UI', Roboto, sans-serif; color: #333; }
-.fe-wrap h2 { color: #6dac20; margin: 24px 0 10px; font-size: 1.15em; border-bottom: 2px solid #e0e0e0; padding-bottom: 6px; }
-.fe-wrap label { display: block; font-weight: 600; font-size: 0.88em; color: #555; margin: 10px 0 4px; }
-.fe-wrap input[type=text], .fe-wrap input[type=number], .fe-wrap select, .fe-wrap textarea {
+.sm-wrap { max-width: 940px; margin: 0 auto; font-family: -apple-system, 'Segoe UI', Roboto, sans-serif; color: #333; }
+.sm-wrap h2 { color: #6dac20; margin: 24px 0 10px; font-size: 1.15em; border-bottom: 2px solid #e0e0e0; padding-bottom: 6px; }
+.sm-wrap label { display: block; font-weight: 600; font-size: 0.88em; color: #555; margin: 10px 0 4px; }
+.sm-wrap input[type=text], .sm-wrap input[type=number], .sm-wrap select, .sm-wrap textarea {
   width: 100%; padding: 8px 10px; border: 1px solid #ccc; border-radius: 6px; font-size: 0.95em; box-sizing: border-box; }
-.fe-wrap input[type=checkbox] { width: 17px; height: 17px; margin: 0; vertical-align: middle; }
-.fe-row { display: flex; gap: 12px; flex-wrap: wrap; }
-.fe-row > div { flex: 1; min-width: 150px; }
-.fe-row > div > label:not([style]) { min-height: 2.6em; display: flex; align-items: flex-end; }
-.fe-btn { background: #6dac20; color: #fff !important; border: 0; border-radius: 6px; padding: 10px 22px; font-size: 1em; cursor: pointer; margin-top: 18px; font-weight: 600; }
-.fe-alert { border-radius: 8px; padding: 10px 14px; margin: 12px 0; }
-.fe-ok { background: #e8f5e9; border: 1px solid #a5d6a7; }
-.fe-err { background: #ffebee; border: 1px solid #ef9a9a; }
-.fe-warn { background: #fff8e1; border: 1px solid #ffe082; }
-.fe-info { background: #e3f2fd; border: 1px solid #90caf9; font-size: 0.9em; }
-.fe-mono { font-family: ui-monospace, monospace; background: #f5f5f5; padding: 2px 6px; border-radius: 4px; }
-.fe-small { font-size: 0.82em; color: #666; margin-top: 3px; }
-.fe-tabs { display: flex; gap: 4px; margin: 14px 0 0; border-bottom: 2px solid #6dac20; flex-wrap: wrap; }
-.fe-tab { background: #eee; border: 1px solid #ccc; border-bottom: 0; border-radius: 8px 8px 0 0; padding: 9px 18px; cursor: pointer; font-size: 0.95em; color: #444 !important; text-shadow: none !important; }
-.fe-tab.fe-active { background: #6dac20; color: #fff !important; border-color: #6dac20; font-weight: 600; }
-.fe-pane { display: none; padding-top: 4px; }
-.fe-pane.fe-active { display: block; }
-.fe-log { text-shadow: none !important; background: #1e1e1e; color: #d4d4d4; font-family: ui-monospace, monospace; font-size: 0.82em; padding: 12px; border-radius: 8px; max-height: 480px; overflow: auto; white-space: pre-wrap; }
-.fe-step { margin: 10px 0; padding: 10px 14px; background: #fafafa; border-left: 4px solid #6dac20; border-radius: 0 8px 8px 0; }
-.fe-tbl { border-collapse: collapse; margin: 8px 0; }
-.fe-tbl th, .fe-tbl td { border: 1px solid #ddd; padding: 6px 10px; text-align: left; font-size: 0.9em; }
-.fe-tbl th { background: #f0f0f0; }
-.fe-wrap .fe-btn, .fe-wrap a.fe-btn, .fe-wrap button { text-shadow: none !important; box-shadow: none !important; }
-.fe-wrap a.fe-btn, .fe-wrap a.fe-btn:visited, .fe-wrap a.fe-btn:hover { color: #fff !important; text-decoration: none; }
+.sm-wrap input[type=checkbox] { width: 17px; height: 17px; margin: 0; vertical-align: middle; }
+.sm-row { display: flex; gap: 12px; flex-wrap: wrap; }
+.sm-row > div { flex: 1; min-width: 150px; }
+.sm-row > div > label:not([style]) { min-height: 2.6em; display: flex; align-items: flex-end; }
+.sm-btn { background: #6dac20; color: #fff !important; border: 0; border-radius: 6px; padding: 10px 22px; font-size: 1em; cursor: pointer; margin-top: 18px; font-weight: 600; }
+.sm-alert { border-radius: 8px; padding: 10px 14px; margin: 12px 0; }
+.sm-ok { background: #e8f5e9; border: 1px solid #a5d6a7; }
+.sm-err { background: #ffebee; border: 1px solid #ef9a9a; }
+.sm-warn { background: #fff8e1; border: 1px solid #ffe082; }
+.sm-info { background: #e3f2fd; border: 1px solid #90caf9; font-size: 0.9em; }
+.sm-mono { font-family: ui-monospace, monospace; background: #f5f5f5; padding: 2px 6px; border-radius: 4px; }
+.sm-small { font-size: 0.82em; color: #666; margin-top: 3px; }
+.sm-tabs { display: flex; gap: 4px; margin: 14px 0 0; border-bottom: 2px solid #6dac20; flex-wrap: wrap; }
+.sm-tab { background: #eee; border: 1px solid #ccc; border-bottom: 0; border-radius: 8px 8px 0 0; padding: 9px 18px; cursor: pointer; font-size: 0.95em; color: #444 !important; text-shadow: none !important; }
+.sm-tab.sm-active { background: #6dac20; color: #fff !important; border-color: #6dac20; font-weight: 600; }
+.sm-pane { display: none; padding-top: 4px; }
+.sm-pane.sm-active { display: block; }
+.sm-log { text-shadow: none !important; background: #1e1e1e; color: #d4d4d4; font-family: ui-monospace, monospace; font-size: 0.82em; padding: 12px; border-radius: 8px; max-height: 480px; overflow: auto; white-space: pre-wrap; }
+.sm-step { margin: 10px 0; padding: 10px 14px; background: #fafafa; border-left: 4px solid #6dac20; border-radius: 0 8px 8px 0; }
+.sm-tbl { border-collapse: collapse; margin: 8px 0; }
+.sm-tbl th, .sm-tbl td { border: 1px solid #ddd; padding: 6px 10px; text-align: left; font-size: 0.9em; }
+.sm-tbl th { background: #f0f0f0; }
+.sm-wrap .sm-btn, .sm-wrap a.sm-btn, .sm-wrap button { text-shadow: none !important; box-shadow: none !important; }
+.sm-wrap a.sm-btn, .sm-wrap a.sm-btn:visited, .sm-wrap a.sm-btn:hover { color: #fff !important; text-decoration: none; }
 
-/* --- Einheitliches Kachel-Raster im Reiter Test (Standard aller Plugins) --- */
-.fe-h3 { color: #4f7d17; font-size: 1.0em; font-weight: 700; margin: 16px 0 2px; text-shadow: none !important; }
-.fe-knopfreihe { display: flex; flex-wrap: wrap; gap: 10px; margin: 10px 0 4px; align-items: stretch; }
-.fe-knopfreihe form { margin: 0; display: flex; }
-.fe-knopfreihe .fe-btn { flex: 0 0 auto; min-width: 250px; text-align: center;
+/* --- Einheitliches Kachel-Raster im Reiter <?php echo fer_t('TEXT.TEST'); ?> (Standard <?php echo fer_t('TEXT.ALLE'); ?>r Plugins) --- */
+.sm-h3 { color: #4f7d17; font-size: 1.0em; font-weight: 700; margin: 16px 0 2px; text-shadow: none !important; }
+.sm-knopfreihe { display: flex; flex-wrap: wrap; gap: 10px; margin: 10px 0 4px; align-items: stretch; }
+.sm-knopfreihe form { margin: 0; display: flex; }
+.sm-knopfreihe .sm-btn { flex: 0 0 auto; min-width: 250px; text-align: center;
     display: inline-flex; align-items: center; justify-content: center; line-height: 1.25; }
-.fe-legende { display: flex; flex-wrap: wrap; gap: 14px; margin: 10px 0 2px; font-size: 0.86em; color: #555; }
-.fe-legende span { display: inline-flex; align-items: center; gap: 6px; }
-.fe-punkt { width: 13px; height: 13px; border-radius: 3px; display: inline-block; }
-.fe-btn.fe-b-lesen   { background: #6dac20; }
-.fe-btn.fe-b-technik { background: #546e7a; }
-.fe-btn.fe-b-aktion  { background: #e0620d; }
-.fe-punkt.fe-b-lesen   { background: #6dac20; }
-.fe-punkt.fe-b-technik { background: #546e7a; }
-.fe-punkt.fe-b-aktion  { background: #e0620d; }
+.sm-legende { display: flex; flex-wrap: wrap; gap: 14px; margin: 10px 0 2px; font-size: 0.86em; color: #555; }
+.sm-legende span { display: inline-flex; align-items: center; gap: 6px; }
+.sm-punkt { width: 13px; height: 13px; border-radius: 3px; display: inline-block; }
+.sm-btn.sm-b-lesen   { background: #6dac20; }
+.sm-btn.sm-b-technik { background: #546e7a; }
+.sm-btn.sm-b-aktion  { background: #e0620d; }
+.sm-punkt.sm-b-lesen   { background: #6dac20; }
+.sm-punkt.sm-b-technik { background: #546e7a; }
+.sm-punkt.sm-b-aktion  { background: #e0620d; }
 </style>
-<div class="fe-wrap">
+<div class="sm-wrap">
 
-<?php if ($fe_saved) { ?><div class="fe-alert fe-ok"><b>Konfiguration gespeichert</b> (inkl. Sicherungskopie f&uuml;r Updates). Die Daten werden beim n&auml;chsten Abruf neu geladen.</div><?php } ?>
-<?php if ($fe_note !== '') { ?><div class="fe-alert fe-ok"><?= fe_e($fe_note) ?></div><?php } ?>
-<?php if ($fe_err !== '') { ?><div class="fe-alert fe-err"><b>Fehler:</b> <?= fe_e($fe_err) ?></div><?php } ?>
+<?php if ($fe_saved) { ?><div class="sm-alert sm-ok"><b><?php echo fer_t('TEXT.KONFIGURATION_GESPEICHERT'); ?></b> <?php echo fer_t('TEXT.INKL_SICHERUNGSKOPIE_FR_UPDATES_DI'); ?></div><?php } ?>
+<?php if ($fe_note !== '') { ?><div class="sm-alert sm-ok"><?= fe_e($fe_note) ?></div><?php } ?>
+<?php if ($fe_err !== '') { ?><div class="sm-alert sm-err"><b><?php echo fer_t('TEXT.FEHLER'); ?></b> <?= fe_e($fe_err) ?></div><?php } ?>
 
 <?php if (!empty($fe_st)) { ?>
-<div class="fe-alert fe-info">
+<div class="sm-alert sm-info">
 <?php if ($fe_st['ok']) { ?>
-<b>Heute (<?= fe_e(fe_d($fe_st['heute']['datum'])) ?>):</b>
-<?= $fe_st['heute']['schulfrei'] ? '<b>schulfrei</b>' : 'normaler Schul-/Arbeitstag' ?>
+<b><?php echo fer_t('TEXT.HEUTE'); ?><?= fe_e(fe_d($fe_st[fer_t('TEXT.HEUTE_2')]['datum'])) ?>):</b>
+<?= $fe_st['heute'][fer_t('TEXT.SCHULFREI')] ? '<b>schulfrei</b>' : 'normaler Schul-/Arbeitstag' ?>
 <?= $fe_st['heute']['feiertag'] ? ' &middot; Feiertag: <b>' . fe_e($fe_st['heute']['feiertag_name']) . '</b>' : '' ?>
 <?= $fe_st['heute']['ferien'] ? ' &middot; Ferien: <b>' . fe_e($fe_st['heute']['ferien_name']) . '</b>' : '' ?>
 <?= $fe_st['heute']['bruecke'] ? ' &middot; <b>Br&uuml;ckentag</b>' : '' ?><br>
-<b>Morgen:</b> <?= $fe_st['morgen']['schulfrei'] ? '<b>schulfrei</b>' : 'Schul-/Arbeitstag' ?>
+<b><?php echo fer_t('TEXT.MORGEN'); ?></b> <?= $fe_st['morgen']['schulfrei'] ? '<b>schulfrei</b>' : 'Schul-/Arbeitstag' ?>
 <?= $fe_st['morgen']['feiertag'] ? ' (' . fe_e($fe_st['morgen']['feiertag_name']) . ')' : '' ?>
 <?= $fe_st['morgen']['ferien'] ? ' (' . fe_e($fe_st['morgen']['ferien_name']) . ')' : '' ?><br>
 <?php if ($fe_st['naechste']['in'] >= 0) { ?>
@@ -218,36 +220,36 @@ $fe_host = fe_e(isset($_SERVER['HTTP_HOST']) ? $_SERVER['HTTP_HOST'] : '<loxberr
     : 'N&auml;chste Ferien: <b>' . fe_e($fe_st['naechste']['name']) . '</b> in <b>' . (int) $fe_st['naechste']['in'] . ' Tagen</b> (' . fe_e(fe_d($fe_st['naechste']['von'])) . ' bis ' . fe_e(fe_d($fe_st['naechste']['bis'])) . ', ' . (int) $fe_st['naechste']['dauer'] . ' Tage)' ?><br>
 <?php } ?>
 <?php if ($fe_st['feiertag_naechster']['in'] >= 0) { ?>
-N&auml;chster Feiertag: <b><?= fe_e($fe_st['feiertag_naechster']['name']) ?></b> in <?= (int) $fe_st['feiertag_naechster']['in'] ?> Tagen (<?= fe_e(fe_d($fe_st['feiertag_naechster']['datum'])) ?>)<br>
+<?php echo fer_t('TEXT.NCHSTER_FEIERTAG'); ?> <b><?= fe_e($fe_st['feiertag_naechster']['name']) ?></b> in <?= (int) $fe_st['feiertag_naechster']['in'] ?> <?php echo fer_t('TEXT.TAGEN'); ?><?= fe_e(fe_d($fe_st['feiertag_naechster']['datum'])) ?>)<br>
 <?php } ?>
-<span class="fe-small">Daten reichen bis <?= fe_e(fe_d($fe_st['reicht_bis'])) ?> &middot; Stand <?= fe_e(substr((string) $fe_st['stand'], 0, 10)) ?></span>
+<span class="sm-small"><?php echo fer_t('TEXT.DATEN_REICHEN_BIS'); ?> <?= fe_e(fe_d($fe_st['reicht_bis'])) ?> <?php echo fer_t('TEXT.STAND'); ?> <?= fe_e(substr((string) $fe_st['stand'], 0, 10)) ?></span>
 <?php } else { ?>
-<b>Noch keine Daten geladen.</b> Bitte unten Land und Bundesland w&auml;hlen, speichern und &bdquo;Jetzt abrufen&ldquo; klicken.
+<b><?php echo fer_t('TEXT.NOCH_KEINE_DATEN_GELADEN'); ?></b> <?php echo fer_t('TEXT.BITTE_UNTEN_LAND_UND_BUNDESLAND_WH'); ?>
 <?php } ?>
 </div>
-<?php if (!empty($fe_st['warnung'])) { ?><div class="fe-alert fe-warn"><b>Achtung:</b> Die Ferien-/Feiertagsdaten reichen weniger als 60 Tage in die Zukunft. Das Plugin l&auml;dt automatisch nach &mdash; falls das scheitert (Protokoll), bitte die Internetverbindung pr&uuml;fen.</div><?php } ?>
+<?php if (!empty($fe_st['warnung'])) { ?><div class="sm-alert sm-warn"><b><?php echo fer_t('TEXT.ACHTUNG'); ?></b> <?php echo fer_t('TEXT.DIE_FERIEN_FEIERTAGSDATEN_REICHEN_'); ?></div><?php } ?>
 <?php } ?>
 
-<div class="fe-tabs">
-    <div class="fe-tab" data-pane="tab-settings">Einstellungen</div>
-    <div class="fe-tab" data-pane="tab-loxone">Einbindung in Loxone</div>
-    <div class="fe-tab" data-pane="tab-bridge">Br&uuml;ckentage</div>
-    <div class="fe-tab" data-pane="tab-vacation">Kommende Ferien</div>
-    <div class="fe-tab" data-pane="tab-holiday">Kommende Feiertage</div>
-    <div class="fe-tab" data-pane="tab-test">Test</div>
-    <div class="fe-tab" data-pane="tab-log">Protokoll</div>
+<div class="sm-tabs">
+    <div class="sm-tab" data-pane="tab-settings"><?php echo fer_t('REITER.EINSTELLUNGEN'); ?></div>
+    <div class="sm-tab" data-pane="tab-loxone"><?php echo fer_t('REITER.LOXONE'); ?></div>
+    <div class="sm-tab" data-pane="tab-bridge"><?php echo fer_t('REITER.BRUECKENTAGE'); ?></div>
+    <div class="sm-tab" data-pane="tab-vacation"><?php echo fer_t('REITER.FERIEN'); ?></div>
+    <div class="sm-tab" data-pane="tab-holiday"><?php echo fer_t('REITER.FEIERTAGE'); ?></div>
+    <div class="sm-tab" data-pane="tab-test"><?php echo fer_t('REITER.TEST'); ?></div>
+    <div class="sm-tab" data-pane="tab-log"><?php echo fer_t('REITER.LOG'); ?></div>
 </div>
 
-<!-- ================= Einstellungen ================= -->
-<div class="fe-pane" id="tab-settings">
-<form method="post" autocomplete="off">
+<!-- ================= <?php echo fer_t('TEXT.EINSTELLUNGEN'); ?> ================= -->
+<div class="sm-pane" id="tab-settings">
+<form action="index.php" method="post" autocomplete="off">
 <input data-role="none" type="hidden" name="save" value="1">
 <input data-role="none" type="hidden" name="activetab" value="tab-settings">
 
-<h2>Region</h2>
-<div class="fe-row">
+<h2><?php echo fer_t('TEXT.REGION'); ?></h2>
+<div class="sm-row">
     <div>
-        <label>Land</label>
+        <label><?php echo fer_t('TEXT.LAND'); ?></label>
         <select data-role="none" name="country">
 <?php foreach (array('DE' => 'Deutschland', 'AT' => '&Ouml;sterreich', 'CH' => 'Schweiz', 'LU' => 'Luxemburg',
                      'BE' => 'Belgien', 'NL' => 'Niederlande', 'FR' => 'Frankreich', 'IT' => 'Italien',
@@ -255,78 +257,66 @@ N&auml;chster Feiertag: <b><?= fe_e($fe_st['feiertag_naechster']['name']) ?></b>
             <option value="<?= $fe_k ?>"<?= $fe_cfg['country'] === $fe_k ? ' selected' : '' ?>><?= $fe_v ?></option>
 <?php } ?>
         </select>
-        <div class="fe-small">Nach dem Wechsel speichern &mdash; danach stehen unten die passenden Regionen zur Auswahl.</div>
+        <div class="sm-small"><?php echo fer_t('TEXT.NACH_DEM_WECHSEL_SPEICHERN_DANACH_'); ?></div>
     </div>
     <div>
-        <label>Bundesland / Region</label>
+        <label><?php echo fer_t('TEXT.BUNDESLAND_REGION'); ?></label>
 <?php if ($fe_subs) { ?>
         <select data-role="none" name="subdivision">
-            <option value="">(ganzes Land, nur bundesweite Feiertage)</option>
+            <option value=""><?php echo fer_t('TEXT.GANZES_LAND_NUR_BUNDESWEITE_FEIERT'); ?></option>
 <?php foreach ($fe_subs as $fe_code => $fe_name) { ?>
             <option value="<?= fe_e($fe_code) ?>"<?= $fe_cfg['subdivision'] === $fe_code ? ' selected' : '' ?>><?= fe_e($fe_name) ?> (<?= fe_e($fe_code) ?>)</option>
 <?php } ?>
         </select>
 <?php } else { ?>
         <input data-role="none" type="text" name="subdivision" value="<?= fe_e($fe_cfg['subdivision']) ?>" placeholder="z. B. DE-BY">
-        <div class="fe-small">Liste konnte nicht geladen werden &mdash; Code direkt eintragen (DE-BW, DE-BY, DE-BE, DE-HH, DE-NW &hellip;).</div>
+        <div class="sm-small"><?php echo fer_t('TEXT.LISTE_KONNTE_NICHT_GELADEN_WERDEN_'); ?></div>
 <?php } ?>
     </div>
 </div>
-<div class="fe-row" style="margin-top:8px;">
+<div class="sm-row" style="margin-top:8px;">
     <div>
-        <label>Arbeitsort / Gemeinde (&ouml;rtliche Sonderf&auml;lle)</label>
+        <label><?php echo fer_t('TEXT.ARBEITSORT_GEMEINDE_RTLICHE_SONDER'); ?></label>
         <select data-role="none" name="locality">
-            <option value=""<?= $fe_cfg['locality'] === '' ? ' selected' : '' ?>>Alle anderen St&auml;dte und Gemeinden</option>
-            <option value="DE-BY-AU"<?= $fe_cfg['locality'] === 'DE-BY-AU' ? ' selected' : '' ?>>Stadtgebiet Augsburg &mdash; mit Friedensfest (8.&nbsp;August)</option>
-            <option value="BY-EV"<?= $fe_cfg['locality'] === 'BY-EV' ? ' selected' : '' ?>>Bayern: &uuml;berwiegend evangelische Gemeinde &mdash; OHNE Mari&auml; Himmelfahrt</option>
-            <option value="SN-KATH"<?= $fe_cfg['locality'] === 'SN-KATH' ? ' selected' : '' ?>>Sachsen: katholische Gemeinde im sorbischen Siedlungsgebiet &mdash; MIT Fronleichnam</option>
-            <option value="TH-KATH"<?= $fe_cfg['locality'] === 'TH-KATH' ? ' selected' : '' ?>>Th&uuml;ringen: Eichsfeld bzw. katholische Gemeinde &mdash; MIT Fronleichnam</option>
+            <option value=""<?= $fe_cfg['locality'] === '' ? ' selected' : '' ?><?php echo fer_t('TEXT.ALLE_ANDEREN_STDTE_UND_GEMEINDEN'); ?></option>
+            <option value="DE-BY-AU"<?= $fe_cfg['locality'] === 'DE-BY-AU' ? ' selected' : '' ?><?php echo fer_t('TEXT.STADTGEBIET_AUGSBURG_MIT_FRIEDENSF'); ?></option>
+            <option value="BY-EV"<?= $fe_cfg['locality'] === 'BY-EV' ? ' selected' : '' ?><?php echo fer_t('TEXT.BAYERN_BERWIEGEND_EVANGELISCHE_GEM'); ?></option>
+            <option value="SN-KATH"<?= $fe_cfg['locality'] === 'SN-KATH' ? ' selected' : '' ?><?php echo fer_t('TEXT.SACHSEN_KATHOLISCHE_GEMEINDE_IM_SO'); ?></option>
+            <option value="TH-KATH"<?= $fe_cfg['locality'] === 'TH-KATH' ? ' selected' : '' ?><?php echo fer_t('TEXT.THRINGEN_EICHSFELD_BZW_KATHOLISCHE'); ?></option>
         </select>
-        <div class="fe-small">Drei Feiertage gelten <b>nicht im ganzen Bundesland</b>, sondern nur in bestimmten Gemeinden.
-        Die Datenquelle kennt davon nur Augsburg &mdash; die beiden anderen F&auml;lle rechnet das Plugin selbst:<br>
-        &bull; <b>Mari&auml; Himmelfahrt</b> ist in Bayern nur in den rund 1.700 &uuml;berwiegend katholischen Gemeinden
-        Feiertag; in den &uuml;brigen rund 350 nicht. Wer dort wohnt, w&auml;hlt &bdquo;&uuml;berwiegend evangelische Gemeinde&ldquo;.<br>
-        &bull; <b>Fronleichnam</b> ist in Sachsen nur in den katholischen Gemeinden des sorbischen Siedlungsgebiets
-        (Landkreis Bautzen) und in Th&uuml;ringen nur im Eichsfeld sowie einigen Gemeinden des Unstrut-Hainich- und
-        Wartburgkreises Feiertag &mdash; dort die passende Zeile w&auml;hlen.<br>
-        &bull; <b>Friedensfest</b> gilt nur im Stadtgebiet Augsburg.<br>
-        Im Zweifel hilft die Gemeinde- oder Stadtverwaltung weiter. F&uuml;r alle anderen Orte bleibt die erste Zeile richtig.</div>
+        <div class="sm-small"><?php echo fer_t('TEXT.DREI_FEIERTAGE_GELTEN'); ?> <b><?php echo fer_t('TEXT.NICHT_IM_GANZEN_BUNDESLAND'); ?></b><?php echo fer_t('TEXT.SONDERN_NUR_IN_BESTIMMTEN_GEMEINDE'); ?><br>
+        <?php echo fer_t('TEXT.TEXT'); ?> <b><?php echo fer_t('TEXT.MARI_HIMMELFAHRT'); ?></b> <?php echo fer_t('TEXT.IST_IN_BAYERN_NUR_IN_DEN_RUND_1_70'); ?><br>
+        &bull; <b><?php echo fer_t('TEXT.FRONLEICHNAM'); ?></b> <?php echo fer_t('TEXT.IST_IN_SACHSEN_NUR_IN_DEN_KATHOLIS'); ?><br>
+        &bull; <b><?php echo fer_t('TEXT.FRIEDENSFEST'); ?></b> <?php echo fer_t('TEXT.GILT_NUR_IM_STADTGEBIET_AUGSBURG'); ?><br>
+        <?php echo fer_t('TEXT.IM_ZWEIFEL_HILFT_DIE_GEMEINDE_ODER'); ?></div>
     </div>
 </div>
 <div style="margin-top:8px;">
     <label style="display:inline-flex;align-items:center;gap:6px;margin-right:20px;">
-        <input data-role="none" type="checkbox" name="school" <?= !empty($fe_cfg['school']) ? 'checked' : '' ?>> Schulferien auswerten
+        <input data-role="none" type="checkbox" name="school" <?= !empty($fe_cfg['school']) ? 'checked' : '' ?><?php echo fer_t('TEXT.SCHULFERIEN_AUSWERTEN'); ?>
     </label>
     <label style="display:inline-flex;align-items:center;gap:6px;margin-right:20px;">
-        <input data-role="none" type="checkbox" name="public" <?= !empty($fe_cfg['public']) ? 'checked' : '' ?>> Gesetzliche Feiertage auswerten
+        <input data-role="none" type="checkbox" name="public" <?= !empty($fe_cfg['public']) ? 'checked' : '' ?><?php echo fer_t('TEXT.GESETZLICHE_FEIERTAGE_AUSWERTEN'); ?>
     </label>
     <label style="display:inline-flex;align-items:center;gap:6px;margin-right:20px;">
-        <input data-role="none" type="checkbox" name="local_holidays" <?= !empty($fe_cfg['local_holidays']) ? 'checked' : '' ?>> Auch nur &ouml;rtliche Feiertage
+        <input data-role="none" type="checkbox" name="local_holidays" <?= !empty($fe_cfg['local_holidays']) ? 'checked' : '' ?><?php echo fer_t('TEXT.AUCH_NUR_RTLICHE_FEIERTAGE'); ?>
     </label>
     <label style="display:inline-flex;align-items:center;gap:6px;">
-        <input data-role="none" type="checkbox" name="bridge" <?= !empty($fe_cfg['bridge']) ? 'checked' : '' ?>> Br&uuml;ckentage erkennen
+        <input data-role="none" type="checkbox" name="bridge" <?= !empty($fe_cfg['bridge']) ? 'checked' : '' ?><?php echo fer_t('TEXT.BRCKENTAGE_ERKENNEN'); ?>
     </label>
-    <div class="fe-small">&bdquo;Auch nur &ouml;rtliche Feiertage&ldquo; nimmt <b>alle</b> ortsgebundenen Feiertage der Region mit, unabh&auml;ngig vom gew&auml;hlten Arbeitsort &mdash; normalerweise ausgeschaltet lassen und stattdessen oben den Arbeitsort w&auml;hlen.
-    Ein <b>Br&uuml;ckentag</b> ist ein Werktag zwischen Feiertag und Wochenende (Freitag nach einem Donnerstags-Feiertag bzw. Montag vor einem Dienstags-Feiertag).</div>
+    <div class="sm-small"><?php echo fer_t('TEXT.AUCH_NUR_RTLICHE_FEIERTAGE_NIMMT'); ?> <b>alle</b> <?php echo fer_t('TEXT.ORTSGEBUNDENEN_FEIERTAGE_DER_REGIO'); ?> <b><?php echo fer_t('TEXT.BRCKENTAG'); ?></b> <?php echo fer_t('TEXT.IST_EIN_WERKTAG_ZWISCHEN_FEIERTAG_'); ?></div>
 </div>
-<div class="fe-alert fe-info" style="margin-top:10px;">Datenquelle: <b>openholidaysapi.org</b> &mdash; amtliche Ferien- und Feiertagsdaten,
-kostenlos und ohne Konto. Das Plugin l&auml;dt automatisch 18 Monate im Voraus und speichert sie lokal, damit es auch ohne Internet weiterl&auml;uft.
-Die j&auml;hrliche Handpflege alter Ferientermine entf&auml;llt damit.</div>
+<div class="sm-alert sm-info" style="margin-top:10px;"><?php echo fer_t('TEXT.DATENQUELLE'); ?> <b><?php echo fer_t('TEXT.OPENHOLIDAYSAPI_ORG'); ?></b> <?php echo fer_t('TEXT.AMTLICHE_FERIEN_UND_FEIERTAGSDATEN'); ?></div>
 
-<h2>Eigene Termine (optional)</h2>
-<div class="fe-small">F&uuml;r Betriebsferien, Urlaub oder schulfreie Tage, die nicht im amtlichen Kalender stehen.<br>
-&bull; <b>Wie Ferien</b> z&auml;hlt in <span class="fe-mono">FERIEN</span>/<span class="fe-mono">SCHULFREI</span>.<br>
-&bull; <b>Wie Feiertag</b> zus&auml;tzlich in <span class="fe-mono">FEIERTAG</span>.<br>
-&bull; <b>Urlaub (abwesend)</b> bedeutet: Das Haus ist leer. Zus&auml;tzlich zu &bdquo;wie Ferien&ldquo; wird
-<span class="fe-mono">URLAUB=1</span> gesetzt, damit Loxone automatisch in den <b>Urlaubsmodus</b> gehen kann &mdash;
-Anwesenheitssimulation, Temperaturabsenkung, Steckdosen aus. Mit <span class="fe-mono">URLAUBENDE=1</span> am letzten
-Urlaubstag l&auml;sst sich das Haus rechtzeitig wieder vorw&auml;rmen. Verdrahtung siehe Reiter
-&bdquo;Einbindung in Loxone&ldquo;, Schritt&nbsp;4d.<br>
-Das Datum bezeichnet ganze Tage: Abreise ist der erste, R&uuml;ckkehr der letzte Tag. Damit das Haus bei der Ankunft
-warm ist, hebt man den Urlaubsmodus in Loxone am letzten Tag &uuml;ber <span class="fe-mono">URLAUBENDE</span> wieder
-auf (Schritt&nbsp;4d) &mdash; ein Vorziehen des &bdquo;bis&ldquo;-Datums ist daf&uuml;r nicht n&ouml;tig.</div>
-<table class="fe-tbl" style="width:100%;">
-<tr><th style="width:30%;">Bezeichnung</th><th style="width:20%;">von (JJJJ-MM-TT)</th><th style="width:20%;">bis</th><th style="width:24%;">Art</th></tr>
+<h2><?php echo fer_t('TEXT.EIGENE_TERMINE_OPTIONAL'); ?></h2>
+<div class="sm-small"><?php echo fer_t('TEXT.FR_BETRIEBSFERIEN_URLAUB_ODER_SCHU'); ?><br>
+&bull; <b><?php echo fer_t('TEXT.WIE_FERIEN'); ?></b> <?php echo fer_t('TEXT.ZHLT_IN'); ?> <span class="sm-mono"><?php echo fer_t('TEXT.FERIEN'); ?></span>/<span class="sm-mono"><?php echo fer_t('TEXT.SCHULFREI_2'); ?></span>.<br>
+&bull; <b><?php echo fer_t('TEXT.WIE_FEIERTAG'); ?></b> <?php echo fer_t('TEXT.ZUSTZLICH_IN'); ?> <span class="sm-mono"><?php echo fer_t('TEXT.FEIERTAG'); ?></span>.<br>
+&bull; <b<?php echo fer_t('TEXT.URLAUB_ABWESEND_2'); ?></b> <?php echo fer_t('TEXT.BEDEUTET_DAS_HAUS_IST_LEER_ZUSTZLI'); ?>
+<span class="sm-mono"><?php echo fer_t('TEXT.URLAUB_1'); ?></span> <?php echo fer_t('TEXT.GESETZT_DAMIT_LOXONE_AUTOMATISCH_I'); ?> <b><?php echo fer_t('TEXT.URLAUBSMODUS'); ?></b> <?php echo fer_t('TEXT.GEHEN_KANN_ANWESENHEITSSIMULATION_'); ?> <span class="sm-mono"><?php echo fer_t('TEXT.URLAUBENDE_1'); ?></span> <?php echo fer_t('TEXT.AM_LETZTEN_URLAUBSTAG_LSST_SICH_DA'); ?><br>
+<?php echo fer_t('TEXT.DAS_DATUM_BEZEICHNET_GANZE_TAGE_AB'); ?> <span class="sm-mono"><?php echo fer_t('TEXT.URLAUBENDE'); ?></span> <?php echo fer_t('TEXT.WIEDER_AUF_SCHRITT4D_EIN_VORZIEHEN'); ?></div>
+<table class="sm-tbl" style="width:100%;">
+<tr><th style="width:30%;"><?php echo fer_t('TEXT.BEZEICHNUNG'); ?></th><th style="width:20%;"><?php echo fer_t('TEXT.VON_JJJJ_MM_TT'); ?></th><th style="width:20%;">bis</th><th style="width:24%;">Art</th></tr>
 <?php for ($fe_i = 0; $fe_i < 6; $fe_i++) {
     $fe_o = isset($fe_cfg['own'][$fe_i]) ? (array) $fe_cfg['own'][$fe_i] : array();
     $fe_o += array('name' => '', 'von' => '', 'bis' => '', 'typ' => 'ferien'); ?>
@@ -335,247 +325,237 @@ auf (Schritt&nbsp;4d) &mdash; ein Vorziehen des &bdquo;bis&ldquo;-Datums ist daf
 <td><input data-role="none" type="text" name="own_von[]" value="<?= fe_e($fe_o['von']) ?>" placeholder="2026-08-03"></td>
 <td><input data-role="none" type="text" name="own_bis[]" value="<?= fe_e($fe_o['bis']) ?>" placeholder="2026-08-14"></td>
 <td><select data-role="none" name="own_typ[]">
-    <option value="ferien"<?= ($fe_o['typ'] !== 'feiertag' && $fe_o['typ'] !== 'urlaub') ? ' selected' : '' ?>>wie Ferien</option>
-    <option value="feiertag"<?= $fe_o['typ'] === 'feiertag' ? ' selected' : '' ?>>wie Feiertag</option>
-    <option value="urlaub"<?= $fe_o['typ'] === 'urlaub' ? ' selected' : '' ?>>Urlaub (abwesend)</option>
+    <option value="ferien"<?= ($fe_o['typ'] !== 'feiertag' && $fe_o['typ'] !== 'urlaub') ? ' selected' : '' ?><?php echo fer_t('TEXT.WIE_FERIEN_2'); ?></option>
+    <option value="feiertag"<?= $fe_o['typ'] === 'feiertag' ? ' selected' : '' ?><?php echo fer_t('TEXT.WIE_FEIERTAG_2'); ?></option>
+    <option value="urlaub"<?= $fe_o['typ'] === 'urlaub' ? ' selected' : '' ?>><?php echo fer_t('TEXT.URLAUB_ABWESEND'); ?></option>
 </select></td>
 </tr>
 <?php } ?>
 </table>
 
-<h2>Benachrichtigungen</h2>
+<h2><?php echo fer_t('TEXT.BENACHRICHTIGUNGEN'); ?></h2>
 <div style="margin-bottom:10px;">
     <label style="display:inline-flex;align-items:center;gap:6px;margin-right:24px;">
-        <input data-role="none" type="checkbox" name="notify_audio" <?= !empty($fe_notify['audio']) ? 'checked' : '' ?>> Audioausgabe aktiv
+        <input data-role="none" type="checkbox" name="notify_audio" <?= !empty($fe_notify['audio']) ? 'checked' : '' ?><?php echo fer_t('TEXT.AUDIOAUSGABE_AKTIV'); ?>
     </label>
     <label style="display:inline-flex;align-items:center;gap:6px;">
-        <input data-role="none" type="checkbox" name="notify_push" <?= !empty($fe_notify['push']) ? 'checked' : '' ?>> Push-Nachricht aktiv
+        <input data-role="none" type="checkbox" name="notify_push" <?= !empty($fe_notify['push']) ? 'checked' : '' ?><?php echo fer_t('TEXT.PUSH_NACHRICHT_AKTIV'); ?>
     </label>
-    <div class="fe-small">Beides an = Ansage + Push. Nur eines an = nur diese Ausgabe. Beides aus = keine Meldung.
-    Die Ansage spricht das Plugin selbst; den Push verschickt der Miniserver &uuml;ber <span class="fe-mono">ANN=1</span> (Anleitung Schritt 4).</div>
+    <div class="sm-small"><?php echo fer_t('TEXT.BEIDES_AN_ANSAGE_PUSH_NUR_EINES_AN'); ?> <span class="sm-mono"><?php echo fer_t('TEXT.ANN_1'); ?></span> <?php echo fer_t('TEXT.ANLEITUNG_SCHRITT_4'); ?></div>
 </div>
-<div class="fe-row">
+<div class="sm-row">
     <div>
-        <label>Meldezeit am Vorabend</label>
+        <label><?php echo fer_t('TEXT.MELDEZEIT_AM_VORABEND'); ?></label>
         <input data-role="none" type="text" name="notify_time" value="<?= fe_e($fe_notify['time']) ?>" placeholder="19:00">
     </div>
     <div>
-        <label style="min-height:2.6em;display:flex;align-items:flex-end;">&nbsp;</label>
+        <label style="min-height:2.6em;display:flex;align-items:flex-end;"><?php echo fer_t('TEXT.TEXT_2'); ?></label>
         <label style="display:inline-flex;align-items:center;gap:6px;font-weight:600;">
-            <input data-role="none" type="checkbox" name="n_freetag" <?= !empty($fe_notify['freetag']) ? 'checked' : '' ?>> Melden, wenn morgen schulfrei ist
+            <input data-role="none" type="checkbox" name="n_freetag" <?= !empty($fe_notify['freetag']) ? 'checked' : '' ?><?php echo fer_t('TEXT.MELDEN_WENN_MORGEN_SCHULFREI_IST'); ?>
         </label><br>
         <label style="display:inline-flex;align-items:center;gap:6px;font-weight:600;">
-            <input data-role="none" type="checkbox" name="n_ferienstart" <?= !empty($fe_notify['ferienstart']) ? 'checked' : '' ?>> Melden am Vorabend des Ferienbeginns
+            <input data-role="none" type="checkbox" name="n_ferienstart" <?= !empty($fe_notify['ferienstart']) ? 'checked' : '' ?><?php echo fer_t('TEXT.MELDEN_AM_VORABEND_DES_FERIENBEGIN'); ?>
         </label><br>
         <label style="display:inline-flex;align-items:center;gap:6px;font-weight:600;">
-            <input data-role="none" type="checkbox" name="n_bridge" <?= !empty($fe_notify['bridge_month']) ? 'checked' : '' ?>> Im Januar die Br&uuml;ckentage des Jahres melden
+            <input data-role="none" type="checkbox" name="n_bridge" <?= !empty($fe_notify['bridge_month']) ? 'checked' : '' ?><?php echo fer_t('TEXT.IM_JANUAR_DIE_BRCKENTAGE_DES_JAHRE'); ?>
         </label>
     </div>
 </div>
 
-<h2>Sprachausgabe</h2>
-<div class="fe-row">
+<h2><?php echo fer_t('TEXT.SPRACHAUSGABE'); ?></h2>
+<div class="sm-row">
     <div>
-        <label>Audio-Ausgabe</label>
+        <label><?php echo fer_t('TEXT.AUDIO_AUSGABE'); ?></label>
         <select data-role="none" name="tts_mode" id="tts_mode" onchange="feTtsMode()">
-            <option value="musicserver"<?= $fe_tts['mode'] === 'musicserver' ? ' selected' : '' ?>>Loxone Music Server (klassisch)</option>
-            <option value="ms4h"<?= $fe_tts['mode'] === 'ms4h' ? ' selected' : '' ?>>Audioserver4Home / MusicServer4Home</option>
-            <option value="audioserver"<?= $fe_tts['mode'] === 'audioserver' ? ' selected' : '' ?>>Original Loxone Audioserver (via Loxone Config)</option>
-            <option value="custom"<?= $fe_tts['mode'] === 'custom' ? ' selected' : '' ?>>Eigene URL-Vorlage</option>
+            <option value="musicserver"<?= $fe_tts['mode'] === 'musicserver' ? ' selected' : '' ?><?php echo fer_t('TEXT.LOXONE_MUSIC_SERVER_KLASSISCH'); ?></option>
+            <option value="ms4h"<?= $fe_tts['mode'] === 'ms4h' ? ' selected' : '' ?><?php echo fer_t('TEXT.AUDIOSERVER4HOME_MUSICSERVER4HOME'); ?></option>
+            <option value="audioserver"<?= $fe_tts['mode'] === 'audioserver' ? ' selected' : '' ?><?php echo fer_t('TEXT.ORIGINAL_LOXONE_AUDIOSERVER_VIA_LO'); ?></option>
+            <option value="custom"<?= $fe_tts['mode'] === 'custom' ? ' selected' : '' ?><?php echo fer_t('TEXT.EIGENE_URL_VORLAGE'); ?></option>
         </select>
     </div>
     <div>
-        <label>IP des Audio-Servers</label>
+        <label><?php echo fer_t('TEXT.IP_DES_AUDIO_SERVERS'); ?></label>
         <input data-role="none" type="text" name="tts_ip" value="<?= fe_e($fe_tts['ip']) ?>" placeholder="z. B. 192.168.1.50">
     </div>
     <div>
-        <label>Port</label>
+        <label><?php echo fer_t('TEXT.PORT'); ?></label>
         <input data-role="none" type="number" name="tts_port" value="<?= (int) $fe_tts['port'] ?>" min="1" max="65535">
     </div>
 </div>
-<div class="fe-row">
+<div class="sm-row">
     <div>
-        <label>Zonen</label>
+        <label><?php echo fer_t('TEXT.ZONEN'); ?></label>
         <input data-role="none" type="text" name="tts_zones" value="<?= fe_e($fe_tts['zones']) ?>" placeholder="z. B. 2,4,6">
-        <div class="fe-small">Zonennummern mit Komma (z.&nbsp;B. <span class="fe-mono">2,4,6</span>) &mdash; die Lautst&auml;rke kommt aus dem Feld daneben. Optional je Zone eigene Lautst&auml;rke: <span class="fe-mono">Zone~Lautst&auml;rke</span> (z.&nbsp;B. <span class="fe-mono">2~25,4~40</span>). Leerzeichen nach dem Komma sind erlaubt &mdash; <span class="fe-mono">2,4,6</span> und <span class="fe-mono">2, 4, 6</span> funktionieren beide.</div>
+        <div class="sm-small"><?php echo fer_t('TEXT.ZONENNUMMERN_MIT_KOMMA_Z_B'); ?> <span class="sm-mono">2,4,6</span><?php echo fer_t('TEXT.DIE_LAUTSTRKE_KOMMT_AUS_DEM_FELD_D'); ?> <span class="sm-mono"><?php echo fer_t('TEXT.ZONE_LAUTSTRKE'); ?></span> <?php echo fer_t('TEXT.Z_B'); ?> <span class="sm-mono">2~25,4~40</span><?php echo fer_t('TEXT.LEERZEICHEN_NACH_DEM_KOMMA_SIND_ER'); ?> <span class="sm-mono">2,4,6</span> und <span class="sm-mono">2, 4, 6</span> <?php echo fer_t('TEXT.FUNKTIONIEREN_BEIDE'); ?></div>
     </div>
     <div>
-        <label>Lautst&auml;rke (%)</label>
+        <label><?php echo fer_t('TEXT.LAUTSTRKE'); ?></label>
         <input data-role="none" type="number" name="tts_volume" value="<?= (int) $fe_tts['volume'] ?>" min="1" max="100">
     </div>
     <div>
-        <label>Sprache</label>
+        <label><?php echo fer_t('TEXT.SPRACHE'); ?></label>
         <input data-role="none" type="text" name="tts_lang" value="<?= fe_e($fe_tts['lang']) ?>" maxlength="2">
     </div>
 </div>
 <div id="tts_template_row">
-    <label>URL-Vorlage (f&uuml;r Audioserver4Home/MS4H bzw. eigene Ausgabe)</label>
-    <textarea data-role="none" name="tts_template" id="tts_template" rows="2" placeholder="http://{ip}:{port}/tts?text={text}&amp;zone={zones}&amp;vol={vol}"><?= fe_e($fe_tts['template']) ?></textarea>
-    <div class="fe-small">Platzhalter: <span class="fe-mono">{ip} {port} {zones} {vol} {lang} {text}</span>. Leer = Standard-Vorlage.</div>
+    <label><?php echo fer_t('TEXT.URL_VORLAGE_FR_AUDIOSERVER4HOME_MS'); ?></label>
+    <textarea data-role="none" name="tts_template" id="tts_template" rows="2" placeholder="<?php echo fer_t('TEXT.HTTP'); ?>{ip}:{port}/tts?text={text}&amp;zone={zones}&amp;vol={vol}"><?= fe_e($fe_tts['template']) ?></textarea>
+    <div class="sm-small"><?php echo fer_t('TEXT.PLATZHALTER'); ?> <span class="sm-mono"><?php echo fer_t('TEXT.IP_PORT_ZONES_VOL_LANG_TEXT'); ?></span><?php echo fer_t('TEXT.LEER_STANDARD_VORLAGE'); ?></div>
 </div>
-<div id="tts_audioserver_hint" class="fe-alert fe-info" style="display:none;">
-    Der originale Loxone Audioserver bietet <b>keine HTTP-TTS-Schnittstelle</b>. In diesem Modus spricht das Plugin NICHT selbst;
-    die Sprachausgabe baut man in Loxone Config: Textgenerator &rarr; TTS-Eingang, ausgel&ouml;st &uuml;ber <span class="fe-mono">ANN=1</span>.
+<div id="tts_audioserver_hint" class="sm-alert sm-info" style="display:none;">
+    <?php echo fer_t('TEXT.DER_ORIGINALE_LOXONE_AUDIOSERVER_B'); ?> <b><?php echo fer_t('TEXT.KEINE_HTTP_TTS_SCHNITTSTELLE'); ?></b><?php echo fer_t('TEXT.IN_DIESEM_MODUS_SPRICHT_DAS_PLUGIN'); ?> <span class="sm-mono">ANN=1</span>.
 </div>
 
-<h2>MQTT (optional)</h2>
+<h2><?php echo fer_t('TEXT.MQTT_OPTIONAL'); ?></h2>
 <label style="display:inline-flex;align-items:center;gap:6px;">
-    <input data-role="none" type="checkbox" name="mqtt_enabled" <?= !empty($fe_cfg['mqtt_enabled']) ? 'checked' : '' ?>> Zustand per MQTT ver&ouml;ffentlichen
+    <input data-role="none" type="checkbox" name="mqtt_enabled" <?= !empty($fe_cfg['mqtt_enabled']) ? 'checked' : '' ?><?php echo fer_t('TEXT.ZUSTAND_PER_MQTT_VERFFENTLICHEN'); ?>
 </label>
-<div class="fe-row" style="margin-top:6px;">
+<div class="sm-row" style="margin-top:6px;">
     <div>
-        <label>Topic-Pr&auml;fix</label>
+        <label><?php echo fer_t('TEXT.TOPIC_PRFIX'); ?></label>
         <input data-role="none" type="text" name="mqtt_topic" value="<?= fe_e($fe_cfg['mqtt_topic']) ?>" placeholder="ferien">
-        <div class="fe-small">Nutzt das <b>LoxBerry MQTT Gateway</b>. Ver&ouml;ffentlicht u.&nbsp;a.
-        <span class="fe-mono"><?= fe_e($fe_cfg['mqtt_topic']) ?>/schulfrei</span>, <span class="fe-mono">/schultag</span>,
-        <span class="fe-mono">/feiertag</span>, <span class="fe-mono">/ferien</span>, <span class="fe-mono">/bruecke</span>,
-        <span class="fe-mono">/morgen_schulfrei</span>, <span class="fe-mono">/ferien_in</span>, <span class="fe-mono">/ferien_rest</span>,
-        <span class="fe-mono">/name</span>.</div>
+        <div class="sm-small"><?php echo fer_t('TEXT.NUTZT_DAS'); ?> <b><?php echo fer_t('TEXT.LOXBERRY_MQTT_GATEWAY'); ?></b><?php echo fer_t('TEXT.VERFFENTLICHT_U_A'); ?>
+        <span class="sm-mono"><?= fe_e($fe_cfg['mqtt_topic']) ?><?php echo fer_t('TEXT.SCHULFREI_3'); ?></span>, <span class="sm-mono"><?php echo fer_t('TEXT.SCHULTAG'); ?></span>,
+        <span class="sm-mono"><?php echo fer_t('TEXT.FEIERTAG_2'); ?></span>, <span class="sm-mono"><?php echo fer_t('TEXT.FERIEN_2'); ?></span>, <span class="sm-mono"><?php echo fer_t('TEXT.BRUECKE'); ?></span>,
+        <span class="sm-mono"><?php echo fer_t('TEXT.MORGEN_SCHULFREI'); ?></span>, <span class="sm-mono"><?php echo fer_t('TEXT.FERIEN_IN'); ?></span>, <span class="sm-mono"><?php echo fer_t('TEXT.FERIEN_REST'); ?></span>,
+        <span class="sm-mono"><?php echo fer_t('TEXT.NAME'); ?></span>.</div>
     </div>
 </div>
 
-<button data-role="none" class="fe-btn" type="submit">Speichern</button>
+<button data-role="none" class="sm-btn" type="submit"><?php echo fer_t('TEXT.SPEICHERN'); ?></button>
 </form>
-<form method="post" style="margin-top:8px;">
+<form action="index.php" method="post" style="margin-top:8px;">
     <input data-role="none" type="hidden" name="fetchnow" value="1">
     <input data-role="none" type="hidden" name="activetab" value="tab-settings">
-    <button data-role="none" class="fe-btn" type="submit" style="background:#607d8b;margin-top:0;">Jetzt abrufen</button>
+    <button data-role="none" class="sm-btn" type="submit" style="background:#607d8b;margin-top:0;"><?php echo fer_t('TEXT.JETZT_ABRUFEN'); ?></button>
 </form>
 </div>
 
 <!-- ================= Einbindung in Loxone ================= -->
-<div class="fe-pane" id="tab-loxone">
-<h2>Einbindung in Loxone &mdash; Schritt f&uuml;r Schritt</h2>
-<p>Der Miniserver bekommt fertig ausgewertete Schalter: <b>Ist heute schulfrei? Ist morgen Schultag?</b>
-Damit lassen sich Wecker, Morgen-Briefing, Rollladen- und Heizzeiten automatisch an Ferien und Feiertage anpassen &mdash;
-ohne dass man je wieder Termine von Hand pflegen muss.</p>
+<div class="sm-pane" id="tab-loxone">
+<h2><?php echo fer_t('TEXT.EINBINDUNG_IN_LOXONE_SCHRITT_FR_SC'); ?></h2>
+<p><?php echo fer_t('TEXT.DER_MINISERVER_BEKOMMT_FERTIG_AUSG'); ?> <b><?php echo fer_t('TEXT.IST_HEUTE_SCHULFREI_IST_MORGEN_SCH'); ?></b>
+<?php echo fer_t('TEXT.DAMIT_LASSEN_SICH_WECKER_MORGEN_BR'); ?></p>
 
-<div class="fe-step"><b>Schritt 1: Virtueller HTTP-Eingang &bdquo;Ferien und Feiertage&ldquo;</b> (Abfrage alle 300 s)
-<table class="fe-tbl">
-<tr><th>Eigenschaft</th><th>Wert</th></tr>
-<tr><td>URL</td><td><span class="fe-mono">http://<?= $fe_host ?>/plugins/<?= fe_e($fe_plugin) ?>/ferien.php</span></td></tr>
-<tr><td>Abfragezyklus</td><td>300 Sekunden</td></tr>
+<div class="sm-step"><b><?php echo fer_t('TEXT.SCHRITT_1_VIRTUELLER_HTTP_EINGANG_'); ?></b> <?php echo fer_t('TEXT.ABFRAGE_ALLE_300_S'); ?>
+<table class="sm-tbl">
+<tr><th><?php echo fer_t('TEXT.EIGENSCHAFT'); ?></th><th><?php echo fer_t('TEXT.WERT'); ?></th></tr>
+<tr><td>URL</td><td><span class="sm-mono">http://<?= $fe_host ?><?php echo fer_t('TEXT.PLUGINS'); ?><?= fe_e($fe_plugin) ?><?php echo fer_t('TEXT.FERIEN_PHP'); ?></span></td></tr>
+<tr><td><?php echo fer_t('TEXT.ABFRAGEZYKLUS'); ?></td><td><?php echo fer_t('TEXT.300_SEKUNDEN'); ?></td></tr>
 </table>
 </div>
 
-<div class="fe-step"><b>Schritt 2: Befehlserkennungen</b> (<span class="fe-mono">\i...\i</span> = Suchtext, <span class="fe-mono">\v</span> = Zahl dahinter)
-<table class="fe-tbl">
-<tr><th>Befehlserkennung</th><th>Bedeutung</th></tr>
-<tr><td><span class="fe-mono">\iSCHULTAG=\i\v</span></td><td><b>1 = heute ist ein normaler Schul-/Arbeitstag</b> (Werktag, keine Ferien, kein Feiertag)</td></tr>
-<tr><td><span class="fe-mono">\iMSCHULTAG=\i\v</span></td><td><b>1 = MORGEN ist Schultag</b> &mdash; der wichtigste Wert f&uuml;r Wecker und Abendlogik</td></tr>
-<tr><td><span class="fe-mono">\iSCHULFREI=\i\v</span> / <span class="fe-mono">\iMSCHULFREI=\i\v</span></td><td>1 = heute bzw. morgen schulfrei (Ferien, Feiertag oder Wochenende)</td></tr>
-<tr><td><span class="fe-mono">\iFERIEN=\i\v</span> / <span class="fe-mono">\iMFERIEN=\i\v</span></td><td>1 = heute bzw. morgen Schulferien</td></tr>
-<tr><td><span class="fe-mono">\iFEIERTAG=\i\v</span> / <span class="fe-mono">\iMFEIERTAG=\i\v</span></td><td>1 = heute bzw. morgen gesetzlicher Feiertag</td></tr>
-<tr><td><span class="fe-mono">\iWOCHENENDE=\i\v</span></td><td>1 = Samstag oder Sonntag</td></tr>
-<tr><td><span class="fe-mono">\iBRUECKE=\i\v</span> / <span class="fe-mono">\iMBRUECKE=\i\v</span></td><td>1 = Br&uuml;ckentag (heute bzw. morgen)</td></tr>
-<tr><td><span class="fe-mono">\iFERIENIN=\i\v</span></td><td>Tage bis zu den n&auml;chsten Ferien (0 = laufen gerade)</td></tr>
-<tr><td><span class="fe-mono">\iFERIENREST=\i\v</span> / <span class="fe-mono">\iFERIENDAUER=\i\v</span></td><td>verbleibende bzw. gesamte Ferientage</td></tr>
-<tr><td><span class="fe-mono">\iFEIERTAGIN=\i\v</span></td><td>Tage bis zum n&auml;chsten Feiertag</td></tr>
-<tr><td><span class="fe-mono">\iURLAUB=\i\v</span> / <span class="fe-mono">\iMURLAUB=\i\v</span></td><td><b>1 = Abwesenheit (Urlaubsmodus) heute bzw. morgen</b> &mdash; aus einem eigenen Termin der Art &bdquo;Urlaub (abwesend)&ldquo;</td></tr>
-<tr><td><span class="fe-mono">\iURLAUBIN=\i\v</span></td><td>Tage bis zur Abreise (0 = Urlaub l&auml;uft)</td></tr>
-<tr><td><span class="fe-mono">\iURLAUBREST=\i\v</span> / <span class="fe-mono">\iURLAUBDAUER=\i\v</span></td><td>verbleibende bzw. gesamte Urlaubstage</td></tr>
-<tr><td><span class="fe-mono">\iURLAUBENDE=\i\v</span></td><td>1 = <b>letzter Urlaubstag</b> (morgen ist man zur&uuml;ck) &mdash; Ausl&ouml;ser zum Vorw&auml;rmen</td></tr>
-<tr><td><span class="fe-mono">\iANN=\i\v</span></td><td>1 = Meldefenster (10 min ab Meldezeit, wenn morgen frei ist) &mdash; Ausl&ouml;ser f&uuml;r den Push</td></tr>
-<tr><td><span class="fe-mono">\iPUSH=\i\v</span> / <span class="fe-mono">\iAUDIO=\i\v</span> / <span class="fe-mono">\iPTEST=\i\v</span></td><td>Freigaben aus der Plugin-Konfiguration bzw. Test-Push</td></tr>
-<tr><td><span class="fe-mono">\iOK=\i\v</span> / <span class="fe-mono">\iWARN=\i\v</span></td><td>1 = Daten vorhanden / Daten laufen bald aus</td></tr>
+<div class="sm-step"><b><?php echo fer_t('TEXT.SCHRITT_2_BEFEHLSERKENNUNGEN'); ?></b> (<span class="sm-mono">\i...\i</span> <?php echo fer_t('TEXT.SUCHTEXT'); ?> <span class="sm-mono">\v</span> <?php echo fer_t('TEXT.ZAHL_DAHINTER'); ?>
+<table class="sm-tbl">
+<tr><th><?php echo fer_t('TEXT.BEFEHLSERKENNUNG'); ?></th><th><?php echo fer_t('TEXT.BEDEUTUNG'); ?></th></tr>
+<tr><td><span class="sm-mono"><?php echo fer_t('TEXT.ISCHULTAG_I_V'); ?></span></td><td><b><?php echo fer_t('TEXT.1_HEUTE_IST_EIN_NORMALER_SCHUL_ARB'); ?></b> <?php echo fer_t('TEXT.WERKTAG_KEINE_FERIEN_KEIN_FEIERTAG'); ?></td></tr>
+<tr><td><span class="sm-mono"><?php echo fer_t('TEXT.IMSCHULTAG_I_V'); ?></span></td><td><b><?php echo fer_t('TEXT.1_MORGEN_IST_SCHULTAG'); ?></b> <?php echo fer_t('TEXT.DER_WICHTIGSTE_WERT_FR_WECKER_UND_'); ?></td></tr>
+<tr><td><span class="sm-mono"><?php echo fer_t('TEXT.ISCHULFREI_I_V'); ?></span> / <span class="sm-mono"><?php echo fer_t('TEXT.IMSCHULFREI_I_V'); ?></span></td><td><?php echo fer_t('TEXT.1_HEUTE_BZW_MORGEN_SCHULFREI_FERIE'); ?></td></tr>
+<tr><td><span class="sm-mono"><?php echo fer_t('TEXT.IFERIEN_I_V'); ?></span> / <span class="sm-mono"><?php echo fer_t('TEXT.IMFERIEN_I_V'); ?></span></td><td><?php echo fer_t('TEXT.1_HEUTE_BZW_MORGEN_SCHULFERIEN'); ?></td></tr>
+<tr><td><span class="sm-mono"><?php echo fer_t('TEXT.IFEIERTAG_I_V'); ?></span> / <span class="sm-mono"><?php echo fer_t('TEXT.IMFEIERTAG_I_V'); ?></span></td><td><?php echo fer_t('TEXT.1_HEUTE_BZW_MORGEN_GESETZLICHER_FE'); ?></td></tr>
+<tr><td><span class="sm-mono"><?php echo fer_t('TEXT.IWOCHENENDE_I_V'); ?></span></td><td><?php echo fer_t('TEXT.1_SAMSTAG_ODER_SONNTAG'); ?></td></tr>
+<tr><td><span class="sm-mono"><?php echo fer_t('TEXT.IBRUECKE_I_V'); ?></span> / <span class="sm-mono"><?php echo fer_t('TEXT.IMBRUECKE_I_V'); ?></span></td><td><?php echo fer_t('TEXT.1_BRCKENTAG_HEUTE_BZW_MORGEN'); ?></td></tr>
+<tr><td><span class="sm-mono"><?php echo fer_t('TEXT.IFERIENIN_I_V'); ?></span></td><td><?php echo fer_t('TEXT.TAGE_BIS_ZU_DEN_NCHSTEN_FERIEN_0_L'); ?></td></tr>
+<tr><td><span class="sm-mono"><?php echo fer_t('TEXT.IFERIENREST_I_V'); ?></span> / <span class="sm-mono"><?php echo fer_t('TEXT.IFERIENDAUER_I_V'); ?></span></td><td><?php echo fer_t('TEXT.VERBLEIBENDE_BZW_GESAMTE_FERIENTAG'); ?></td></tr>
+<tr><td><span class="sm-mono"><?php echo fer_t('TEXT.IFEIERTAGIN_I_V'); ?></span></td><td><?php echo fer_t('TEXT.TAGE_BIS_ZUM_NCHSTEN_FEIERTAG'); ?></td></tr>
+<tr><td><span class="sm-mono"><?php echo fer_t('TEXT.IURLAUB_I_V'); ?></span> / <span class="sm-mono"><?php echo fer_t('TEXT.IMURLAUB_I_V'); ?></span></td><td><b><?php echo fer_t('TEXT.1_ABWESENHEIT_URLAUBSMODUS_HEUTE_B'); ?></b> <?php echo fer_t('TEXT.AUS_EINEM_EIGENEN_TERMIN_DER_ART_U'); ?></td></tr>
+<tr><td><span class="sm-mono"><?php echo fer_t('TEXT.IURLAUBIN_I_V'); ?></span></td><td><?php echo fer_t('TEXT.TAGE_BIS_ZUR_ABREISE_0_URLAUB_LUFT'); ?></td></tr>
+<tr><td><span class="sm-mono"><?php echo fer_t('TEXT.IURLAUBREST_I_V'); ?></span> / <span class="sm-mono"><?php echo fer_t('TEXT.IURLAUBDAUER_I_V'); ?></span></td><td><?php echo fer_t('TEXT.VERBLEIBENDE_BZW_GESAMTE_URLAUBSTA'); ?></td></tr>
+<tr><td><span class="sm-mono"><?php echo fer_t('TEXT.IURLAUBENDE_I_V'); ?></span></td><td>1 = <b><?php echo fer_t('TEXT.LETZTER_URLAUBSTAG'); ?></b> <?php echo fer_t('TEXT.MORGEN_IST_MAN_ZURCK_AUSLSER_ZUM_V'); ?></td></tr>
+<tr><td><span class="sm-mono"><?php echo fer_t('TEXT.IANN_I_V'); ?></span></td><td><?php echo fer_t('TEXT.1_MELDEFENSTER_10_MIN_AB_MELDEZEIT'); ?></td></tr>
+<tr><td><span class="sm-mono"><?php echo fer_t('TEXT.IPUSH_I_V'); ?></span> / <span class="sm-mono"><?php echo fer_t('TEXT.IAUDIO_I_V'); ?></span> / <span class="sm-mono"><?php echo fer_t('TEXT.IPTEST_I_V'); ?></span></td><td><?php echo fer_t('TEXT.FREIGABEN_AUS_DER_PLUGIN_KONFIGURA'); ?></td></tr>
+<tr><td><span class="sm-mono"><?php echo fer_t('TEXT.IOK_I_V'); ?></span> / <span class="sm-mono"><?php echo fer_t('TEXT.IWARN_I_V'); ?></span></td><td><?php echo fer_t('TEXT.1_DATEN_VORHANDEN_DATEN_LAUFEN_BAL'); ?></td></tr>
 </table>
 </div>
 
-<div class="fe-step"><b>Schritt 3: Kacheln f&uuml;r die App</b><br>
-FERIENIN und FERIENREST als Analoganzeigen mit Einheit <span class="fe-mono">&lt;v.0&gt; Tage</span> (&bdquo;Ferien in X Tagen&ldquo; ist
-erfahrungsgem&auml;&szlig; die beliebteste Kachel im Haushalt), SCHULTAG und SCHULFREI als Digitalanzeigen.
+<div class="sm-step"><b><?php echo fer_t('TEXT.SCHRITT_3_KACHELN_FR_DIE_APP'); ?></b><br>
+<?php echo fer_t('TEXT.FERIENIN_UND_FERIENREST_ALS_ANALOG'); ?> <span class="sm-mono"><?php echo fer_t('TEXT.V_0_TAGE'); ?></span> <?php echo fer_t('TEXT.FERIEN_IN_X_TAGEN_IST_ERFAHRUNGSGE'); ?>
 </div>
 
-<div class="fe-step"><b>Schritt 4: Komplette Baustein-Liste zum 1:1-Nachbauen</b><br>
-<b>4a) Wecker und Briefing nur an Schultagen</b>
-<table class="fe-tbl">
-<tr><th>Baustein</th><th>Name</th><th>Einstellung</th><th>Eing&auml;nge</th></tr>
-<tr><td>Schwellwertschalter S1</td><td>Morgen ist Schultag</td><td>Ein 0,5 / Aus 0,4</td><td>&larr; MSCHULTAG</td></tr>
-<tr><td>Schwellwertschalter S2</td><td>Heute ist Schultag</td><td>Ein 0,5 / Aus 0,4</td><td>&larr; SCHULTAG</td></tr>
-<tr><td>UND U1</td><td>Wecker freigeben</td><td>&rarr; auf den Freigabe-Eingang des Weckers bzw. der Wecker-Zeitschaltuhr</td><td>S2 &amp; (eigener Schalter &bdquo;Wecker aktiv&ldquo;)</td></tr>
-<tr><td>UND U2</td><td>Morgen-Briefing freigeben</td><td>&rarr; ersetzt die bisherige Ferien-/Feiertagslogik im Briefing</td><td>S2 &amp; (Briefing-Schalter)</td></tr>
-<tr><td>NICHT N1 + UND U3</td><td>Sp&auml;te Zeiten an freien Tagen</td><td>&rarr; z. B. Rollladen erst 8:30 statt 7:00, Heizung sp&auml;ter hoch</td><td>N1 &larr; S2, U3: N1 &amp; (Zeitimpuls)</td></tr>
+<div class="sm-step"><b><?php echo fer_t('TEXT.SCHRITT_4_KOMPLETTE_BAUSTEIN_LISTE'); ?></b><br>
+<b><?php echo fer_t('TEXT.4A_WECKER_UND_BRIEFING_NUR_AN_SCHU'); ?></b>
+<table class="sm-tbl">
+<tr><th><?php echo fer_t('TEXT.BAUSTEIN'); ?></th><th><?php echo fer_t('TEXT.NAME_2'); ?></th><th><?php echo fer_t('TEXT.EINSTELLUNG'); ?></th><th><?php echo fer_t('TEXT.EINGNGE'); ?></th></tr>
+<tr><td><?php echo fer_t('TEXT.SCHWELLWERTSCHALTER_S1'); ?></td><td><?php echo fer_t('TEXT.MORGEN_IST_SCHULTAG'); ?></td><td><?php echo fer_t('TEXT.EIN_0_5_AUS_0_4'); ?></td><td><?php echo fer_t('TEXT.MSCHULTAG'); ?></td></tr>
+<tr><td><?php echo fer_t('TEXT.SCHWELLWERTSCHALTER_S2'); ?></td><td><?php echo fer_t('TEXT.HEUTE_IST_SCHULTAG'); ?></td><td>Ein 0,5 / Aus 0,4</td><td><?php echo fer_t('TEXT.SCHULTAG_2'); ?></td></tr>
+<tr><td><?php echo fer_t('TEXT.UND_U1'); ?></td><td><?php echo fer_t('TEXT.WECKER_FREIGEBEN'); ?></td><td><?php echo fer_t('TEXT.AUF_DEN_FREIGABE_EINGANG_DES_WECKE'); ?></td><td><?php echo fer_t('TEXT.S2_EIGENER_SCHALTER_WECKER_AKTIV'); ?></td></tr>
+<tr><td><?php echo fer_t('TEXT.UND_U2'); ?></td><td><?php echo fer_t('TEXT.MORGEN_BRIEFING_FREIGEBEN'); ?></td><td><?php echo fer_t('TEXT.ERSETZT_DIE_BISHERIGE_FERIEN_FEIER'); ?></td><td><?php echo fer_t('TEXT.S2_BRIEFING_SCHALTER'); ?></td></tr>
+<tr><td><?php echo fer_t('TEXT.NICHT_N1_UND_U3'); ?></td><td><?php echo fer_t('TEXT.SPTE_ZEITEN_AN_FREIEN_TAGEN'); ?></td><td><?php echo fer_t('TEXT.Z_B_ROLLLADEN_ERST_8_30_STATT_7_00'); ?></td><td><?php echo fer_t('TEXT.N1_S2_U3_N1_ZEITIMPULS'); ?></td></tr>
 </table>
-<b>4b) Vorabend-Meldung &bdquo;morgen ist frei&ldquo;</b>
-<table class="fe-tbl">
+<b><?php echo fer_t('TEXT.4B_VORABEND_MELDUNG_MORGEN_IST_FRE'); ?></b>
+<table class="sm-tbl">
 <tr><th>Baustein</th><th>Name</th><th>Einstellung</th><th>Eing&auml;nge</th></tr>
-<tr><td>Schwellwertschalter S3</td><td>Meldefenster aktiv</td><td>Ein 0,5 / Aus 0,4</td><td>&larr; ANN</td></tr>
-<tr><td>Schwellwertschalter S4</td><td>Push freigegeben</td><td>Ein 0,5 / Aus 0,4</td><td>&larr; PUSH</td></tr>
-<tr><td>UND U4</td><td>Frei-Meldung jetzt</td><td></td><td>S3 &amp; S4</td></tr>
-<tr><td>ODER O1</td><td>Push-Sammler</td><td>einzige Quelle des Benachrichtigungs-Bausteins!</td><td>U4</td></tr>
-<tr><td>Benachrichtigungs-Baustein</td><td>Push &bdquo;Morgen ist frei&ldquo;</td><td>Text z. B. &bdquo;Morgen ist schulfrei &mdash; der Wecker bleibt aus.&ldquo;</td><td>&larr; O1</td></tr>
-<tr><td>Benachrichtigungs-Baustein 2</td><td>Test-Push</td><td>eigener Baustein NUR f&uuml;r den Test</td><td>&larr; Schwellwertschalter an PTEST</td></tr>
+<tr><td><?php echo fer_t('TEXT.SCHWELLWERTSCHALTER_S3'); ?></td><td><?php echo fer_t('TEXT.MELDEFENSTER_AKTIV'); ?></td><td>Ein 0,5 / Aus 0,4</td><td><?php echo fer_t('TEXT.ANN'); ?></td></tr>
+<tr><td><?php echo fer_t('TEXT.SCHWELLWERTSCHALTER_S4'); ?></td><td><?php echo fer_t('TEXT.PUSH_FREIGEGEBEN'); ?></td><td>Ein 0,5 / Aus 0,4</td><td><?php echo fer_t('TEXT.PUSH'); ?></td></tr>
+<tr><td><?php echo fer_t('TEXT.UND_U4'); ?></td><td><?php echo fer_t('TEXT.FREI_MELDUNG_JETZT'); ?></td><td></td><td><?php echo fer_t('TEXT.S3_S4'); ?></td></tr>
+<tr><td><?php echo fer_t('TEXT.ODER_O1'); ?></td><td><?php echo fer_t('TEXT.PUSH_SAMMLER'); ?></td><td><?php echo fer_t('TEXT.EINZIGE_QUELLE_DES_BENACHRICHTIGUN'); ?></td><td>U4</td></tr>
+<tr><td><?php echo fer_t('TEXT.BENACHRICHTIGUNGS_BAUSTEIN'); ?></td><td><?php echo fer_t('TEXT.PUSH_MORGEN_IST_FREI'); ?></td><td><?php echo fer_t('TEXT.TEXT_Z_B_MORGEN_IST_SCHULFREI_DER_'); ?></td><td><?php echo fer_t('TEXT.O1'); ?></td></tr>
+<tr><td><?php echo fer_t('TEXT.BENACHRICHTIGUNGS_BAUSTEIN_2'); ?></td><td><?php echo fer_t('TEXT.TEST_PUSH'); ?></td><td><?php echo fer_t('TEXT.EIGENER_BAUSTEIN_NUR_FR_DEN_TEST'); ?></td><td><?php echo fer_t('TEXT.SCHWELLWERTSCHALTER_AN_PTEST'); ?></td></tr>
 </table>
-<b>4c) Ferien-Countdown und Br&uuml;ckentage</b>
-<table class="fe-tbl">
+<b><?php echo fer_t('TEXT.4C_FERIEN_COUNTDOWN_UND_BRCKENTAGE'); ?></b>
+<table class="sm-tbl">
 <tr><th>Baustein</th><th>Name</th><th>Einstellung</th><th>Eing&auml;nge</th></tr>
-<tr><td>Statusbaustein</td><td>Ferien-Kachel</td><td>Text: &bdquo;Noch &lt;v1.0&gt; Tage bis zu den Ferien&ldquo; bzw. bei laufenden Ferien &bdquo;Noch &lt;v2.0&gt; Ferientage&ldquo;</td><td>I1 &larr; FERIENIN, I2 &larr; FERIENREST</td></tr>
-<tr><td>Schwellwertschalter S5 + Impuls</td><td>Br&uuml;ckentag-Hinweis</td><td>S5 an MBRUECKE; mit einem Zeitimpuls (z. B. 18:00) UND-verkn&uuml;pfen &rarr; Push &bdquo;Morgen ist Br&uuml;ckentag&ldquo;</td><td>&larr; MBRUECKE</td></tr>
-<tr><td>Schwellwertschalter S6</td><td>Ferienmodus (Anwesenheit)</td><td>an FERIEN &mdash; z. B. Heizprogramm oder Beschattung anders fahren</td><td>&larr; FERIEN</td></tr>
+<tr><td><?php echo fer_t('TEXT.STATUSBAUSTEIN'); ?></td><td><?php echo fer_t('TEXT.FERIEN_KACHEL'); ?></td><td><?php echo fer_t('TEXT.TEXT_NOCH_V1_0_TAGE_BIS_ZU_DEN_FER'); ?></td><td><?php echo fer_t('TEXT.I1_FERIENIN_I2_FERIENREST'); ?></td></tr>
+<tr><td><?php echo fer_t('TEXT.SCHWELLWERTSCHALTER_S5_IMPULS'); ?></td><td><?php echo fer_t('TEXT.BRCKENTAG_HINWEIS'); ?></td><td><?php echo fer_t('TEXT.S5_AN_MBRUECKE_MIT_EINEM_ZEITIMPUL'); ?></td><td><?php echo fer_t('TEXT.MBRUECKE'); ?></td></tr>
+<tr><td><?php echo fer_t('TEXT.SCHWELLWERTSCHALTER_S6'); ?></td><td><?php echo fer_t('TEXT.FERIENMODUS_ANWESENHEIT'); ?></td><td><?php echo fer_t('TEXT.AN_FERIEN_Z_B_HEIZPROGRAMM_ODER_BE'); ?></td><td><?php echo fer_t('TEXT.FERIEN_3'); ?></td></tr>
 </table>
-<b>4d) Urlaubsmodus (Abwesenheit)</b>
-<table class="fe-tbl">
+<b><?php echo fer_t('TEXT.4D_URLAUBSMODUS_ABWESENHEIT'); ?></b>
+<table class="sm-tbl">
 <tr><th>Baustein</th><th>Name</th><th>Einstellung</th><th>Eing&auml;nge</th></tr>
-<tr><td>Schwellwertschalter S7</td><td>Urlaub aktiv</td><td>Ein 0,5 / Aus 0,4</td><td>&larr; URLAUB</td></tr>
-<tr><td>Schwellwertschalter S8</td><td>Letzter Urlaubstag</td><td>Ein 0,5 / Aus 0,4</td><td>&larr; URLAUBENDE</td></tr>
-<tr><td>ODER O2</td><td>Urlaubsmodus</td><td>Sammelt Kalender-Urlaub und den Handschalter, damit man den Modus jederzeit selbst ein-/ausschalten kann</td><td>S7 &amp; (Merker &bdquo;Urlaub manuell&ldquo;)</td></tr>
-<tr><td>Anwesenheitssimulation</td><td>&mdash;</td><td>&rarr; Eingang &bdquo;Aktivieren&ldquo;</td><td>&larr; O2</td></tr>
-<tr><td>Intelligente Raumregelung</td><td>Heizung</td><td>&rarr; Eingang f&uuml;r den Betriebsart-/Absenkbefehl (Urlaubs- bzw. Sparmodus)</td><td>&larr; O2</td></tr>
-<tr><td>NICHT N2 + UND U5</td><td>Vorw&auml;rmen zur R&uuml;ckkehr</td><td>S8 hebt die Absenkung am letzten Urlaubstag wieder auf, damit das Haus bei der Ankunft warm ist</td><td>N2 &larr; S8, U5: O2 &amp; N2 &rarr; Absenkung</td></tr>
-<tr><td>UND U6 / Steckdosen</td><td>Verbraucher abschalten</td><td>&rarr; Aus-Befehl an Steckdosen, Handtuchheizung, Warmwasser-Zirkulation usw.</td><td>&larr; O2</td></tr>
-<tr><td>Statusbaustein</td><td>Urlaubs-Kachel</td><td>Text: &bdquo;Urlaub &mdash; noch &lt;v1.0&gt; Tage&ldquo; bzw. &bdquo;Abreise in &lt;v2.0&gt; Tagen&ldquo;</td><td>I1 &larr; URLAUBREST, I2 &larr; URLAUBIN</td></tr>
+<tr><td><?php echo fer_t('TEXT.SCHWELLWERTSCHALTER_S7'); ?></td><td><?php echo fer_t('TEXT.URLAUB_AKTIV'); ?></td><td>Ein 0,5 / Aus 0,4</td><td><?php echo fer_t('TEXT.URLAUB'); ?></td></tr>
+<tr><td><?php echo fer_t('TEXT.SCHWELLWERTSCHALTER_S8'); ?></td><td><?php echo fer_t('TEXT.LETZTER_URLAUBSTAG_2'); ?></td><td>Ein 0,5 / Aus 0,4</td><td><?php echo fer_t('TEXT.URLAUBENDE_2'); ?></td></tr>
+<tr><td><?php echo fer_t('TEXT.ODER_O2'); ?></td><td>Urlaubsmodus</td><td><?php echo fer_t('TEXT.SAMMELT_KALENDER_URLAUB_UND_DEN_HA'); ?></td><td><?php echo fer_t('TEXT.S7_MERKER_URLAUB_MANUELL'); ?></td></tr>
+<tr><td><?php echo fer_t('TEXT.ANWESENHEITSSIMULATION'); ?></td><td><?php echo fer_t('TEXT.TEXT_3'); ?></td><td><?php echo fer_t('TEXT.EINGANG_AKTIVIEREN'); ?></td><td><?php echo fer_t('TEXT.O2'); ?></td></tr>
+<tr><td><?php echo fer_t('TEXT.INTELLIGENTE_RAUMREGELUNG'); ?></td><td><?php echo fer_t('TEXT.HEIZUNG'); ?></td><td><?php echo fer_t('TEXT.EINGANG_FR_DEN_BETRIEBSART_ABSENKB'); ?></td><td>&larr; O2</td></tr>
+<tr><td><?php echo fer_t('TEXT.NICHT_N2_UND_U5'); ?></td><td><?php echo fer_t('TEXT.VORWRMEN_ZUR_RCKKEHR'); ?></td><td><?php echo fer_t('TEXT.S8_HEBT_DIE_ABSENKUNG_AM_LETZTEN_U'); ?></td><td><?php echo fer_t('TEXT.N2_S8_U5_O2_N2_ABSENKUNG'); ?></td></tr>
+<tr><td><?php echo fer_t('TEXT.UND_U6_STECKDOSEN'); ?></td><td><?php echo fer_t('TEXT.VERBRAUCHER_ABSCHALTEN'); ?></td><td><?php echo fer_t('TEXT.AUS_BEFEHL_AN_STECKDOSEN_HANDTUCHH'); ?></td><td>&larr; O2</td></tr>
+<tr><td><?php echo fer_t('TEXT.STATUS'); ?>baustein</td><td><?php echo fer_t('TEXT.URLAUBS_KACHEL'); ?></td><td><?php echo fer_t('TEXT.TEXT_URLAUB_NOCH_V1_0_TAGE_BZW_ABR'); ?></td><td><?php echo fer_t('TEXT.I1_URLAUBREST_I2_URLAUBIN'); ?></td></tr>
 </table>
-<div class="fe-small">Wichtig: Den Urlaubsmodus nie direkt aus URLAUB speisen, sondern immer &uuml;ber das ODER O2 &mdash;
-sonst l&auml;sst er sich bei einer kurzfristigen Planungs&auml;nderung nicht von Hand &uuml;bersteuern.
-Sicherheitsrelevante Dinge (Alarmanlage scharf schalten) sollten <b>nicht</b> allein am Kalender h&auml;ngen,
-sondern zus&auml;tzlich an der echten Anwesenheitserkennung.</div>
-<b>Praxis-Erfahrungen zum Benachrichtigungs-Baustein:</b> Er sendet nur bei einer 0&rarr;1-Flanke.
-NIEMALS mehrere Quellen direkt an den Eingang legen &mdash; eine dauerhaft aktive Quelle verschluckt alle weiteren
-Ausl&ouml;ser. Immer erst im ODER-Baustein sammeln. F&uuml;r den Test (PTEST) einen EIGENEN Baustein verwenden.
+<div class="sm-small"><?php echo fer_t('TEXT.WICHTIG_DEN_URLAUBSMODUS_NIE_DIREK'); ?> <b><?php echo fer_t('TEXT.NICHT'); ?></b> <?php echo fer_t('TEXT.ALLEIN_AM_KALENDER_HNGEN_SONDERN_Z'); ?></div>
+<b><?php echo fer_t('TEXT.PRAXIS_ERFAHRUNGEN_ZUM_BENACHRICHT'); ?></b> <?php echo fer_t('TEXT.ER_SENDET_NUR_BEI_EINER_01_FLANKE_'); ?>
 </div>
 
-<div class="fe-step"><b>Schritt 5: MQTT-Alternative + JSON</b><br>
-Alle Werte gibt es auch &uuml;ber das LoxBerry MQTT Gateway (Reiter Einstellungen &rarr; MQTT) und als JSON
-f&uuml;r Drittsoftware: <span class="fe-mono">http://<?= $fe_host ?>/plugins/<?= fe_e($fe_plugin) ?>/ferien.php?json=1</span>
+<div class="sm-step"><b><?php echo fer_t('TEXT.SCHRITT_5_MQTT_ALTERNATIVE_JSON'); ?></b><br>
+<?php echo fer_t('TEXT.ALLE_WERTE_GIBT_ES_AUCH_BER_DAS_LO'); ?> <span class="sm-mono">http://<?= $fe_host ?>/plugins/<?= fe_e($fe_plugin) ?><?php echo fer_t('TEXT.FERIEN_PHP_JSON_1'); ?></span>
 </div>
 </div>
 
 <!-- ================= Test ================= -->
-<div class="fe-pane" id="tab-test">
+<div class="sm-pane" id="tab-test">
 <h2>Test</h2>
-<div class="fe-legende">
-<span><i class="fe-punkt fe-b-lesen"></i> Ansehen &mdash; fragt nur ab, ver&auml;ndert nichts</span>
-<span><i class="fe-punkt fe-b-technik"></i> Technische Auskunft &mdash; f&uuml;r die Fehlersuche</span>
-<span><i class="fe-punkt fe-b-aktion"></i> L&ouml;st etwas aus &mdash; sendet oder ver&auml;ndert</span>
+<div class="sm-legende">
+<span><i class="sm-punkt sm-b-lesen"></i> <?php echo fer_t('LEGENDE.LESEN'); ?></span>
+<span><i class="sm-punkt sm-b-technik"></i> <?php echo fer_t('LEGENDE.TECHNIK'); ?></span>
+<span><i class="sm-punkt sm-b-aktion"></i> <?php echo fer_t('LEGENDE.AKTION'); ?></span>
 </div>
 
-<h3 class="fe-h3">Ansehen</h3>
-<div class="fe-knopfreihe">
-<a class="fe-btn fe-b-lesen"  href="/plugins/<?= fe_e($fe_plugin) ?>/ferien.php" target="_blank">Loxone-Zeile abrufen</a>
-<a class="fe-btn fe-b-lesen"  href="/plugins/<?= fe_e($fe_plugin) ?>/ferien.php?json=1" target="_blank">JSON-Ansicht</a>
+<h3 class="sm-h3"><?php echo fer_t('TEXT.ANSEHEN'); ?></h3>
+<div class="sm-knopfreihe">
+<a class="sm-btn sm-b-lesen"  href="/plugins/<?= fe_e($fe_plugin) ?>/ferien.php" target="_blank"><?php echo fer_t('TEXT.LOXONE_ZEILE_ABRUFEN'); ?></a>
+<a class="sm-btn sm-b-lesen"  href="/plugins/<?= fe_e($fe_plugin) ?>/ferien.php?json=1" target="_blank"><?php echo fer_t('TEXT.JSON_ANSICHT'); ?></a>
 </div>
 
-<h3 class="fe-h3">Technische Auskunft</h3>
-<div class="fe-knopfreihe">
-<a class="fe-btn fe-b-technik"  href="/plugins/<?= fe_e($fe_plugin) ?>/ferien.php?debug=1" target="_blank">Debug (alle Termine)</a>
-<a class="fe-btn fe-b-technik"  href="/plugins/<?= fe_e($fe_plugin) ?>/ferien.php?refresh=1&amp;debug=1" target="_blank">Neu abrufen + Debug</a>
+<h3 class="sm-h3"><?php echo fer_t('TEXT.TECHNISCHE_AUSKUNFT'); ?></h3>
+<div class="sm-knopfreihe">
+<a class="sm-btn sm-b-technik"  href="/plugins/<?= fe_e($fe_plugin) ?>/ferien.php?debug=1" target="_blank"><?php echo fer_t('TEXT.DEBUG_ALLE_TERMINE'); ?></a>
+<a class="sm-btn sm-b-technik"  href="/plugins/<?= fe_e($fe_plugin) ?>/ferien.php?refresh=1&amp;debug=1" target="_blank"><?php echo fer_t('TEXT.NEU_ABRUFEN_DEBUG'); ?></a>
 </div>
 
-<h3 class="fe-h3">L&ouml;st etwas aus</h3>
-<div class="fe-knopfreihe">
-<a class="fe-btn fe-b-aktion"  href="/plugins/<?= fe_e($fe_plugin) ?>/ferien.php?say=1" target="_blank">Test-Ansage</a>
-<a class="fe-btn fe-b-aktion"  href="/plugins/<?= fe_e($fe_plugin) ?>/ferien.php?ptest=1" target="_blank">Test-Pushnachricht</a>
+<h3 class="sm-h3"><?php echo fer_t('TEXT.LST_ETWAS_AUS'); ?></h3>
+<div class="sm-knopfreihe">
+<a class="sm-btn sm-b-aktion"  href="/plugins/<?= fe_e($fe_plugin) ?>/ferien.php?say=1" target="_blank"><?php echo fer_t('TEXT.TEST_ANSAGE'); ?></a>
+<a class="sm-btn sm-b-aktion"  href="/plugins/<?= fe_e($fe_plugin) ?>/ferien.php?ptest=1" target="_blank"><?php echo fer_t('TEXT.TEST_PUSHNACHRICHT'); ?></a>
 </div>
 
 
 </div>
 
 <!-- ================= Brueckentage ================= -->
-<div class="fe-pane" id="tab-bridge">
-<h2>Br&uuml;ckentage der n&auml;chsten 12 Monate</h2>
-<div class="fe-small" style="margin-bottom:8px;">Werktage zwischen Feiertag und Wochenende &mdash; mit einem Urlaubstag ergeben sie ein langes Wochenende.</div>
+<div class="sm-pane" id="tab-bridge">
+<h2><?php echo fer_t('TEXT.BRCKENTAGE_DER_NCHSTEN_12_MONATE'); ?></h2>
+<div class="sm-small" style="margin-bottom:8px;"><?php echo fer_t('TEXT.WERKTAGE_ZWISCHEN_FEIERTAG_UND_WOC'); ?></div>
 <?php if (!empty($fe_st['brueckentage'])) { ?>
-<table class="fe-tbl"><tr><th>Datum</th><th>Wochentag</th><th>in Tagen</th><th>ergibt</th></tr>
+<table class="sm-tbl"><tr><th><?php echo fer_t('TEXT.DATUM'); ?></th><th><?php echo fer_t('TEXT.WOCHENTAG'); ?></th><th><?php echo fer_t('TEXT.IN_TAGEN'); ?></th><th><?php echo fer_t('TEXT.ERGIBT'); ?></th></tr>
 <?php foreach ((array) $fe_st['brueckentage'] as $fe_t) {
     $fe_ts = strtotime($fe_t);
     $fe_in = (int) floor(($fe_ts - strtotime(date('Y-m-d'))) / 86400);
@@ -584,69 +564,65 @@ f&uuml;r Drittsoftware: <span class="fe-mono">http://<?= $fe_host ?>/plugins/<?=
 <tr><td><?= fe_e(fe_d($fe_t)) ?></td><td><?= fe_e(date('D', $fe_ts)) ?></td>
 <td><?= $fe_in <= 0 ? 'heute' : $fe_in ?></td><td><?= $fe_erg ?></td></tr>
 <?php } ?></table>
-<div class="fe-small" style="margin-top:8px;">Ein Brückentag ist ein Werktag, der zwischen einem gesetzlichen Feiertag und dem
-Wochenende eingeklemmt ist &mdash; also der Freitag nach einem Donnerstags-Feiertag oder der Montag vor einem Dienstags-Feiertag.
-Wer diesen einen Tag Urlaub nimmt, hat vier freie Tage am St&uuml;ck.</div>
+<div class="sm-small" style="margin-top:8px;"><?php echo fer_t('TEXT.EIN_BRUECKENTAG_IST_EIN_WERKTAG_DE'); ?></div>
 <?php } else { ?>
-<div class="fe-alert fe-info">Zurzeit sind keine Br&uuml;ckentage bekannt.
-Pr&uuml;fen Sie unter <b>Einstellungen</b>, ob &bdquo;Br&uuml;ckentage erkennen&ldquo; aktiviert und ein Bundesland gew&auml;hlt ist,
-und holen Sie im Reiter <b>Test</b> die Daten neu ab.</div>
+<div class="sm-alert sm-info"><?php echo fer_t('TEXT.ZURZEIT_SIND_KEINE_BRCKENTAGE_BEKA'); ?> <b>Einstellungen</b><?php echo fer_t('TEXT.OB_BRCKENTAGE_ERKENNEN_AKTIVIERT_U'); ?> <b>Test</b> <?php echo fer_t('TEXT.DIE_DATEN_NEU_AB'); ?></div>
 <?php } ?>
 </div>
 
-<!-- ================= Kommende Ferien ================= -->
-<div class="fe-pane" id="tab-vacation">
+<!-- ================= <?php echo fer_t('TEXT.KOMMENDE_FERIEN'); ?> ================= -->
+<div class="sm-pane" id="tab-vacation">
 <h2>Kommende Ferien</h2>
 <?php if (function_exists('fer_data')) { $fe_d = fer_data(); $fe_heute = date('Y-m-d'); ?>
-<div class="fe-small" style="margin-bottom:8px;">Schulferien des gew&auml;hlten Bundeslandes sowie eigene Termine vom Typ &bdquo;wie Ferien&ldquo;. Laufende Zeitr&auml;ume stehen oben.</div>
-<table class="fe-tbl"><tr><th>von</th><th>bis</th><th>Bezeichnung</th><th>Tage</th><th>Status</th></tr>
+<div class="sm-small" style="margin-bottom:8px;"><?php echo fer_t('TEXT.SCHULFERIEN_DES_GEWHLTEN_BUNDESLAN'); ?></div>
+<table class="sm-tbl"><tr><th>von</th><th>bis</th><th>Bezeichnung</th><th><?php echo fer_t('TEXT.TAGE'); ?></th><th>Status</th></tr>
 <?php $fe_n = 0; foreach ((array) $fe_d['ferien'] as $fe_e2) {
     if ($fe_e2['bis'] < $fe_heute || $fe_n++ > 14) { continue; }
     $fe_tage = (int) round((strtotime($fe_e2['bis']) - strtotime($fe_e2['von'])) / 86400) + 1;
     $fe_in = (int) floor((strtotime($fe_e2['von']) - strtotime($fe_heute)) / 86400); ?>
 <tr><td><?= fe_e(fe_d($fe_e2['von'])) ?></td><td><?= fe_e(fe_d($fe_e2['bis'])) ?></td>
-<td><?= fe_e($fe_e2['name']) ?><?= !empty($fe_e2['urlaub']) ? ' <span class="fe-small">(Urlaub &mdash; abwesend)</span>' : (!empty($fe_e2['eigen']) ? ' <span class="fe-small">(eigener Termin)</span>' : '') ?></td>
+<td><?= fe_e($fe_e2['name']) ?><?= !empty($fe_e2['urlaub']) ? ' <span class="sm-small">(Urlaub &mdash; abwesend)</span>' : (!empty($fe_e2['eigen']) ? ' <span class="sm-small">(eigener Termin)</span>' : '') ?></td>
 <td><?= $fe_tage ?></td>
 <td><?= $fe_in <= 0 ? '<b>l&auml;uft</b>' : ('in ' . $fe_in . ' Tag' . ($fe_in === 1 ? '' : 'en')) ?></td></tr>
 <?php } ?></table>
 <?php } else { ?>
-<div class="fe-alert fe-info">Die Bibliothek des Plugins wurde nicht gefunden &mdash; bitte das Plugin neu installieren.</div>
+<div class="sm-alert sm-info"><?php echo fer_t('TEXT.DIE_BIBLIOTHEK_DES_PLUGINS_WURDE_N'); ?></div>
 <?php } ?>
 </div>
 
-<!-- ================= Kommende Feiertage ================= -->
-<div class="fe-pane" id="tab-holiday">
+<!-- ================= <?php echo fer_t('TEXT.KOMMENDE_FEIERTAGE'); ?> ================= -->
+<div class="sm-pane" id="tab-holiday">
 <h2>Kommende Feiertage</h2>
 <?php if (function_exists('fer_data')) { if (!isset($fe_d)) { $fe_d = fer_data(); } $fe_heute = date('Y-m-d'); ?>
-<div class="fe-small" style="margin-bottom:8px;">Gesetzliche Feiertage des gew&auml;hlten Bundeslandes (inklusive der Korrekturen f&uuml;r den eingestellten Arbeitsort) sowie eigene Termine vom Typ &bdquo;wie Feiertag&ldquo;.</div>
-<table class="fe-tbl"><tr><th>Datum</th><th>Wochentag</th><th>Bezeichnung</th><th>in Tagen</th></tr>
+<div class="sm-small" style="margin-bottom:8px;"><?php echo fer_t('TEXT.GESETZLICHE_FEIERTAGE_DES_GEWHLTEN'); ?></div>
+<table class="sm-tbl"><tr><th>Datum</th><th>Wochentag</th><th>Bezeichnung</th><th>in Tagen</th></tr>
 <?php $fe_n = 0; foreach ((array) $fe_d['feiertage'] as $fe_e2) {
     if ($fe_e2['bis'] < $fe_heute || $fe_n++ > 17) { continue; }
     $fe_in = (int) floor((strtotime($fe_e2['von']) - strtotime($fe_heute)) / 86400);
     $fe_wt = (int) date('N', strtotime($fe_e2['von'])); ?>
 <tr><td><?= fe_e(fe_d($fe_e2['von'])) ?></td>
-<td><?= fe_e(date('D', strtotime($fe_e2['von']))) ?><?= ($fe_wt >= 6) ? ' <span class="fe-small">(f&auml;llt aufs Wochenende)</span>' : '' ?></td>
-<td><?= fe_e($fe_e2['name']) ?><?= !empty($fe_e2['eigen']) ? ' <span class="fe-small">(eigener Termin)</span>' : '' ?><?= !empty($fe_e2['ortlich']) ? ' <span class="fe-small">(nur &ouml;rtlich)</span>' : '' ?></td>
+<td><?= fe_e(date('D', strtotime($fe_e2['von']))) ?><?= ($fe_wt >= 6) ? ' <span class="sm-small">(f&auml;llt aufs Wochenende)</span>' : '' ?></td>
+<td><?= fe_e($fe_e2['name']) ?><?= !empty($fe_e2['eigen']) ? ' <span class="sm-small">(eigener Termin)</span>' : '' ?><?= !empty($fe_e2['ortlich']) ? ' <span class="sm-small">(nur &ouml;rtlich)</span>' : '' ?></td>
 <td><?= $fe_in <= 0 ? '<b>heute</b>' : $fe_in ?></td></tr>
 <?php } ?></table>
 <?php } else { ?>
-<div class="fe-alert fe-info">Die Bibliothek des Plugins wurde nicht gefunden &mdash; bitte das Plugin neu installieren.</div>
+<div class="sm-alert sm-info">Die Bibliothek des Plugins wurde nicht gefunden &mdash; bitte das Plugin neu installieren.</div>
 <?php } ?>
 </div>
 
-<!-- ================= Protokoll ================= -->
-<div class="fe-pane" id="tab-log">
+<!-- ================= <?php echo fer_t('TEXT.PROTOKOLL'); ?> ================= -->
+<div class="sm-pane" id="tab-log">
 <h2>Protokoll</h2>
-<div class="fe-small" style="margin-bottom:8px;">Protokolliert werden Datenabrufe, Zustands&auml;nderungen, Ansagen und Fehler. Neueste Eintr&auml;ge oben (max. 300).<br>Datei: <span class="fe-mono"><?= fe_e($fe_logfile) ?></span></div>
+<div class="sm-small" style="margin-bottom:8px;"><?php echo fer_t('TEXT.PROTOKOLLIERT_WERDEN_DATENABRUFE_Z'); ?><br><?php echo fer_t('TEXT.DATEI'); ?> <span class="sm-mono"><?= fe_e($fe_logfile) ?></span></div>
 <?php if ($fe_loglines) { ?>
-<div class="fe-log"><?= fe_e(implode("\n", $fe_loglines)) ?></div>
+<div class="sm-log"><?= fe_e(implode("\n", $fe_loglines)) ?></div>
 <?php } else { ?>
-<div class="fe-alert fe-info">Noch keine Protokoll-Eintr&auml;ge vorhanden.</div>
+<div class="sm-alert sm-info"><?php echo fer_t('TEXT.NOCH_KEINE_PROTOKOLL_EINTRGE_VORHA'); ?></div>
 <?php } ?>
-<form method="post" style="margin-top:10px;">
+<form action="index.php" method="post" style="margin-top:10px;">
     <input data-role="none" type="hidden" name="clearlog" value="1">
     <input data-role="none" type="hidden" name="activetab" value="tab-log">
-    <button data-role="none" class="fe-btn" type="submit" style="background:#c62828;">Protokoll leeren</button>
+    <button data-role="none" class="sm-btn" type="submit" style="background:#c62828;"><?php echo fer_t('TEXT.PROTOKOLL_LEEREN'); ?></button>
 </form>
 </div>
 
@@ -660,10 +636,10 @@ function feTtsMode() {
     if (m === 'musicserver' && (!port.value || port.value === '80')) { port.value = 7091; }
 }
 (function () {
-    var tabs = document.querySelectorAll('.fe-tab');
+    var tabs = document.querySelectorAll('.sm-tab');
     function activate(id) {
-        tabs.forEach(function (t) { t.classList.toggle('fe-active', t.dataset.pane === id); });
-        document.querySelectorAll('.fe-pane').forEach(function (p) { p.classList.toggle('fe-active', p.id === id); });
+        tabs.forEach(function (t) { t.classList.toggle('sm-active', t.dataset.pane === id); });
+        document.querySelectorAll('.sm-pane').forEach(function (p) { p.classList.toggle('sm-active', p.id === id); });
     }
     tabs.forEach(function (t) { t.addEventListener('click', function () { activate(t.dataset.pane); }); });
     activate(<?= json_encode($fe_tab) ?>);
