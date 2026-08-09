@@ -92,6 +92,24 @@ if (isset($_GET['debug'])) {
     echo "\n";
 }
 
+/*
+ * ACHTUNG - die REIHENFOLGE der Felder ist Teil der Schnittstelle.
+ *
+ * Loxone sucht in der Zeile die wortwoertliche Zeichenkette der
+ * Befehlserkennung (z. B. "FERIEN=") und nimmt den ERSTEN Treffer. In dieser
+ * Zeile steht "FERIEN=" aber auch als Teil von "MFERIEN=" - genauso
+ * "FEIERTAG=" in "MFEIERTAG=", "SCHULFREI=" in "MSCHULFREI=", "SCHULTAG=" in
+ * "MSCHULTAG=", "BRUECKE=" in "MBRUECKE=" und "URLAUB=" in "MURLAUB=".
+ *
+ * Gutgegangen ist das bisher nur deshalb, weil das Feld fuer HEUTE jeweils
+ * VOR seinem M-Gegenstueck steht. Wer die Felder umsortiert - etwa um sie
+ * huebscher zu gruppieren -, liefert Loxone stillschweigend den Wert von
+ * morgen als den von heute. Es gaebe keine Fehlermeldung, nur falsche
+ * Wecker.
+ *
+ * Wer hier etwas aendert, prueft danach: fuer jedes Feld muss der erste
+ * Treffer von "<NAME>=" auch zu diesem Feld gehoeren.
+ */
 printf("FERIEN;OK=%d;FERIEN=%d;FEIERTAG=%d;WOCHENENDE=%d;SCHULFREI=%d;SCHULTAG=%d;BRUECKE=%d;MFERIEN=%d;MFEIERTAG=%d;MSCHULFREI=%d;MSCHULTAG=%d;MBRUECKE=%d;FERIENIN=%d;FERIENREST=%d;FERIENDAUER=%d;FEIERTAGIN=%d;URLAUB=%d;MURLAUB=%d;URLAUBIN=%d;URLAUBREST=%d;URLAUBDAUER=%d;URLAUBENDE=%d;WARN=%d;ANN=%d;AUDIO=%d;PUSH=%d;PTEST=%d\n",
     $st['ok'],
     $st['heute']['ferien'], $st['heute']['feiertag'], $st['heute']['wochenende'],

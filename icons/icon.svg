@@ -1,16 +1,75 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
-  <rect width="512" height="512" rx="96" fill="#6dac20"/>
-  <rect x="96" y="130" width="320" height="286" rx="26" fill="#ffffff"/>
-  <rect x="96" y="130" width="320" height="62" rx="26" fill="#4f8016"/>
-  <rect x="150" y="96" width="30" height="72" rx="15" fill="#ffffff"/>
-  <rect x="332" y="96" width="30" height="72" rx="15" fill="#ffffff"/>
-  <g fill="#cfe3b4">
-    <rect x="132" y="222" width="52" height="42" rx="8"/><rect x="200" y="222" width="52" height="42" rx="8"/>
-    <rect x="268" y="222" width="52" height="42" rx="8"/><rect x="336" y="222" width="44" height="42" rx="8"/>
-    <rect x="132" y="284" width="52" height="42" rx="8"/><rect x="268" y="284" width="52" height="42" rx="8"/>
-    <rect x="336" y="284" width="44" height="42" rx="8"/><rect x="132" y="346" width="52" height="42" rx="8"/>
-    <rect x="200" y="346" width="52" height="42" rx="8"/>
+<?xml version="1.0" encoding="UTF-8"?>
+<svg width="512" height="512" viewBox="0 0 512 512" version="1.1" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <radialGradient id="bg-grad" cx="50%" cy="50%" r="50%" fx="35%" fy="35%">
+      <stop offset="0%" stop-color="#7dc424" />
+      <stop offset="65%" stop-color="#6dac20" />
+      <stop offset="100%" stop-color="#568819" />
+    </radialGradient>
+    <filter id="shadow" x="-10%" y="-10%" width="120%" height="120%">
+      <feDropShadow dx="0" dy="4" stdDeviation="4" flood-color="#000000" flood-opacity="0.25"/>
+    </filter>
+  </defs>
+
+  <!-- Outer Badge Ring -->
+  <circle cx="256" cy="256" r="246" fill="url(#bg-grad)" />
+  <circle cx="256" cy="256" r="232" fill="none" stroke="#ffffff" stroke-opacity="0.35" stroke-width="3" />
+
+  <g filter="url(#shadow)" fill="#ffffff">
+    <!-- Calendar Main Body (fuer 7 Spalten verbreitert) -->
+    <rect x="161" y="80" width="190" height="205" rx="16" fill="#ffffff" />
+
+    <!-- Calendar Header Bar -->
+    <path d="M 161 96 C 161 87 168 80 177 80 L 335 80 C 344 80 351 87 351 96 L 351 125 L 161 125 Z" fill="#6dac20" />
+
+    <!-- Ring Binders at Top -->
+    <rect x="191" y="68" width="12" height="22" rx="6" fill="#ffffff" />
+    <rect x="250" y="68" width="12" height="22" rx="6" fill="#ffffff" />
+    <rect x="309" y="68" width="12" height="22" rx="6" fill="#ffffff" />
+
+    <!-- 7 COLUMNS GRID: Mo-Fr (#6dac20) | Sa-So (#4e7e17) -->
+    <!-- Row 1 -->
+    <rect x="178" y="140" width="18" height="18" rx="4" fill="#6dac20" />
+    <rect x="201" y="140" width="18" height="18" rx="4" fill="#6dac20" />
+    <rect x="224" y="140" width="18" height="18" rx="4" fill="#6dac20" />
+    <rect x="247" y="140" width="18" height="18" rx="4" fill="#6dac20" />
+    <rect x="270" y="140" width="18" height="18" rx="4" fill="#6dac20" />
+    <rect x="293" y="140" width="18" height="18" rx="4" fill="#4e7e17" />
+    <rect x="316" y="140" width="18" height="18" rx="4" fill="#4e7e17" />
+
+    <!-- Row 2 -->
+    <rect x="178" y="168" width="18" height="18" rx="4" fill="#6dac20" />
+    <rect x="201" y="168" width="18" height="18" rx="4" fill="#6dac20" />
+    <rect x="224" y="168" width="18" height="18" rx="4" fill="#6dac20" />
+    <!-- Highlighted Feiertag Day -->
+    <rect x="247" y="168" width="18" height="18" rx="4" fill="#6dac20" />
+    <circle cx="256" cy="177" r="3.5" fill="#ffffff" />
+    <rect x="270" y="168" width="18" height="18" rx="4" fill="#6dac20" />
+    <rect x="293" y="168" width="18" height="18" rx="4" fill="#4e7e17" />
+    <rect x="316" y="168" width="18" height="18" rx="4" fill="#4e7e17" />
+
+    <!-- Row 3 -->
+    <rect x="178" y="196" width="18" height="18" rx="4" fill="#6dac20" />
+    <rect x="201" y="196" width="18" height="18" rx="4" fill="#6dac20" />
+    <rect x="224" y="196" width="18" height="18" rx="4" fill="#6dac20" />
+    <rect x="247" y="196" width="18" height="18" rx="4" fill="#6dac20" />
+    <rect x="270" y="196" width="18" height="18" rx="4" fill="#6dac20" />
+    <rect x="293" y="196" width="18" height="18" rx="4" fill="#4e7e17" />
+    <rect x="316" y="196" width="18" height="18" rx="4" fill="#4e7e17" />
+
+    <!-- Vacation Period Bars -->
+    <rect x="178" y="224" width="110" height="20" rx="6" fill="#6dac20" />
+    <circle cx="190" cy="234" r="3" fill="#ffffff" />
+    <rect x="200" y="232" width="78" height="4" rx="2" fill="#ffffff" opacity="0.8" />
+    
+    <rect x="293" y="224" width="41" height="20" rx="6" fill="#4e7e17" />
+    <rect x="298" y="232" width="31" height="4" rx="2" fill="#ffffff" opacity="0.8" />
+
+    <!-- Dashed Line -->
+    <path d="M 150 345 L 362 345" stroke="#ffffff" stroke-width="4" stroke-dasharray="6 8" opacity="0.8" />
   </g>
-  <rect x="200" y="284" width="52" height="42" rx="8" fill="#e65100"/>
-  <rect x="268" y="346" width="112" height="42" rx="8" fill="#6dac20"/>
+
+  <!-- Typography -->
+  <text x="256" y="388" text-anchor="middle" fill="#ffffff" font-family="Arial, sans-serif" font-weight="900" font-size="29" letter-spacing="0.5">Ferien Feiertage</text>
+  <text x="256" y="424" text-anchor="middle" fill="#ffffff" font-family="Arial, sans-serif" font-weight="bold" font-size="20" letter-spacing="3">LOXBERRY</text>
 </svg>

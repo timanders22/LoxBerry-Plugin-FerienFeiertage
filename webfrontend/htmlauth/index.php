@@ -1,6 +1,6 @@
 <?php
 /**
- * Ferien und Feiertage - Admin-Oberflaeche (v1.0.0)
+ * Ferien und Feiertage - Admin-Oberflaeche (v1.1.0)
  * Reiter: Einstellungen | Einbindung in Loxone | Brueckentage | Kommende Ferien |
  *         Kommende Feiertage | Test | Protokoll
  * Kompatibel mit PHP 7.4 und PHP 8.x (LoxBerry 3.x/4.x).
@@ -50,7 +50,21 @@ if ((!is_file($fe_cfgfile) || trim((string) @file_get_contents($fe_cfgfile)) ===
 }
 
 $fe_saved = false; $fe_err = ''; $fe_note = '';
-$fe_tab = preg_match('/^tab-(settings|loxone|bridge|vacation|holiday|test|log)$/', (string) (isset($_POST['activetab']) ? $_POST['activetab'] : '')) ? $_POST['activetab'] : 'tab-settings';
+
+/* Wer einen Reiter hinzufuegt, muss DREI Stellen mitziehen: die Reiterleiste,
+   den Bereich (sm-pane mit gleicher id) und diese Positivliste. Fehlt der
+   Name hier, springt die Seite nach jedem Absenden zurueck auf Einstellungen. */
+$fe_muster = '/^tab-(settings|loxone|bridge|vacation|holiday|test|log)$/';
+$fe_tab = preg_match($fe_muster, (string) (isset($_POST['activetab']) ? $_POST['activetab'] : ''))
+    ? (string) $_POST['activetab'] : 'tab-settings';
+// Die Reiter sind echte Verweise. Wer sie anklickt (oder ein Lesezeichen
+// darauf setzt), landet ueber ?form= im richtigen Bereich - auch dann, wenn
+// im Browser kein JavaScript laeuft.
+if (isset($_GET['form']) && preg_match($fe_muster, 'tab-' . preg_replace('/[^a-z]/', '', (string) $_GET['form']))) {
+    $fe_tab = 'tab-' . preg_replace('/[^a-z]/', '', (string) $_GET['form']);
+}
+/** Klasse fuer den gerade sichtbaren Reiter bzw. Bereich. */
+function fe_aktiv($id) { global $fe_tab; return $fe_tab === $id ? ' sm-active' : ''; }
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['clearlog'])) {
     @mkdir(dirname($fe_logfile), 0775, true);
@@ -65,6 +79,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['fetchnow']) && functi
 }
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['save'])) {
+    // Der Stand VOR dem Speichern - daran wird spaeter erkannt, ob sich die
+    // Region geaendert hat und die Termine neu geholt werden muessen.
+    $fe_vorher = function_exists('fer_config') ? fer_config() : array();
+    if (!is_array($fe_vorher)) { $fe_vorher = array(); }
     $fe_new = array();
     $fe_new['country'] = preg_replace('/[^A-Za-z]/', '', (string) (isset($_POST['country']) ? $_POST['country'] : 'DE')) ?: 'DE';
     $fe_new['country'] = strtoupper($fe_new['country']);
@@ -120,8 +138,49 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['save'])) {
     if ($fe_json !== false && @file_put_contents($fe_cfgfile, $fe_json) !== false) {
         $fe_saved = true;
         @copy($fe_cfgfile, $fe_bkfile);
-        @unlink('/tmp/ferien/state.json');
-        @unlink('/tmp/ferien/termine.json');
+        // Zwischenspeicher raeumen - und zwar den RICHTIGEN.
+        //
+        // Bis 1.0.1 stand hier zweimal ein fester Pfad unter /tmp/ferien/.
+        // Fuer state.json ging das gut (dort liegt sie tatsaechlich), fuer
+        // termine.json nicht: die Termindatei liegt in data/plugins/<ordner>/,
+        // nicht in /tmp. Der Aufruf loeschte also nichts.
+        //
+        // Die Folge war ein Fehler, den man beim Einrichten sofort trifft:
+        // Bundesland von Bayern auf Berlin umstellen, speichern - und es
+        // aendert sich nichts. Denn fer_fetch() sieht eine Termindatei, die
+        // keine sieben Tage alt ist, und liefert sie unveraendert zurueck.
+        // Erst eine Woche spaeter oder nach "Jetzt abrufen" kamen die
+        // richtigen Daten.
+        //
+        // Deshalb: die Pfade ueber die Funktionen holen, und wenn sich die
+        // REGION geaendert hat, die Termindatei entfernen, damit der naechste
+        // Abruf wirklich neu holt. Aendert sich nur die Meldezeit, bleibt sie
+        // liegen - dann waere ein Abruf reine Last fuer die fremde
+        // Schnittstelle.
+        if (function_exists('fer_tmpdir')) {
+            @unlink(fer_tmpdir() . '/state.json');
+        }
+        $fe_regionsfelder = array('country', 'subdivision', 'school', 'public',
+                                  'locality', 'local_holidays');
+        $fe_region_neu = false;
+        foreach ($fe_regionsfelder as $fe_rf) {
+            $fe_alt = isset($fe_vorher[$fe_rf]) ? $fe_vorher[$fe_rf] : null;
+            if ((string) $fe_alt !== (string) $fe_new[$fe_rf]) { $fe_region_neu = true; break; }
+        }
+        if ($fe_region_neu && function_exists('fer_datafile')) {
+            @unlink(fer_datafile());
+            if (function_exists('fer_log')) {
+                fer_log('Region geaendert - Termindatei verworfen, die Daten werden neu geholt.');
+            }
+            if (function_exists('fer_fetch')) {
+                list($fe_rok, $fe_rq) = fer_fetch(true);
+                fer_state(true);
+                $fe_note = $fe_rok
+                    ? 'Region geaendert - Ferien und Feiertage wurden neu geholt (' . $fe_rq . ').'
+                    : 'Region geaendert, aber der Abruf ist FEHLGESCHLAGEN. Im Reiter Protokoll steht mehr;'
+                    . ' mit "Jetzt abrufen" laesst es sich wiederholen.';
+            }
+        }
     } else {
         $fe_err = 'Konfiguration konnte nicht gespeichert werden: ' . $fe_cfgfile;
     }
@@ -169,7 +228,9 @@ $fe_host = fe_e(isset($_SERVER['HTTP_HOST']) ? $_SERVER['HTTP_HOST'] : '<loxberr
 .sm-mono { font-family: ui-monospace, monospace; background: #f5f5f5; padding: 2px 6px; border-radius: 4px; }
 .sm-small { font-size: 0.82em; color: #666; margin-top: 3px; }
 .sm-tabs { display: flex; gap: 4px; margin: 14px 0 0; border-bottom: 2px solid #6dac20; flex-wrap: wrap; }
-.sm-tab { background: #eee; border: 1px solid #ccc; border-bottom: 0; border-radius: 8px 8px 0 0; padding: 9px 18px; cursor: pointer; font-size: 0.95em; color: #444 !important; text-shadow: none !important; }
+.sm-tab { background: #eee; border: 1px solid #ccc; border-bottom: 0; border-radius: 8px 8px 0 0; padding: 9px 18px; cursor: pointer; font-size: 0.95em; color: #444 !important; text-shadow: none !important;
+  display: inline-block; text-decoration: none !important; }
+.sm-tab:visited, .sm-tab:hover { text-decoration: none !important; }
 .sm-tab.sm-active { background: #6dac20; color: #fff !important; border-color: #6dac20; font-weight: 600; }
 .sm-pane { display: none; padding-top: 4px; }
 .sm-pane.sm-active { display: block; }
@@ -181,7 +242,7 @@ $fe_host = fe_e(isset($_SERVER['HTTP_HOST']) ? $_SERVER['HTTP_HOST'] : '<loxberr
 .sm-wrap .sm-btn, .sm-wrap a.sm-btn, .sm-wrap button { text-shadow: none !important; box-shadow: none !important; }
 .sm-wrap a.sm-btn, .sm-wrap a.sm-btn:visited, .sm-wrap a.sm-btn:hover { color: #fff !important; text-decoration: none; }
 
-/* --- Einheitliches Kachel-Raster im Reiter <?php echo fer_t('TEXT.TEST'); ?> (Standard <?php echo fer_t('TEXT.ALLE'); ?>r Plugins) --- */
+/* --- Einheitliches Kachel-Raster im Reiter Test (Hausstandard) --- */
 .sm-h3 { color: #4f7d17; font-size: 1.0em; font-weight: 700; margin: 16px 0 2px; text-shadow: none !important; }
 .sm-knopfreihe { display: flex; flex-wrap: wrap; gap: 10px; margin: 10px 0 4px; align-items: stretch; }
 .sm-knopfreihe form { margin: 0; display: flex; }
@@ -206,18 +267,26 @@ $fe_host = fe_e(isset($_SERVER['HTTP_HOST']) ? $_SERVER['HTTP_HOST'] : '<loxberr
 <?php if (!empty($fe_st)) { ?>
 <div class="sm-alert sm-info">
 <?php if ($fe_st['ok']) { ?>
-<b><?php echo fer_t('TEXT.HEUTE'); ?><?= fe_e(fe_d($fe_st[fer_t('TEXT.HEUTE_2')]['datum'])) ?>):</b>
-<?= $fe_st['heute'][fer_t('TEXT.SCHULFREI')] ? '<b>schulfrei</b>' : 'normaler Schul-/Arbeitstag' ?>
-<?= $fe_st['heute']['feiertag'] ? ' &middot; Feiertag: <b>' . fe_e($fe_st['heute']['feiertag_name']) . '</b>' : '' ?>
-<?= $fe_st['heute']['ferien'] ? ' &middot; Ferien: <b>' . fe_e($fe_st['heute']['ferien_name']) . '</b>' : '' ?>
-<?= $fe_st['heute']['bruecke'] ? ' &middot; <b>Br&uuml;ckentag</b>' : '' ?><br>
-<b><?php echo fer_t('TEXT.MORGEN'); ?></b> <?= $fe_st['morgen']['schulfrei'] ? '<b>schulfrei</b>' : 'Schul-/Arbeitstag' ?>
+<?php /* ACHTUNG: 'heute' und 'schulfrei' sind ARRAY-SCHLUESSEL aus fer_state(),
+   keine Anzeigetexte. Bis 1.0.1 standen hier fer_t('TEXT.HEUTE_2') bzw.
+   fer_t('TEXT.SCHULFREI') - offensichtlich durch einen Durchlauf entstanden,
+   der Zeichenketten pauschal in Sprachschluessel umgeschrieben hat. Auf
+   Deutsch fiel das nicht auf, weil TEXT.HEUTE_2 zufaellig "heute" ergibt.
+   Auf Englisch liefert derselbe Schluessel "today", der Zugriff geht ins
+   Leere, und der gesamte Statuskasten bleibt leer. Diese Schluessel duerfen
+   NIE uebersetzt werden. */ ?>
+<b><?php echo fer_t('TEXT.HEUTE'); ?><?= fe_e(fe_d($fe_st['heute']['datum'])) ?>):</b>
+<?= $fe_st['heute']['schulfrei'] ? '<b>' . fer_t('TEXT.SCHULFREI') . '</b>' : fer_t('TEXT.NORMALER_SCHULTAG') ?>
+<?= $fe_st['heute']['feiertag'] ? ' &middot; ' . fer_t('TX.FEIERTAG') . ': <b>' . fe_e($fe_st['heute']['feiertag_name']) . '</b>' : '' ?>
+<?= $fe_st['heute']['ferien'] ? ' &middot; ' . fer_t('TX.FERIEN') . ': <b>' . fe_e($fe_st['heute']['ferien_name']) . '</b>' : '' ?>
+<?= $fe_st['heute']['bruecke'] ? ' &middot; <b>' . fer_t('TEXT.BRCKENTAG') . '</b>' : '' ?><br>
+<b><?php echo fer_t('TEXT.MORGEN'); ?></b> <?= $fe_st['morgen']['schulfrei'] ? '<b>' . fer_t('TEXT.SCHULFREI') . '</b>' : fer_t('TX.SCHULTAG') ?>
 <?= $fe_st['morgen']['feiertag'] ? ' (' . fe_e($fe_st['morgen']['feiertag_name']) . ')' : '' ?>
 <?= $fe_st['morgen']['ferien'] ? ' (' . fe_e($fe_st['morgen']['ferien_name']) . ')' : '' ?><br>
 <?php if ($fe_st['naechste']['in'] >= 0) { ?>
 <?= $fe_st['naechste']['rest'] > 0
-    ? 'Laufende Ferien: <b>' . fe_e($fe_st['naechste']['name']) . '</b> noch <b>' . (int) $fe_st['naechste']['rest'] . ' Tage</b> (bis ' . fe_e(fe_d($fe_st['naechste']['bis'])) . ')'
-    : 'N&auml;chste Ferien: <b>' . fe_e($fe_st['naechste']['name']) . '</b> in <b>' . (int) $fe_st['naechste']['in'] . ' Tagen</b> (' . fe_e(fe_d($fe_st['naechste']['von'])) . ' bis ' . fe_e(fe_d($fe_st['naechste']['bis'])) . ', ' . (int) $fe_st['naechste']['dauer'] . ' Tage)' ?><br>
+    ? sprintf(fer_t('TX.FERIEN_LAUFEN'), fe_e($fe_st['naechste']['name']), (int) $fe_st['naechste']['rest'], fe_e(fe_d($fe_st['naechste']['bis'])))
+    : sprintf(fer_t('TX.FERIEN_KOMMEN'), fe_e($fe_st['naechste']['name']), (int) $fe_st['naechste']['in'], fe_e(fe_d($fe_st['naechste']['von'])), fe_e(fe_d($fe_st['naechste']['bis'])), (int) $fe_st['naechste']['dauer']) ?><br>
 <?php } ?>
 <?php if ($fe_st['feiertag_naechster']['in'] >= 0) { ?>
 <?php echo fer_t('TEXT.NCHSTER_FEIERTAG'); ?> <b><?= fe_e($fe_st['feiertag_naechster']['name']) ?></b> in <?= (int) $fe_st['feiertag_naechster']['in'] ?> <?php echo fer_t('TEXT.TAGEN'); ?><?= fe_e(fe_d($fe_st['feiertag_naechster']['datum'])) ?>)<br>
@@ -230,18 +299,25 @@ $fe_host = fe_e(isset($_SERVER['HTTP_HOST']) ? $_SERVER['HTTP_HOST'] : '<loxberr
 <?php if (!empty($fe_st['warnung'])) { ?><div class="sm-alert sm-warn"><b><?php echo fer_t('TEXT.ACHTUNG'); ?></b> <?php echo fer_t('TEXT.DIE_FERIEN_FEIERTAGSDATEN_REICHEN_'); ?></div><?php } ?>
 <?php } ?>
 
+<?php /* Echte Verweise, keine <div>-Attrappen.
+   Bis 1.0.1 waren die Reiter <div>-Elemente, die erst ein Klick-Empfaenger
+   in JavaScript benutzbar machte. Alle Bereiche stehen aber auf
+   display:none, und sm-active setzte ausschliesslich dieses JavaScript -
+   ohne JavaScript war die Seite deshalb LEER. Jetzt entscheidet der Server,
+   was sichtbar ist; das JavaScript schaltet nur noch schneller um, damit
+   nicht jeder Reiterwechsel die Seite neu laedt. */ ?>
 <div class="sm-tabs">
-    <div class="sm-tab" data-pane="tab-settings"><?php echo fer_t('REITER.EINSTELLUNGEN'); ?></div>
-    <div class="sm-tab" data-pane="tab-loxone"><?php echo fer_t('REITER.LOXONE'); ?></div>
-    <div class="sm-tab" data-pane="tab-bridge"><?php echo fer_t('REITER.BRUECKENTAGE'); ?></div>
-    <div class="sm-tab" data-pane="tab-vacation"><?php echo fer_t('REITER.FERIEN'); ?></div>
-    <div class="sm-tab" data-pane="tab-holiday"><?php echo fer_t('REITER.FEIERTAGE'); ?></div>
-    <div class="sm-tab" data-pane="tab-test"><?php echo fer_t('REITER.TEST'); ?></div>
-    <div class="sm-tab" data-pane="tab-log"><?php echo fer_t('REITER.LOG'); ?></div>
+    <a class="sm-tab<?= fe_aktiv('tab-settings') ?>" data-pane="tab-settings" href="index.php?form=settings"><?php echo fer_t('REITER.EINSTELLUNGEN'); ?></a>
+    <a class="sm-tab<?= fe_aktiv('tab-loxone') ?>" data-pane="tab-loxone" href="index.php?form=loxone"><?php echo fer_t('REITER.LOXONE'); ?></a>
+    <a class="sm-tab<?= fe_aktiv('tab-bridge') ?>" data-pane="tab-bridge" href="index.php?form=bridge"><?php echo fer_t('REITER.BRUECKENTAGE'); ?></a>
+    <a class="sm-tab<?= fe_aktiv('tab-vacation') ?>" data-pane="tab-vacation" href="index.php?form=vacation"><?php echo fer_t('REITER.FERIEN'); ?></a>
+    <a class="sm-tab<?= fe_aktiv('tab-holiday') ?>" data-pane="tab-holiday" href="index.php?form=holiday"><?php echo fer_t('REITER.FEIERTAGE'); ?></a>
+    <a class="sm-tab<?= fe_aktiv('tab-test') ?>" data-pane="tab-test" href="index.php?form=test"><?php echo fer_t('REITER.TEST'); ?></a>
+    <a class="sm-tab<?= fe_aktiv('tab-log') ?>" data-pane="tab-log" href="index.php?form=log"><?php echo fer_t('REITER.LOG'); ?></a>
 </div>
 
 <!-- ================= <?php echo fer_t('TEXT.EINSTELLUNGEN'); ?> ================= -->
-<div class="sm-pane" id="tab-settings">
+<div class="sm-pane<?= fe_aktiv('tab-settings') ?>" id="tab-settings">
 <form action="index.php" method="post" autocomplete="off">
 <input data-role="none" type="hidden" name="save" value="1">
 <input data-role="none" type="hidden" name="activetab" value="tab-settings">
@@ -278,11 +354,11 @@ $fe_host = fe_e(isset($_SERVER['HTTP_HOST']) ? $_SERVER['HTTP_HOST'] : '<loxberr
     <div>
         <label><?php echo fer_t('TEXT.ARBEITSORT_GEMEINDE_RTLICHE_SONDER'); ?></label>
         <select data-role="none" name="locality">
-            <option value=""<?= $fe_cfg['locality'] === '' ? ' selected' : '' ?><?php echo fer_t('TEXT.ALLE_ANDEREN_STDTE_UND_GEMEINDEN'); ?></option>
-            <option value="DE-BY-AU"<?= $fe_cfg['locality'] === 'DE-BY-AU' ? ' selected' : '' ?><?php echo fer_t('TEXT.STADTGEBIET_AUGSBURG_MIT_FRIEDENSF'); ?></option>
-            <option value="BY-EV"<?= $fe_cfg['locality'] === 'BY-EV' ? ' selected' : '' ?><?php echo fer_t('TEXT.BAYERN_BERWIEGEND_EVANGELISCHE_GEM'); ?></option>
-            <option value="SN-KATH"<?= $fe_cfg['locality'] === 'SN-KATH' ? ' selected' : '' ?><?php echo fer_t('TEXT.SACHSEN_KATHOLISCHE_GEMEINDE_IM_SO'); ?></option>
-            <option value="TH-KATH"<?= $fe_cfg['locality'] === 'TH-KATH' ? ' selected' : '' ?><?php echo fer_t('TEXT.THRINGEN_EICHSFELD_BZW_KATHOLISCHE'); ?></option>
+            <option value=""<?= $fe_cfg['locality'] === '' ? ' selected' : '' ?>><?php echo fer_t('TEXT.ALLE_ANDEREN_STDTE_UND_GEMEINDEN'); ?></option>
+            <option value="DE-BY-AU"<?= $fe_cfg['locality'] === 'DE-BY-AU' ? ' selected' : '' ?>><?php echo fer_t('TEXT.STADTGEBIET_AUGSBURG_MIT_FRIEDENSF'); ?></option>
+            <option value="BY-EV"<?= $fe_cfg['locality'] === 'BY-EV' ? ' selected' : '' ?>><?php echo fer_t('TEXT.BAYERN_BERWIEGEND_EVANGELISCHE_GEM'); ?></option>
+            <option value="SN-KATH"<?= $fe_cfg['locality'] === 'SN-KATH' ? ' selected' : '' ?>><?php echo fer_t('TEXT.SACHSEN_KATHOLISCHE_GEMEINDE_IM_SO'); ?></option>
+            <option value="TH-KATH"<?= $fe_cfg['locality'] === 'TH-KATH' ? ' selected' : '' ?>><?php echo fer_t('TEXT.THRINGEN_EICHSFELD_BZW_KATHOLISCHE'); ?></option>
         </select>
         <div class="sm-small"><?php echo fer_t('TEXT.DREI_FEIERTAGE_GELTEN'); ?> <b><?php echo fer_t('TEXT.NICHT_IM_GANZEN_BUNDESLAND'); ?></b><?php echo fer_t('TEXT.SONDERN_NUR_IN_BESTIMMTEN_GEMEINDE'); ?><br>
         <?php echo fer_t('TEXT.TEXT'); ?> <b><?php echo fer_t('TEXT.MARI_HIMMELFAHRT'); ?></b> <?php echo fer_t('TEXT.IST_IN_BAYERN_NUR_IN_DEN_RUND_1_70'); ?><br>
@@ -293,16 +369,16 @@ $fe_host = fe_e(isset($_SERVER['HTTP_HOST']) ? $_SERVER['HTTP_HOST'] : '<loxberr
 </div>
 <div style="margin-top:8px;">
     <label style="display:inline-flex;align-items:center;gap:6px;margin-right:20px;">
-        <input data-role="none" type="checkbox" name="school" <?= !empty($fe_cfg['school']) ? 'checked' : '' ?><?php echo fer_t('TEXT.SCHULFERIEN_AUSWERTEN'); ?>
+        <input data-role="none" type="checkbox" name="school" <?= !empty($fe_cfg['school']) ? 'checked' : '' ?>> <?php echo fer_t('TEXT.SCHULFERIEN_AUSWERTEN'); ?>
     </label>
     <label style="display:inline-flex;align-items:center;gap:6px;margin-right:20px;">
-        <input data-role="none" type="checkbox" name="public" <?= !empty($fe_cfg['public']) ? 'checked' : '' ?><?php echo fer_t('TEXT.GESETZLICHE_FEIERTAGE_AUSWERTEN'); ?>
+        <input data-role="none" type="checkbox" name="public" <?= !empty($fe_cfg['public']) ? 'checked' : '' ?>> <?php echo fer_t('TEXT.GESETZLICHE_FEIERTAGE_AUSWERTEN'); ?>
     </label>
     <label style="display:inline-flex;align-items:center;gap:6px;margin-right:20px;">
-        <input data-role="none" type="checkbox" name="local_holidays" <?= !empty($fe_cfg['local_holidays']) ? 'checked' : '' ?><?php echo fer_t('TEXT.AUCH_NUR_RTLICHE_FEIERTAGE'); ?>
+        <input data-role="none" type="checkbox" name="local_holidays" <?= !empty($fe_cfg['local_holidays']) ? 'checked' : '' ?>> <?php echo fer_t('TEXT.AUCH_NUR_RTLICHE_FEIERTAGE'); ?>
     </label>
     <label style="display:inline-flex;align-items:center;gap:6px;">
-        <input data-role="none" type="checkbox" name="bridge" <?= !empty($fe_cfg['bridge']) ? 'checked' : '' ?><?php echo fer_t('TEXT.BRCKENTAGE_ERKENNEN'); ?>
+        <input data-role="none" type="checkbox" name="bridge" <?= !empty($fe_cfg['bridge']) ? 'checked' : '' ?>> <?php echo fer_t('TEXT.BRCKENTAGE_ERKENNEN'); ?>
     </label>
     <div class="sm-small"><?php echo fer_t('TEXT.AUCH_NUR_RTLICHE_FEIERTAGE_NIMMT'); ?> <b>alle</b> <?php echo fer_t('TEXT.ORTSGEBUNDENEN_FEIERTAGE_DER_REGIO'); ?> <b><?php echo fer_t('TEXT.BRCKENTAG'); ?></b> <?php echo fer_t('TEXT.IST_EIN_WERKTAG_ZWISCHEN_FEIERTAG_'); ?></div>
 </div>
@@ -312,7 +388,7 @@ $fe_host = fe_e(isset($_SERVER['HTTP_HOST']) ? $_SERVER['HTTP_HOST'] : '<loxberr
 <div class="sm-small"><?php echo fer_t('TEXT.FR_BETRIEBSFERIEN_URLAUB_ODER_SCHU'); ?><br>
 &bull; <b><?php echo fer_t('TEXT.WIE_FERIEN'); ?></b> <?php echo fer_t('TEXT.ZHLT_IN'); ?> <span class="sm-mono"><?php echo fer_t('TEXT.FERIEN'); ?></span>/<span class="sm-mono"><?php echo fer_t('TEXT.SCHULFREI_2'); ?></span>.<br>
 &bull; <b><?php echo fer_t('TEXT.WIE_FEIERTAG'); ?></b> <?php echo fer_t('TEXT.ZUSTZLICH_IN'); ?> <span class="sm-mono"><?php echo fer_t('TEXT.FEIERTAG'); ?></span>.<br>
-&bull; <b<?php echo fer_t('TEXT.URLAUB_ABWESEND_2'); ?></b> <?php echo fer_t('TEXT.BEDEUTET_DAS_HAUS_IST_LEER_ZUSTZLI'); ?>
+&bull; <b><?php echo fer_t('TEXT.URLAUB_ABWESEND_2'); ?></b> <?php echo fer_t('TEXT.BEDEUTET_DAS_HAUS_IST_LEER_ZUSTZLI'); ?>
 <span class="sm-mono"><?php echo fer_t('TEXT.URLAUB_1'); ?></span> <?php echo fer_t('TEXT.GESETZT_DAMIT_LOXONE_AUTOMATISCH_I'); ?> <b><?php echo fer_t('TEXT.URLAUBSMODUS'); ?></b> <?php echo fer_t('TEXT.GEHEN_KANN_ANWESENHEITSSIMULATION_'); ?> <span class="sm-mono"><?php echo fer_t('TEXT.URLAUBENDE_1'); ?></span> <?php echo fer_t('TEXT.AM_LETZTEN_URLAUBSTAG_LSST_SICH_DA'); ?><br>
 <?php echo fer_t('TEXT.DAS_DATUM_BEZEICHNET_GANZE_TAGE_AB'); ?> <span class="sm-mono"><?php echo fer_t('TEXT.URLAUBENDE'); ?></span> <?php echo fer_t('TEXT.WIEDER_AUF_SCHRITT4D_EIN_VORZIEHEN'); ?></div>
 <table class="sm-tbl" style="width:100%;">
@@ -325,8 +401,8 @@ $fe_host = fe_e(isset($_SERVER['HTTP_HOST']) ? $_SERVER['HTTP_HOST'] : '<loxberr
 <td><input data-role="none" type="text" name="own_von[]" value="<?= fe_e($fe_o['von']) ?>" placeholder="2026-08-03"></td>
 <td><input data-role="none" type="text" name="own_bis[]" value="<?= fe_e($fe_o['bis']) ?>" placeholder="2026-08-14"></td>
 <td><select data-role="none" name="own_typ[]">
-    <option value="ferien"<?= ($fe_o['typ'] !== 'feiertag' && $fe_o['typ'] !== 'urlaub') ? ' selected' : '' ?><?php echo fer_t('TEXT.WIE_FERIEN_2'); ?></option>
-    <option value="feiertag"<?= $fe_o['typ'] === 'feiertag' ? ' selected' : '' ?><?php echo fer_t('TEXT.WIE_FEIERTAG_2'); ?></option>
+    <option value="ferien"<?= ($fe_o['typ'] !== 'feiertag' && $fe_o['typ'] !== 'urlaub') ? ' selected' : '' ?>><?php echo fer_t('TEXT.WIE_FERIEN_2'); ?></option>
+    <option value="feiertag"<?= $fe_o['typ'] === 'feiertag' ? ' selected' : '' ?>><?php echo fer_t('TEXT.WIE_FEIERTAG_2'); ?></option>
     <option value="urlaub"<?= $fe_o['typ'] === 'urlaub' ? ' selected' : '' ?>><?php echo fer_t('TEXT.URLAUB_ABWESEND'); ?></option>
 </select></td>
 </tr>
@@ -336,10 +412,10 @@ $fe_host = fe_e(isset($_SERVER['HTTP_HOST']) ? $_SERVER['HTTP_HOST'] : '<loxberr
 <h2><?php echo fer_t('TEXT.BENACHRICHTIGUNGEN'); ?></h2>
 <div style="margin-bottom:10px;">
     <label style="display:inline-flex;align-items:center;gap:6px;margin-right:24px;">
-        <input data-role="none" type="checkbox" name="notify_audio" <?= !empty($fe_notify['audio']) ? 'checked' : '' ?><?php echo fer_t('TEXT.AUDIOAUSGABE_AKTIV'); ?>
+        <input data-role="none" type="checkbox" name="notify_audio" <?= !empty($fe_notify['audio']) ? 'checked' : '' ?>> <?php echo fer_t('TEXT.AUDIOAUSGABE_AKTIV'); ?>
     </label>
     <label style="display:inline-flex;align-items:center;gap:6px;">
-        <input data-role="none" type="checkbox" name="notify_push" <?= !empty($fe_notify['push']) ? 'checked' : '' ?><?php echo fer_t('TEXT.PUSH_NACHRICHT_AKTIV'); ?>
+        <input data-role="none" type="checkbox" name="notify_push" <?= !empty($fe_notify['push']) ? 'checked' : '' ?>> <?php echo fer_t('TEXT.PUSH_NACHRICHT_AKTIV'); ?>
     </label>
     <div class="sm-small"><?php echo fer_t('TEXT.BEIDES_AN_ANSAGE_PUSH_NUR_EINES_AN'); ?> <span class="sm-mono"><?php echo fer_t('TEXT.ANN_1'); ?></span> <?php echo fer_t('TEXT.ANLEITUNG_SCHRITT_4'); ?></div>
 </div>
@@ -351,13 +427,13 @@ $fe_host = fe_e(isset($_SERVER['HTTP_HOST']) ? $_SERVER['HTTP_HOST'] : '<loxberr
     <div>
         <label style="min-height:2.6em;display:flex;align-items:flex-end;"><?php echo fer_t('TEXT.TEXT_2'); ?></label>
         <label style="display:inline-flex;align-items:center;gap:6px;font-weight:600;">
-            <input data-role="none" type="checkbox" name="n_freetag" <?= !empty($fe_notify['freetag']) ? 'checked' : '' ?><?php echo fer_t('TEXT.MELDEN_WENN_MORGEN_SCHULFREI_IST'); ?>
+            <input data-role="none" type="checkbox" name="n_freetag" <?= !empty($fe_notify['freetag']) ? 'checked' : '' ?>> <?php echo fer_t('TEXT.MELDEN_WENN_MORGEN_SCHULFREI_IST'); ?>
         </label><br>
         <label style="display:inline-flex;align-items:center;gap:6px;font-weight:600;">
-            <input data-role="none" type="checkbox" name="n_ferienstart" <?= !empty($fe_notify['ferienstart']) ? 'checked' : '' ?><?php echo fer_t('TEXT.MELDEN_AM_VORABEND_DES_FERIENBEGIN'); ?>
+            <input data-role="none" type="checkbox" name="n_ferienstart" <?= !empty($fe_notify['ferienstart']) ? 'checked' : '' ?>> <?php echo fer_t('TEXT.MELDEN_AM_VORABEND_DES_FERIENBEGIN'); ?>
         </label><br>
         <label style="display:inline-flex;align-items:center;gap:6px;font-weight:600;">
-            <input data-role="none" type="checkbox" name="n_bridge" <?= !empty($fe_notify['bridge_month']) ? 'checked' : '' ?><?php echo fer_t('TEXT.IM_JANUAR_DIE_BRCKENTAGE_DES_JAHRE'); ?>
+            <input data-role="none" type="checkbox" name="n_bridge" <?= !empty($fe_notify['bridge_month']) ? 'checked' : '' ?>> <?php echo fer_t('TEXT.IM_JANUAR_DIE_BRCKENTAGE_DES_JAHRE'); ?>
         </label>
     </div>
 </div>
@@ -367,10 +443,10 @@ $fe_host = fe_e(isset($_SERVER['HTTP_HOST']) ? $_SERVER['HTTP_HOST'] : '<loxberr
     <div>
         <label><?php echo fer_t('TEXT.AUDIO_AUSGABE'); ?></label>
         <select data-role="none" name="tts_mode" id="tts_mode" onchange="feTtsMode()">
-            <option value="musicserver"<?= $fe_tts['mode'] === 'musicserver' ? ' selected' : '' ?><?php echo fer_t('TEXT.LOXONE_MUSIC_SERVER_KLASSISCH'); ?></option>
-            <option value="ms4h"<?= $fe_tts['mode'] === 'ms4h' ? ' selected' : '' ?><?php echo fer_t('TEXT.AUDIOSERVER4HOME_MUSICSERVER4HOME'); ?></option>
-            <option value="audioserver"<?= $fe_tts['mode'] === 'audioserver' ? ' selected' : '' ?><?php echo fer_t('TEXT.ORIGINAL_LOXONE_AUDIOSERVER_VIA_LO'); ?></option>
-            <option value="custom"<?= $fe_tts['mode'] === 'custom' ? ' selected' : '' ?><?php echo fer_t('TEXT.EIGENE_URL_VORLAGE'); ?></option>
+            <option value="musicserver"<?= $fe_tts['mode'] === 'musicserver' ? ' selected' : '' ?>><?php echo fer_t('TEXT.LOXONE_MUSIC_SERVER_KLASSISCH'); ?></option>
+            <option value="ms4h"<?= $fe_tts['mode'] === 'ms4h' ? ' selected' : '' ?>><?php echo fer_t('TEXT.AUDIOSERVER4HOME_MUSICSERVER4HOME'); ?></option>
+            <option value="audioserver"<?= $fe_tts['mode'] === 'audioserver' ? ' selected' : '' ?>><?php echo fer_t('TEXT.ORIGINAL_LOXONE_AUDIOSERVER_VIA_LO'); ?></option>
+            <option value="custom"<?= $fe_tts['mode'] === 'custom' ? ' selected' : '' ?>><?php echo fer_t('TEXT.EIGENE_URL_VORLAGE'); ?></option>
         </select>
     </div>
     <div>
@@ -408,7 +484,7 @@ $fe_host = fe_e(isset($_SERVER['HTTP_HOST']) ? $_SERVER['HTTP_HOST'] : '<loxberr
 
 <h2><?php echo fer_t('TEXT.MQTT_OPTIONAL'); ?></h2>
 <label style="display:inline-flex;align-items:center;gap:6px;">
-    <input data-role="none" type="checkbox" name="mqtt_enabled" <?= !empty($fe_cfg['mqtt_enabled']) ? 'checked' : '' ?><?php echo fer_t('TEXT.ZUSTAND_PER_MQTT_VERFFENTLICHEN'); ?>
+    <input data-role="none" type="checkbox" name="mqtt_enabled" <?= !empty($fe_cfg['mqtt_enabled']) ? 'checked' : '' ?>> <?php echo fer_t('TEXT.ZUSTAND_PER_MQTT_VERFFENTLICHEN'); ?>
 </label>
 <div class="sm-row" style="margin-top:6px;">
     <div>
@@ -432,7 +508,7 @@ $fe_host = fe_e(isset($_SERVER['HTTP_HOST']) ? $_SERVER['HTTP_HOST'] : '<loxberr
 </div>
 
 <!-- ================= Einbindung in Loxone ================= -->
-<div class="sm-pane" id="tab-loxone">
+<div class="sm-pane<?= fe_aktiv('tab-loxone') ?>" id="tab-loxone">
 <h2><?php echo fer_t('TEXT.EINBINDUNG_IN_LOXONE_SCHRITT_FR_SC'); ?></h2>
 <p><?php echo fer_t('TEXT.DER_MINISERVER_BEKOMMT_FERTIG_AUSG'); ?> <b><?php echo fer_t('TEXT.IST_HEUTE_SCHULFREI_IST_MORGEN_SCH'); ?></b>
 <?php echo fer_t('TEXT.DAMIT_LASSEN_SICH_WECKER_MORGEN_BR'); ?></p>
@@ -477,16 +553,16 @@ $fe_host = fe_e(isset($_SERVER['HTTP_HOST']) ? $_SERVER['HTTP_HOST'] : '<loxberr
 <table class="sm-tbl">
 <tr><th><?php echo fer_t('TEXT.BAUSTEIN'); ?></th><th><?php echo fer_t('TEXT.NAME_2'); ?></th><th><?php echo fer_t('TEXT.EINSTELLUNG'); ?></th><th><?php echo fer_t('TEXT.EINGNGE'); ?></th></tr>
 <tr><td><?php echo fer_t('TEXT.SCHWELLWERTSCHALTER_S1'); ?></td><td><?php echo fer_t('TEXT.MORGEN_IST_SCHULTAG'); ?></td><td><?php echo fer_t('TEXT.EIN_0_5_AUS_0_4'); ?></td><td><?php echo fer_t('TEXT.MSCHULTAG'); ?></td></tr>
-<tr><td><?php echo fer_t('TEXT.SCHWELLWERTSCHALTER_S2'); ?></td><td><?php echo fer_t('TEXT.HEUTE_IST_SCHULTAG'); ?></td><td>Ein 0,5 / Aus 0,4</td><td><?php echo fer_t('TEXT.SCHULTAG_2'); ?></td></tr>
+<tr><td><?php echo fer_t('TEXT.SCHWELLWERTSCHALTER_S2'); ?></td><td><?php echo fer_t('TEXT.HEUTE_IST_SCHULTAG'); ?></td><td><?php echo fer_t('TX.SCHWELLE'); ?></td><td><?php echo fer_t('TEXT.SCHULTAG_2'); ?></td></tr>
 <tr><td><?php echo fer_t('TEXT.UND_U1'); ?></td><td><?php echo fer_t('TEXT.WECKER_FREIGEBEN'); ?></td><td><?php echo fer_t('TEXT.AUF_DEN_FREIGABE_EINGANG_DES_WECKE'); ?></td><td><?php echo fer_t('TEXT.S2_EIGENER_SCHALTER_WECKER_AKTIV'); ?></td></tr>
 <tr><td><?php echo fer_t('TEXT.UND_U2'); ?></td><td><?php echo fer_t('TEXT.MORGEN_BRIEFING_FREIGEBEN'); ?></td><td><?php echo fer_t('TEXT.ERSETZT_DIE_BISHERIGE_FERIEN_FEIER'); ?></td><td><?php echo fer_t('TEXT.S2_BRIEFING_SCHALTER'); ?></td></tr>
 <tr><td><?php echo fer_t('TEXT.NICHT_N1_UND_U3'); ?></td><td><?php echo fer_t('TEXT.SPTE_ZEITEN_AN_FREIEN_TAGEN'); ?></td><td><?php echo fer_t('TEXT.Z_B_ROLLLADEN_ERST_8_30_STATT_7_00'); ?></td><td><?php echo fer_t('TEXT.N1_S2_U3_N1_ZEITIMPULS'); ?></td></tr>
 </table>
 <b><?php echo fer_t('TEXT.4B_VORABEND_MELDUNG_MORGEN_IST_FRE'); ?></b>
 <table class="sm-tbl">
-<tr><th>Baustein</th><th>Name</th><th>Einstellung</th><th>Eing&auml;nge</th></tr>
-<tr><td><?php echo fer_t('TEXT.SCHWELLWERTSCHALTER_S3'); ?></td><td><?php echo fer_t('TEXT.MELDEFENSTER_AKTIV'); ?></td><td>Ein 0,5 / Aus 0,4</td><td><?php echo fer_t('TEXT.ANN'); ?></td></tr>
-<tr><td><?php echo fer_t('TEXT.SCHWELLWERTSCHALTER_S4'); ?></td><td><?php echo fer_t('TEXT.PUSH_FREIGEGEBEN'); ?></td><td>Ein 0,5 / Aus 0,4</td><td><?php echo fer_t('TEXT.PUSH'); ?></td></tr>
+<tr><th><?php echo fer_t('TEXT.BAUSTEIN'); ?></th><th><?php echo fer_t('TEXT.NAME_2'); ?></th><th><?php echo fer_t('TEXT.EINSTELLUNG'); ?></th><th><?php echo fer_t('TEXT.EINGNGE'); ?></th></tr>
+<tr><td><?php echo fer_t('TEXT.SCHWELLWERTSCHALTER_S3'); ?></td><td><?php echo fer_t('TEXT.MELDEFENSTER_AKTIV'); ?></td><td><?php echo fer_t('TX.SCHWELLE'); ?></td><td><?php echo fer_t('TEXT.ANN'); ?></td></tr>
+<tr><td><?php echo fer_t('TEXT.SCHWELLWERTSCHALTER_S4'); ?></td><td><?php echo fer_t('TEXT.PUSH_FREIGEGEBEN'); ?></td><td><?php echo fer_t('TX.SCHWELLE'); ?></td><td><?php echo fer_t('TEXT.PUSH'); ?></td></tr>
 <tr><td><?php echo fer_t('TEXT.UND_U4'); ?></td><td><?php echo fer_t('TEXT.FREI_MELDUNG_JETZT'); ?></td><td></td><td><?php echo fer_t('TEXT.S3_S4'); ?></td></tr>
 <tr><td><?php echo fer_t('TEXT.ODER_O1'); ?></td><td><?php echo fer_t('TEXT.PUSH_SAMMLER'); ?></td><td><?php echo fer_t('TEXT.EINZIGE_QUELLE_DES_BENACHRICHTIGUN'); ?></td><td>U4</td></tr>
 <tr><td><?php echo fer_t('TEXT.BENACHRICHTIGUNGS_BAUSTEIN'); ?></td><td><?php echo fer_t('TEXT.PUSH_MORGEN_IST_FREI'); ?></td><td><?php echo fer_t('TEXT.TEXT_Z_B_MORGEN_IST_SCHULFREI_DER_'); ?></td><td><?php echo fer_t('TEXT.O1'); ?></td></tr>
@@ -494,22 +570,22 @@ $fe_host = fe_e(isset($_SERVER['HTTP_HOST']) ? $_SERVER['HTTP_HOST'] : '<loxberr
 </table>
 <b><?php echo fer_t('TEXT.4C_FERIEN_COUNTDOWN_UND_BRCKENTAGE'); ?></b>
 <table class="sm-tbl">
-<tr><th>Baustein</th><th>Name</th><th>Einstellung</th><th>Eing&auml;nge</th></tr>
+<tr><th><?php echo fer_t('TEXT.BAUSTEIN'); ?></th><th><?php echo fer_t('TEXT.NAME_2'); ?></th><th><?php echo fer_t('TEXT.EINSTELLUNG'); ?></th><th><?php echo fer_t('TEXT.EINGNGE'); ?></th></tr>
 <tr><td><?php echo fer_t('TEXT.STATUSBAUSTEIN'); ?></td><td><?php echo fer_t('TEXT.FERIEN_KACHEL'); ?></td><td><?php echo fer_t('TEXT.TEXT_NOCH_V1_0_TAGE_BIS_ZU_DEN_FER'); ?></td><td><?php echo fer_t('TEXT.I1_FERIENIN_I2_FERIENREST'); ?></td></tr>
 <tr><td><?php echo fer_t('TEXT.SCHWELLWERTSCHALTER_S5_IMPULS'); ?></td><td><?php echo fer_t('TEXT.BRCKENTAG_HINWEIS'); ?></td><td><?php echo fer_t('TEXT.S5_AN_MBRUECKE_MIT_EINEM_ZEITIMPUL'); ?></td><td><?php echo fer_t('TEXT.MBRUECKE'); ?></td></tr>
 <tr><td><?php echo fer_t('TEXT.SCHWELLWERTSCHALTER_S6'); ?></td><td><?php echo fer_t('TEXT.FERIENMODUS_ANWESENHEIT'); ?></td><td><?php echo fer_t('TEXT.AN_FERIEN_Z_B_HEIZPROGRAMM_ODER_BE'); ?></td><td><?php echo fer_t('TEXT.FERIEN_3'); ?></td></tr>
 </table>
 <b><?php echo fer_t('TEXT.4D_URLAUBSMODUS_ABWESENHEIT'); ?></b>
 <table class="sm-tbl">
-<tr><th>Baustein</th><th>Name</th><th>Einstellung</th><th>Eing&auml;nge</th></tr>
-<tr><td><?php echo fer_t('TEXT.SCHWELLWERTSCHALTER_S7'); ?></td><td><?php echo fer_t('TEXT.URLAUB_AKTIV'); ?></td><td>Ein 0,5 / Aus 0,4</td><td><?php echo fer_t('TEXT.URLAUB'); ?></td></tr>
-<tr><td><?php echo fer_t('TEXT.SCHWELLWERTSCHALTER_S8'); ?></td><td><?php echo fer_t('TEXT.LETZTER_URLAUBSTAG_2'); ?></td><td>Ein 0,5 / Aus 0,4</td><td><?php echo fer_t('TEXT.URLAUBENDE_2'); ?></td></tr>
-<tr><td><?php echo fer_t('TEXT.ODER_O2'); ?></td><td>Urlaubsmodus</td><td><?php echo fer_t('TEXT.SAMMELT_KALENDER_URLAUB_UND_DEN_HA'); ?></td><td><?php echo fer_t('TEXT.S7_MERKER_URLAUB_MANUELL'); ?></td></tr>
+<tr><th><?php echo fer_t('TEXT.BAUSTEIN'); ?></th><th><?php echo fer_t('TEXT.NAME_2'); ?></th><th><?php echo fer_t('TEXT.EINSTELLUNG'); ?></th><th><?php echo fer_t('TEXT.EINGNGE'); ?></th></tr>
+<tr><td><?php echo fer_t('TEXT.SCHWELLWERTSCHALTER_S7'); ?></td><td><?php echo fer_t('TEXT.URLAUB_AKTIV'); ?></td><td><?php echo fer_t('TX.SCHWELLE'); ?></td><td><?php echo fer_t('TEXT.URLAUB'); ?></td></tr>
+<tr><td><?php echo fer_t('TEXT.SCHWELLWERTSCHALTER_S8'); ?></td><td><?php echo fer_t('TEXT.LETZTER_URLAUBSTAG_2'); ?></td><td><?php echo fer_t('TX.SCHWELLE'); ?></td><td><?php echo fer_t('TEXT.URLAUBENDE_2'); ?></td></tr>
+<tr><td><?php echo fer_t('TEXT.ODER_O2'); ?></td><td><?php echo fer_t('TX.URLAUBSMODUS'); ?></td><td><?php echo fer_t('TEXT.SAMMELT_KALENDER_URLAUB_UND_DEN_HA'); ?></td><td><?php echo fer_t('TEXT.S7_MERKER_URLAUB_MANUELL'); ?></td></tr>
 <tr><td><?php echo fer_t('TEXT.ANWESENHEITSSIMULATION'); ?></td><td><?php echo fer_t('TEXT.TEXT_3'); ?></td><td><?php echo fer_t('TEXT.EINGANG_AKTIVIEREN'); ?></td><td><?php echo fer_t('TEXT.O2'); ?></td></tr>
 <tr><td><?php echo fer_t('TEXT.INTELLIGENTE_RAUMREGELUNG'); ?></td><td><?php echo fer_t('TEXT.HEIZUNG'); ?></td><td><?php echo fer_t('TEXT.EINGANG_FR_DEN_BETRIEBSART_ABSENKB'); ?></td><td>&larr; O2</td></tr>
 <tr><td><?php echo fer_t('TEXT.NICHT_N2_UND_U5'); ?></td><td><?php echo fer_t('TEXT.VORWRMEN_ZUR_RCKKEHR'); ?></td><td><?php echo fer_t('TEXT.S8_HEBT_DIE_ABSENKUNG_AM_LETZTEN_U'); ?></td><td><?php echo fer_t('TEXT.N2_S8_U5_O2_N2_ABSENKUNG'); ?></td></tr>
 <tr><td><?php echo fer_t('TEXT.UND_U6_STECKDOSEN'); ?></td><td><?php echo fer_t('TEXT.VERBRAUCHER_ABSCHALTEN'); ?></td><td><?php echo fer_t('TEXT.AUS_BEFEHL_AN_STECKDOSEN_HANDTUCHH'); ?></td><td>&larr; O2</td></tr>
-<tr><td><?php echo fer_t('TEXT.STATUS'); ?>baustein</td><td><?php echo fer_t('TEXT.URLAUBS_KACHEL'); ?></td><td><?php echo fer_t('TEXT.TEXT_URLAUB_NOCH_V1_0_TAGE_BZW_ABR'); ?></td><td><?php echo fer_t('TEXT.I1_URLAUBREST_I2_URLAUBIN'); ?></td></tr>
+<tr><td><?php echo fer_t('TX.STATUSBAUSTEIN'); ?></td><td><?php echo fer_t('TEXT.URLAUBS_KACHEL'); ?></td><td><?php echo fer_t('TEXT.TEXT_URLAUB_NOCH_V1_0_TAGE_BZW_ABR'); ?></td><td><?php echo fer_t('TEXT.I1_URLAUBREST_I2_URLAUBIN'); ?></td></tr>
 </table>
 <div class="sm-small"><?php echo fer_t('TEXT.WICHTIG_DEN_URLAUBSMODUS_NIE_DIREK'); ?> <b><?php echo fer_t('TEXT.NICHT'); ?></b> <?php echo fer_t('TEXT.ALLEIN_AM_KALENDER_HNGEN_SONDERN_Z'); ?></div>
 <b><?php echo fer_t('TEXT.PRAXIS_ERFAHRUNGEN_ZUM_BENACHRICHT'); ?></b> <?php echo fer_t('TEXT.ER_SENDET_NUR_BEI_EINER_01_FLANKE_'); ?>
@@ -521,8 +597,8 @@ $fe_host = fe_e(isset($_SERVER['HTTP_HOST']) ? $_SERVER['HTTP_HOST'] : '<loxberr
 </div>
 
 <!-- ================= Test ================= -->
-<div class="sm-pane" id="tab-test">
-<h2>Test</h2>
+<div class="sm-pane<?= fe_aktiv('tab-test') ?>" id="tab-test">
+<h2><?php echo fer_t('REITER.TEST'); ?></h2>
 <div class="sm-legende">
 <span><i class="sm-punkt sm-b-lesen"></i> <?php echo fer_t('LEGENDE.LESEN'); ?></span>
 <span><i class="sm-punkt sm-b-technik"></i> <?php echo fer_t('LEGENDE.TECHNIK'); ?></span>
@@ -551,7 +627,7 @@ $fe_host = fe_e(isset($_SERVER['HTTP_HOST']) ? $_SERVER['HTTP_HOST'] : '<loxberr
 </div>
 
 <!-- ================= Brueckentage ================= -->
-<div class="sm-pane" id="tab-bridge">
+<div class="sm-pane<?= fe_aktiv('tab-bridge') ?>" id="tab-bridge">
 <h2><?php echo fer_t('TEXT.BRCKENTAGE_DER_NCHSTEN_12_MONATE'); ?></h2>
 <div class="sm-small" style="margin-bottom:8px;"><?php echo fer_t('TEXT.WERKTAGE_ZWISCHEN_FEIERTAG_UND_WOC'); ?></div>
 <?php if (!empty($fe_st['brueckentage'])) { ?>
@@ -560,30 +636,30 @@ $fe_host = fe_e(isset($_SERVER['HTTP_HOST']) ? $_SERVER['HTTP_HOST'] : '<loxberr
     $fe_ts = strtotime($fe_t);
     $fe_in = (int) floor(($fe_ts - strtotime(date('Y-m-d'))) / 86400);
     $fe_wt = (int) date('N', $fe_ts);
-    $fe_erg = $fe_wt === 5 ? 'langes Wochenende (Do&ndash;So)' : ($fe_wt === 1 ? 'langes Wochenende (Sa&ndash;Di)' : '4 freie Tage am St&uuml;ck'); ?>
+    $fe_erg = $fe_wt === 5 ? fer_t('TX.WE_DOSO') : ($fe_wt === 1 ? fer_t('TX.WE_SADI') : fer_t('TX.WE_VIER')); ?>
 <tr><td><?= fe_e(fe_d($fe_t)) ?></td><td><?= fe_e(date('D', $fe_ts)) ?></td>
-<td><?= $fe_in <= 0 ? 'heute' : $fe_in ?></td><td><?= $fe_erg ?></td></tr>
+<td><?= $fe_in <= 0 ? fer_t('TX.HEUTE') : $fe_in ?></td><td><?= $fe_erg ?></td></tr>
 <?php } ?></table>
 <div class="sm-small" style="margin-top:8px;"><?php echo fer_t('TEXT.EIN_BRUECKENTAG_IST_EIN_WERKTAG_DE'); ?></div>
 <?php } else { ?>
-<div class="sm-alert sm-info"><?php echo fer_t('TEXT.ZURZEIT_SIND_KEINE_BRCKENTAGE_BEKA'); ?> <b>Einstellungen</b><?php echo fer_t('TEXT.OB_BRCKENTAGE_ERKENNEN_AKTIVIERT_U'); ?> <b>Test</b> <?php echo fer_t('TEXT.DIE_DATEN_NEU_AB'); ?></div>
+<div class="sm-alert sm-info"><?php echo fer_t('TEXT.ZURZEIT_SIND_KEINE_BRCKENTAGE_BEKA'); ?> <b><?php echo fer_t('REITER.EINSTELLUNGEN'); ?></b><?php echo fer_t('TEXT.OB_BRCKENTAGE_ERKENNEN_AKTIVIERT_U'); ?> <b><?php echo fer_t('REITER.TEST'); ?></b> <?php echo fer_t('TEXT.DIE_DATEN_NEU_AB'); ?></div>
 <?php } ?>
 </div>
 
 <!-- ================= <?php echo fer_t('TEXT.KOMMENDE_FERIEN'); ?> ================= -->
-<div class="sm-pane" id="tab-vacation">
-<h2>Kommende Ferien</h2>
+<div class="sm-pane<?= fe_aktiv('tab-vacation') ?>" id="tab-vacation">
+<h2><?php echo fer_t('REITER.FERIEN'); ?></h2>
 <?php if (function_exists('fer_data')) { $fe_d = fer_data(); $fe_heute = date('Y-m-d'); ?>
 <div class="sm-small" style="margin-bottom:8px;"><?php echo fer_t('TEXT.SCHULFERIEN_DES_GEWHLTEN_BUNDESLAN'); ?></div>
-<table class="sm-tbl"><tr><th>von</th><th>bis</th><th>Bezeichnung</th><th><?php echo fer_t('TEXT.TAGE'); ?></th><th>Status</th></tr>
+<table class="sm-tbl"><tr><th><?php echo fer_t('TX.SP_VON'); ?></th><th><?php echo fer_t('TX.SP_BIS'); ?></th><th><?php echo fer_t('TX.SP_BEZEICHNUNG'); ?></th><th><?php echo fer_t('TEXT.TAGE'); ?></th><th><?php echo fer_t('TX.SP_STATUS'); ?></th></tr>
 <?php $fe_n = 0; foreach ((array) $fe_d['ferien'] as $fe_e2) {
     if ($fe_e2['bis'] < $fe_heute || $fe_n++ > 14) { continue; }
     $fe_tage = (int) round((strtotime($fe_e2['bis']) - strtotime($fe_e2['von'])) / 86400) + 1;
     $fe_in = (int) floor((strtotime($fe_e2['von']) - strtotime($fe_heute)) / 86400); ?>
 <tr><td><?= fe_e(fe_d($fe_e2['von'])) ?></td><td><?= fe_e(fe_d($fe_e2['bis'])) ?></td>
-<td><?= fe_e($fe_e2['name']) ?><?= !empty($fe_e2['urlaub']) ? ' <span class="sm-small">(Urlaub &mdash; abwesend)</span>' : (!empty($fe_e2['eigen']) ? ' <span class="sm-small">(eigener Termin)</span>' : '') ?></td>
+<td><?= fe_e($fe_e2['name']) ?><?= !empty($fe_e2['urlaub']) ? ' <span class="sm-small">' . fer_t('TEXT.URLAUB_ABWESEND_3') . '</span>' : (!empty($fe_e2['eigen']) ? ' <span class="sm-small">' . fer_t('TEXT.EIGENER_TERMIN') . '</span>' : '') ?></td>
 <td><?= $fe_tage ?></td>
-<td><?= $fe_in <= 0 ? '<b>l&auml;uft</b>' : ('in ' . $fe_in . ' Tag' . ($fe_in === 1 ? '' : 'en')) ?></td></tr>
+<td><?= $fe_in <= 0 ? '<b>' . fer_t('TEXT.LUFT') . '</b>' : sprintf(fer_t($fe_in === 1 ? 'TX.IN_TAG' : 'TX.IN_TAGEN'), $fe_in) ?></td></tr>
 <?php } ?></table>
 <?php } else { ?>
 <div class="sm-alert sm-info"><?php echo fer_t('TEXT.DIE_BIBLIOTHEK_DES_PLUGINS_WURDE_N'); ?></div>
@@ -591,39 +667,48 @@ $fe_host = fe_e(isset($_SERVER['HTTP_HOST']) ? $_SERVER['HTTP_HOST'] : '<loxberr
 </div>
 
 <!-- ================= <?php echo fer_t('TEXT.KOMMENDE_FEIERTAGE'); ?> ================= -->
-<div class="sm-pane" id="tab-holiday">
-<h2>Kommende Feiertage</h2>
+<div class="sm-pane<?= fe_aktiv('tab-holiday') ?>" id="tab-holiday">
+<h2><?php echo fer_t('REITER.FEIERTAGE'); ?></h2>
 <?php if (function_exists('fer_data')) { if (!isset($fe_d)) { $fe_d = fer_data(); } $fe_heute = date('Y-m-d'); ?>
 <div class="sm-small" style="margin-bottom:8px;"><?php echo fer_t('TEXT.GESETZLICHE_FEIERTAGE_DES_GEWHLTEN'); ?></div>
-<table class="sm-tbl"><tr><th>Datum</th><th>Wochentag</th><th>Bezeichnung</th><th>in Tagen</th></tr>
+<table class="sm-tbl"><tr><th><?php echo fer_t('TEXT.DATUM'); ?></th><th><?php echo fer_t('TEXT.WOCHENTAG'); ?></th><th><?php echo fer_t('TX.SP_BEZEICHNUNG'); ?></th><th><?php echo fer_t('TEXT.IN_TAGEN'); ?></th></tr>
 <?php $fe_n = 0; foreach ((array) $fe_d['feiertage'] as $fe_e2) {
     if ($fe_e2['bis'] < $fe_heute || $fe_n++ > 17) { continue; }
     $fe_in = (int) floor((strtotime($fe_e2['von']) - strtotime($fe_heute)) / 86400);
     $fe_wt = (int) date('N', strtotime($fe_e2['von'])); ?>
 <tr><td><?= fe_e(fe_d($fe_e2['von'])) ?></td>
-<td><?= fe_e(date('D', strtotime($fe_e2['von']))) ?><?= ($fe_wt >= 6) ? ' <span class="sm-small">(f&auml;llt aufs Wochenende)</span>' : '' ?></td>
-<td><?= fe_e($fe_e2['name']) ?><?= !empty($fe_e2['eigen']) ? ' <span class="sm-small">(eigener Termin)</span>' : '' ?><?= !empty($fe_e2['ortlich']) ? ' <span class="sm-small">(nur &ouml;rtlich)</span>' : '' ?></td>
+<td><?= fe_e(date('D', strtotime($fe_e2['von']))) ?><?= ($fe_wt >= 6) ? ' <span class="sm-small">' . fer_t('TEXT.FLLT_AUFS_WOCHENENDE') . '</span>' : '' ?></td>
+<td><?= fe_e($fe_e2['name']) ?><?= !empty($fe_e2['eigen']) ? ' <span class="sm-small">' . fer_t('TEXT.EIGENER_TERMIN') . '</span>' : '' ?><?= !empty($fe_e2['ortlich']) ? ' <span class="sm-small">' . fer_t('TEXT.NUR_RTLICH') . '</span>' : '' ?></td>
 <td><?= $fe_in <= 0 ? '<b>heute</b>' : $fe_in ?></td></tr>
 <?php } ?></table>
 <?php } else { ?>
-<div class="sm-alert sm-info">Die Bibliothek des Plugins wurde nicht gefunden &mdash; bitte das Plugin neu installieren.</div>
+<div class="sm-alert sm-info"><?php echo fer_t('TEXT.DIE_BIBLIOTHEK_DES_PLUGINS_WURDE_N'); ?></div>
 <?php } ?>
 </div>
 
 <!-- ================= <?php echo fer_t('TEXT.PROTOKOLL'); ?> ================= -->
-<div class="sm-pane" id="tab-log">
-<h2>Protokoll</h2>
+<div class="sm-pane<?= fe_aktiv('tab-log') ?>" id="tab-log">
+<h2><?php echo fer_t('REITER.LOG'); ?></h2>
 <div class="sm-small" style="margin-bottom:8px;"><?php echo fer_t('TEXT.PROTOKOLLIERT_WERDEN_DATENABRUFE_Z'); ?><br><?php echo fer_t('TEXT.DATEI'); ?> <span class="sm-mono"><?= fe_e($fe_logfile) ?></span></div>
 <?php if ($fe_loglines) { ?>
 <div class="sm-log"><?= fe_e(implode("\n", $fe_loglines)) ?></div>
 <?php } else { ?>
 <div class="sm-alert sm-info"><?php echo fer_t('TEXT.NOCH_KEINE_PROTOKOLL_EINTRGE_VORHA'); ?></div>
 <?php } ?>
-<form action="index.php" method="post" style="margin-top:10px;">
+<div class="sm-legende">
+<span><i class="sm-punkt sm-b-aktion"></i> <?php echo fer_t('LEGENDE.AKTION'); ?></span>
+</div>
+<div class="sm-knopfreihe">
+<form action="index.php" method="post">
     <input data-role="none" type="hidden" name="clearlog" value="1">
     <input data-role="none" type="hidden" name="activetab" value="tab-log">
-    <button data-role="none" class="sm-btn" type="submit" style="background:#c62828;"><?php echo fer_t('TEXT.PROTOKOLL_LEEREN'); ?></button>
+    <?php /* Orange, nicht rot: Rot ist im Hausstandard nicht vorgesehen -
+       es liest sich als Warnung vor einer Gefahr, und ein geleertes
+       Protokoll ist keine. Die Farbe sagt hier nur: dieser Knopf
+       veraendert etwas. */ ?>
+    <button data-role="none" class="sm-btn sm-b-aktion" type="submit"><?php echo fer_t('TEXT.PROTOKOLL_LEEREN'); ?></button>
 </form>
+</div>
 </div>
 
 </div>
@@ -640,8 +725,18 @@ function feTtsMode() {
     function activate(id) {
         tabs.forEach(function (t) { t.classList.toggle('sm-active', t.dataset.pane === id); });
         document.querySelectorAll('.sm-pane').forEach(function (p) { p.classList.toggle('sm-active', p.id === id); });
+        // Damit ein Absenden im richtigen Reiter zurueckkommt.
+        document.querySelectorAll('input[name="activetab"]').forEach(function (f) { f.value = id; });
     }
-    tabs.forEach(function (t) { t.addEventListener('click', function () { activate(t.dataset.pane); }); });
+    tabs.forEach(function (t) {
+        t.addEventListener('click', function (ev) {
+            // Ohne JavaScript folgt der Browser dem href und der Server
+            // liefert den richtigen Reiter. Mit JavaScript geht es schneller
+            // ohne Neuladen - deshalb hier den Verweis abfangen.
+            ev.preventDefault();
+            activate(t.dataset.pane);
+        });
+    });
     activate(<?= json_encode($fe_tab) ?>);
     feTtsMode();
 })();

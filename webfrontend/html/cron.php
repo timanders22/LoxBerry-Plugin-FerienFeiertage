@@ -9,6 +9,26 @@
 
 require_once __DIR__ . '/ferien_lib.php';
 
+/*
+ * Nur ein Lauf gleichzeitig.
+ *
+ * Der Minutencron startet dieses Skript jede Minute neu, ein Durchlauf kann
+ * aber deutlich laenger dauern: fer_http wartet je Endpunkt bis zu 20 s, bei
+ * Schulferien UND Feiertagen sind das 40 s, dazu kommt im Zweifel eine
+ * Ansage mit weiteren 10 s. Haengt openholidaysapi.org, stapeln sich die
+ * Laeufe - und jeder von ihnen schreibt am Ende in dieselben Dateien.
+ *
+ * Ist schon einer unterwegs, endet dieser Lauf ruhig. Das ist kein Fehler,
+ * sondern der Normalfall bei einer langsamen Gegenstelle, und gehoert
+ * deshalb auch nicht ins Protokoll - sonst stuende es alle sechzig Sekunden
+ * darin.
+ */
+$fer_lock = fer_sperre('cron');
+if ($fer_lock === false) {
+    echo "BUSY\n";
+    exit(0);
+}
+
 $st = fer_state();
 // Nachladen, wenn die Daten bald auslaufen (hoechstens einmal taeglich versuchen)
 $force = false;
@@ -38,4 +58,7 @@ if ($sig !== $old || !is_file($beat) || time() - filemtime($beat) > 1800) {
 foreach (glob(fer_tmpdir() . '/renew_*') ?: array() as $f) {
     if (basename($f) !== 'renew_' . date('Ymd')) { @unlink($f); }
 }
+
+flock($fer_lock, LOCK_UN);
+fclose($fer_lock);
 echo "OK\n";

@@ -90,6 +90,77 @@ function fer_config() {
     return $cfg;
 }
 
+/**
+ * JSON in eine Datei schreiben - ganz oder gar nicht.
+ *
+ * Zwei Fallen stecken darin, und das Plugin ist bis 1.0.1 in beide getreten:
+ *
+ * 1. json_encode liefert bei ungueltigem UTF-8 nicht etwa eine Ausnahme,
+ *    sondern false. file_put_contents($pfad, false) schreibt daraufhin eine
+ *    Datei mit NULL Bytes - und gibt 0 zurueck, nicht false. Der Aufrufer
+ *    haelt das fuer einen Erfolg und hat eine leere Datei.
+ * 2. Wird direkt in die Zieldatei geschrieben, kann ein gleichzeitig
+ *    lesender Prozess sie halb gefuellt erwischen. Beim Zustand passiert das
+ *    regelmaessig: der Cron schreibt state.json, waehrend Loxone ferien.php
+ *    abruft. Ergebnis: json_decode scheitert, und Loxone bekommt Nullen.
+ *
+ * Deshalb: erst in eine eigene Datei mit unverwechselbarem Namen (Prozess-
+ * nummer plus Zufall - zwei Cron-Laeufe duerfen sich nicht gegenseitig die
+ * Zwischendatei wegziehen), dann rename(). rename() ist innerhalb eines
+ * Dateisystems unteilbar: ein Leser sieht entweder die alte oder die neue
+ * Datei, nie eine halbe.
+ */
+function fer_json_schreiben($pfad, $daten) {
+    $js = json_encode($daten, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+    if ($js === false) {
+        fer_log('FEHLER: ' . basename($pfad) . ' konnte nicht erzeugt werden ('
+            . json_last_error_msg() . ') - die vorhandene Datei bleibt unveraendert.');
+        return false;
+    }
+    $verz = dirname($pfad);
+    if (!is_dir($verz)) { @mkdir($verz, 0775, true); }
+    $tmp = $pfad . '.' . getmypid() . '.' . mt_rand(1000, 9999) . '.tmp';
+    if (@file_put_contents($tmp, $js) === false) {
+        fer_log('FEHLER: ' . $tmp . ' liess sich nicht schreiben - Platz? Rechte?');
+        return false;
+    }
+    if (!@rename($tmp, $pfad)) {
+        @unlink($tmp);
+        fer_log('FEHLER: ' . basename($pfad) . ' liess sich nicht ersetzen.');
+        return false;
+    }
+    return true;
+}
+
+/**
+ * Eine Sperre, damit sich zwei Laeufe nicht ueberholen.
+ *
+ * Der Minutencron startet cron.php jede Minute neu. Ein Durchlauf kann
+ * laenger dauern: fer_http wartet bis zu 20 s je Endpunkt, bei zwei
+ * Endpunkten sind das 40 s, dazu kommt im Zweifel noch eine Ansage mit
+ * 10 s. Haengt openholidaysapi.org, stapeln sich die Laeufe - und jeder von
+ * ihnen schreibt am Ende in dieselben Dateien.
+ *
+ * Rueckgabe: der offene Dateizeiger (den der Aufrufer offen halten muss,
+ * denn mit ihm faellt die Sperre) oder false, wenn schon jemand laeuft.
+ */
+function fer_sperre($name = 'cron') {
+    $f = fer_tmpdir() . '/' . preg_replace('/[^a-z0-9_]/', '', $name) . '.lock';
+    $fh = @fopen($f, 'c');
+    if ($fh === false) {
+        // Nicht stillschweigend weiterlaufen: ohne Sperre ist der Schaden
+        // groesser als ohne Lauf, und ohne Meldung sucht niemand danach.
+        fer_log('WARNUNG: Sperrdatei ' . $f . ' laesst sich nicht oeffnen - '
+              . 'Platz im Verzeichnis und Eigentuemer pruefen.');
+        return false;
+    }
+    if (!flock($fh, LOCK_EX | LOCK_NB)) {
+        fclose($fh);
+        return false;
+    }
+    return $fh;
+}
+
 function fer_tmpdir() {
     $p = fer_paths();
     if (!is_dir($p['tmp'])) { @mkdir($p['tmp'], 0775, true); }
@@ -211,7 +282,7 @@ function fer_fetch($force = false) {
     }
     usort($out['ferien'], function ($a, $b) { return strcmp($a['von'], $b['von']); });
     usort($out['feiertage'], function ($a, $b) { return strcmp($a['von'], $b['von']); });
-    file_put_contents($f, json_encode($out));
+    fer_json_schreiben($f, $out);
     @unlink(fer_tmpdir() . '/state.json');
     fer_log('Daten abgerufen: ' . count($out['ferien']) . ' Ferienzeitraeume, '
         . count($out['feiertage']) . ' Feiertage (' . $land . ($sub !== '' ? '/' . $sub : '') . ', bis ' . $bis . ')');
@@ -439,7 +510,7 @@ function fer_state($force = false) {
     if ($st['ok'] && $st['reicht_bis'] !== '' && $st['reicht_bis'] < date('Y-m-d', strtotime('+60 days'))) {
         $st['warnung'] = 1;
     }
-    file_put_contents($cache, json_encode($st));
+    fer_json_schreiben($cache, $st);
     fer_log_if_changed('zustand', 'heute frei=' . $st['heute']['schulfrei'] . ' (' . $st['heute']['ferien_name']
         . $st['heute']['feiertag_name'] . ') | morgen frei=' . $st['morgen']['schulfrei']
         . ' | Urlaub=' . $st['urlaub']['aktiv'] . ($st['urlaub']['aktiv'] ? ' (' . $st['urlaub']['name'] . ', noch ' . $st['urlaub']['rest'] . ' Tage)' : ''));
@@ -459,10 +530,29 @@ function fer_mqtt_publish($st = null) {
     }
     if ($st === null) { $st = fer_state(); }
     $gen = @json_decode((string) @file_get_contents($p['lbhome'] . '/config/system/general.json'), true);
+    // is_array() vor dem verschachtelten Zugriff.
+    //
+    // Zur Einordnung: ein toedlicher Fehler drohte hier NICHT. Waere
+    // $gen['Mqtt'] eine Zeichenkette, gaebe isset($gen['Mqtt']['Udpinport'])
+    // seit PHP 7.1 schlicht false zurueck - isset() loest bei unzulaessigen
+    // Zeichenketten-Positionen keinen Fehler aus, das ist ausdruecklich so
+    // dokumentiert. Der Zugriff dahinter wird dann gar nicht erst erreicht.
+    //
+    // Ein anderer Fall ist aber real: bei einer Zeichenkette mit Inhalt
+    // wuerde 'Udpinport' zu Position 0 verrechnet, isset waere WAHR, und der
+    // Port ergaebe sich aus dem ersten Buchstaben. Das Plugin schickte seine
+    // Meldungen dann an einen ausgewuerfelten Port. Dagegen hilft is_array,
+    // und deshalb steht es jetzt da.
     $udpport = 0;
-    if (isset($gen['Mqtt']['Udpinport'])) { $udpport = (int) $gen['Mqtt']['Udpinport']; }
-    if (!$udpport && isset($gen['mqtt']['udpinport'])) { $udpport = (int) $gen['mqtt']['udpinport']; }
-    if (!$udpport) {
+    if (isset($gen['Mqtt']) && is_array($gen['Mqtt']) && isset($gen['Mqtt']['Udpinport'])) {
+        $udpport = (int) $gen['Mqtt']['Udpinport'];
+    }
+    if (!$udpport && isset($gen['mqtt']) && is_array($gen['mqtt']) && isset($gen['mqtt']['udpinport'])) {
+        $udpport = (int) $gen['mqtt']['udpinport'];
+    }
+    if ($udpport < 1 || $udpport > 65535) {
+        fer_log_if_changed('mqtt', 'kein brauchbarer UDP-Eingangsport in der general.json'
+            . ' - ist das MQTT-Gateway eingerichtet?');
         return;
     }
     $prefix = trim((string) $cfg['mqtt_topic']) !== '' ? trim((string) $cfg['mqtt_topic']) : 'ferien';
@@ -485,12 +575,51 @@ function fer_mqtt_publish($st = null) {
         'feiertag_name' => $st['feiertag_naechster']['name'] !== '' ? $st['feiertag_naechster']['name'] : '-',
     );
     $s = @socket_create(AF_INET, SOCK_DGRAM, SOL_UDP);
-    if (!$s) { return; }
+    if (!$s) {
+        fer_log_if_changed('mqtt', 'UDP-Socket liess sich nicht anlegen -'
+            . ' fehlt die PHP-Erweiterung sockets?');
+        return;
+    }
+    $gesendet = 0;
     foreach ($m as $k => $v) {
-        $msg = 'publish ' . $prefix . '/' . $k . ' ' . $v;
-        @socket_sendto($s, $msg, strlen($msg), 0, '127.0.0.1', $udpport);
+        $msg = 'publish ' . fer_mqtt_thema($prefix . '/' . $k) . ' ' . fer_mqtt_nutzlast($v);
+        if (@socket_sendto($s, $msg, strlen($msg), 0, '127.0.0.1', $udpport) !== false) {
+            $gesendet++;
+        }
     }
     socket_close($s);
+    fer_log_if_changed('mqtt', $gesendet . ' von ' . count($m) . ' Werten gesendet (Port ' . $udpport . ')');
+}
+
+/**
+ * Ein Thema fuer das LoxBerry-MQTT-Gateway.
+ *
+ * Das Gateway liest die UDP-Zeile als drei Teile: Verb, Thema, Rest. Getrennt
+ * wird an Leerzeichen - ein Leerzeichen IM Thema verschiebt alles dahinter.
+ * mqtt_topic ist zwar in der Oberflaeche schon gefiltert, aber die Schluessel
+ * kommen aus dem Feld-Bauplan und koennten sich spaeter aendern. Gefiltert
+ * wird deshalb dort, wo es zaehlt: unmittelbar vor dem Senden.
+ */
+function fer_mqtt_thema($thema) {
+    $t = preg_replace('#[^A-Za-z0-9_/\-]#', '_', (string) $thema);
+    return trim(preg_replace('#/+#', '/', $t), '/');
+}
+
+/**
+ * Eine Nutzlast fuer das MQTT-Gateway.
+ *
+ * Zeilenumbrueche muessen weg: das Gateway liest zeilenweise. Ein Umbruch
+ * mitten in der Nutzlast macht aus einer Nachricht zwei - die zweite beginnt
+ * nicht mit 'publish' und wird verworfen, der Rest des Wertes ist verloren.
+ *
+ * Das ist hier keine Theorie: 'name', 'ferien_name', 'urlaub_name' und
+ * 'feiertag_name' stammen aus der OpenHolidays-Antwort bzw. aus einem selbst
+ * eingetragenen Termin. Leerzeichen darin sind voellig in Ordnung (das
+ * Gateway nimmt den ganzen Rest der Zeile als Nutzlast) - Umbrueche nicht.
+ */
+function fer_mqtt_nutzlast($wert) {
+    $w = str_replace(array("\r\n", "\r", "\n", "\t"), ' ', (string) $wert);
+    return trim(preg_replace('/ {2,}/', ' ', $w));
 }
 
 /* ---------------- Ansage (TTS) - identisch zu den anderen Plugins ---------------- */
@@ -558,16 +687,54 @@ function fer_announce_text($st = null) {
     return '';
 }
 
-/** Meldefenster fuer Loxone: 1 in den ersten 10 Minuten nach der Meldezeit. */
-function fer_ann_active($st = null) {
+/**
+ * Der heutige Zeitpunkt der Meldezeit als Zeitstempel.
+ *
+ * Eine Stelle fuer beide Verwendungen - das Meldefenster fuer Loxone und die
+ * eigene Ansage. Bis 1.0.1 rechneten beide getrennt, und sie rechneten
+ * unterschiedlich.
+ */
+function fer_ann_start() {
     $cfg = fer_config();
+    $when = preg_match('/^\d{1,2}:\d{2}$/', (string) $cfg['notify']['time']) ? $cfg['notify']['time'] : '19:00';
+    list($hh, $mm) = explode(':', $when);
+    $hh = max(0, min(23, (int) $hh));
+    $mm = max(0, min(59, (int) $mm));
+    return mktime($hh, $mm, 0);
+}
+
+/**
+ * Wie lange nach der Meldezeit darf noch angesagt werden?
+ *
+ * Der Minutencron ist nicht puenktlich. Ist der LoxBerry beschaeftigt oder
+ * haengt ein anderes Plugin in der Warteschlange, kommt der Lauf statt um
+ * 19:00:05 erst um 19:01:02 - und eine Pruefung auf die Minute genau laesst
+ * die Ansage des Tages ersatzlos ausfallen.
+ *
+ * Eine Stunde Nachlauf faengt das ab, auch einen kurzen Stromausfall am
+ * Abend. Sie ist zugleich die Obergrenze: ein LoxBerry, der erst um drei Uhr
+ * nachts hochfaehrt, soll NICHT noch verkuenden, dass morgen schulfrei ist.
+ * Dass die Ansage dann ausfaellt, ist die richtige Antwort.
+ */
+define('FER_ANN_NACHLAUF', 3600);
+
+/**
+ * Meldefenster fuer Loxone: 1 in den ersten 10 Minuten nach der Meldezeit.
+ *
+ * Die zehn Minuten bleiben BEWUSST stehen, obwohl die eigene Ansage eine
+ * Stunde Nachlauf hat. Dieser Wert geht als ANN= an den Miniserver, und dort
+ * haengt er ueblicherweise an einem Schwellwertschalter, der auf die Flanke
+ * reagiert. Ein Fenster, das eine Stunde offen steht, waere kein Impuls mehr
+ * und wuerde bestehende Loxone-Programme veraendern. Kommt der Cron sehr
+ * spaet, sagt das Plugin also selbst noch an, waehrend ANN= schon wieder 0
+ * ist - im Reiter Einbindung in Loxone steht das auch so.
+ */
+function fer_ann_active($st = null) {
     if ($st === null) { $st = fer_state(); }
     if (fer_announce_text($st) === '') {
         return 0;
     }
-    $when = preg_match('/^\d{1,2}:\d{2}$/', (string) $cfg['notify']['time']) ? $cfg['notify']['time'] : '19:00';
-    list($hh, $mm) = explode(':', $when);
-    $start = mktime((int) $hh, (int) $mm, 0);
+    $start = fer_ann_start();
     return (time() >= $start && time() < $start + 600) ? 1 : 0;
 }
 
@@ -576,21 +743,64 @@ function fer_ptest_active() {
     return (is_file($f) && time() - filemtime($f) < 300) ? 1 : 0;
 }
 
+/**
+ * Darf zu diesem Anlass gemeldet werden?
+ *
+ * Bis 1.0.1 fragte diese Entscheidung nur 'freetag' ab - das Haekchen
+ * "Melden am Vorabend des Ferienbeginns" in der Oberflaeche hatte damit
+ * KEINE Wirkung. Wer nur den Ferienbeginn gemeldet haben wollte und
+ * 'freetag' abwaehlte, bekam gar nichts mehr.
+ *
+ * Am Ferienbeginn gilt jetzt ODER, nicht ENTWEDER-ODER: es genuegt, wenn
+ * EINES der beiden Haekchen gesetzt ist. Das ist Absicht. Ein UND oder ein
+ * Umschalten haette bei jeder Anlage, die bisher nur 'freetag' gesetzt
+ * hatte, eine Ansage STILL entfallen lassen - und ausgefallene Ansagen sind
+ * genau das, was hier repariert werden soll. Niemand verliert etwas, was er
+ * heute bekommt; wer 'ferienstart' allein setzt, bekommt endlich das, was
+ * das Haekchen verspricht.
+ */
+function fer_ann_erlaubt($st, $cfg = null) {
+    if ($cfg === null) { $cfg = fer_config(); }
+    $m = $st['morgen'];
+    // Ferienbeginn: morgen Ferien, heute noch nicht.
+    if (!empty($m['ferien']) && empty($st['heute']['ferien'])) {
+        return (!empty($cfg['notify']['ferienstart']) || !empty($cfg['notify']['freetag'])) ? 1 : 0;
+    }
+    if (!empty($m['feiertag']) || !empty($m['ferien'])) {
+        return !empty($cfg['notify']['freetag']) ? 1 : 0;
+    }
+    // Brueckentag: eigener Anlass, an das Januar-Haekchen NICHT gekoppelt -
+    // das steuert nur die Jahresuebersicht.
+    return !empty($m['bruecke']) ? 1 : 0;
+}
+
 /** Cron: Vorabend-Ansage (einmal taeglich) und Brueckentags-Uebersicht im Januar. */
 function fer_announce_check() {
     $cfg = fer_config();
     $st = fer_state();
     if (!empty($cfg['notify']['audio'])) {
-        $when = preg_match('/^\d{1,2}:\d{2}$/', (string) $cfg['notify']['time']) ? $cfg['notify']['time'] : '19:00';
-        list($hh, $mm) = explode(':', $when);
-        if (date('H:i') === sprintf('%02d:%02d', (int) $hh, (int) $mm)) {
+        // Verglichen wird ueber Zeitstempel, NICHT ueber date('H:i').
+        //
+        // Bis 1.0.1 stand hier date('H:i') === '19:00'. Traf der Cron die
+        // Minute nicht - und der Minutencron trifft sie nicht zuverlaessig -,
+        // fiel die Ansage des Tages ersatzlos aus. Aufgefallen ist das kaum,
+        // weil es meistens klappte; genau das macht solche Fehler zaeh.
+        //
+        // Die Merkdatei said_<Datum> sorgt weiterhin dafuer, dass es bei
+        // EINER Ansage je Tag bleibt, auch wenn der Cron sechzigmal
+        // vorbeikommt.
+        $start = fer_ann_start();
+        if (time() >= $start && time() < $start + FER_ANN_NACHLAUF) {
             $flag = fer_tmpdir() . '/said_' . date('Ymd');
             if (!is_file($flag)) {
                 @file_put_contents($flag, '1');
                 $txt = fer_announce_text($st);
-                $erlaubt = ($st['morgen']['feiertag'] || $st['morgen']['ferien']) ? !empty($cfg['notify']['freetag'])
-                         : ($st['morgen']['bruecke'] ? 1 : 0);
+                $erlaubt = fer_ann_erlaubt($st, $cfg);
                 if ($txt !== '' && $erlaubt) {
+                    if (time() > $start + 90) {
+                        fer_log('Ansage verspaetet (' . (int) ((time() - $start) / 60)
+                            . ' min nach der Meldezeit) - der Minutencron war nicht puenktlich.');
+                    }
                     fer_say($txt);
                 }
             }
@@ -639,7 +849,7 @@ function fer_subdivisions($land = 'DE') {
         }
     }
     if ($out) {
-        file_put_contents($cache, json_encode($out));
+        fer_json_schreiben($cache, $out);
     }
     return $out;
 }
