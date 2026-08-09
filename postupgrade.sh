@@ -41,5 +41,19 @@ fi
 rm -f /tmp/ferien/state.json /tmp/ferien/mqtt_sig.txt 2>/dev/null
 
 rm -rf "$BASE/data/plugins/$PFOLDER/upgrade_sicherung" 2>/dev/null
+
+# Altlast aus 1.1.0 und frueher: cron.php lag im HTML-Verzeichnis und war damit
+# fuer jeden im Heimnetz per HTTP abrufbar - ein Aufruf stiess einen ganzen
+# Durchlauf an (Abruf, MQTT, im Zweifel eine Ansage). Seit 1.1.1 liegt die Datei
+# unter bin/ und wird nur noch vom Cron ueber die Kommandozeile aufgerufen.
+#
+# Diese Zeile steht hier, weil sie nichts kostet und der Zweck des Umzugs sonst
+# davon abhinge, dass das Update das alte HTML-Verzeichnis restlos ersetzt.
+ALT="$BASE/webfrontend/html/plugins/$PFOLDER/cron.php"
+if [ -f "$ALT" ]; then
+    rm -f "$ALT"
+    echo "<OK> Alte, ueber HTTP erreichbare cron.php entfernt."
+fi
+
 echo "<OK> Update abgeschlossen."
 exit 0

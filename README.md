@@ -64,6 +64,30 @@ MIT — siehe [LICENSE](LICENSE).
 
 ## Änderungen
 
+### 1.1.1
+
+- **`cron.php` liegt jetzt unter `bin/` statt unter `webfrontend/html/`.**
+  Aufgerufen wird die Datei ausschließlich vom Minutencron, und zwar über die
+  PHP-Kommandozeile — nie über HTTP. Im HTML-Verzeichnis war sie zusätzlich für
+  jeden im Heimnetz abrufbar, und ein Aufruf stößt einen vollständigen
+  Durchlauf an: Abruf bei openholidaysapi.org, MQTT-Meldung, im Zweifel eine
+  Ansage über den Audioserver. Ein Weg, den von außen niemand braucht, sollte
+  von außen auch nicht erreichbar sein.
+
+  `cron/cron.01min` ruft die Datei jetzt über `REPLACELBPBINDIR` auf.
+  `ferien_lib.php` bleibt im HTML-Verzeichnis, weil dort auch `ferien.php`
+  liegt — der Endpunkt für den Miniserver; `cron.php` findet die Bibliothek
+  über dieselbe Marke, mit einem Rückfall für den Lauf aus dem ausgepackten
+  Archiv. Bleibt beides erfolglos, bricht das Skript mit einer Meldung ab,
+  statt still nichts zu tun.
+
+  `postupgrade.sh` entfernt eine aus 1.1.0 stehengebliebene `cron.php` aus dem
+  HTML-Verzeichnis — sonst hinge der Zweck des Umzugs davon ab, dass das Update
+  das alte Verzeichnis restlos ersetzt.
+
+- **An den Loxone-Adressen ändert sich nichts.** `ferien.php` bleibt, wo es
+  ist, mit denselben Parametern.
+
 ### 1.1.0
 
 - **Verpasste Ansagen.** Die Vorabend-Ansage prüfte auf die Minute genau

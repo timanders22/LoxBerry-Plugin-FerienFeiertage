@@ -5,9 +5,33 @@
  * 1. Daten woechentlich nachladen (und automatisch, wenn sie bald auslaufen).
  * 2. Zustand aktualisieren, bei Aenderung per MQTT melden (sonst halbstuendlich).
  * 3. Vorabend-Ansage und Brueckentags-Uebersicht im Januar.
+ *
+ * WARUM DIESE DATEI IN bin/ LIEGT UND NICHT MEHR IN webfrontend/html/
+ *
+ * Aufgerufen wird sie ausschliesslich vom Minutencron, und zwar ueber die
+ * PHP-Kommandozeile - nicht ueber HTTP. Im HTML-Verzeichnis war sie darueber
+ * hinaus fuer jeden im Heimnetz abrufbar, und ein Aufruf stoesst einen
+ * vollstaendigen Durchlauf an: Abruf bei openholidaysapi.org, MQTT-Meldung,
+ * im Zweifel eine Ansage ueber den Audioserver. Ein Weg, der von aussen nicht
+ * gebraucht wird, sollte von aussen auch nicht erreichbar sein.
  */
 
-require_once __DIR__ . '/ferien_lib.php';
+/*
+ * ferien_lib.php bleibt im HTML-Verzeichnis - dort liegt auch ferien.php, der
+ * Endpunkt fuer den Miniserver. LoxBerry ersetzt die Marke bei der
+ * Installation durch den Plugin-HTML-Pfad; laeuft dieses Skript aus dem
+ * ausgepackten Archiv heraus, steht sie noch unveraendert da, und der Pfad
+ * wird relativ zu dieser Datei gebildet.
+ */
+$fer_htmldir = 'REPLACELBPHTMLDIR';
+if (strpos($fer_htmldir, 'REPLACE') === 0 || !is_file($fer_htmldir . '/ferien_lib.php')) {
+    $fer_htmldir = dirname(__DIR__) . '/webfrontend/html';
+}
+if (!is_file($fer_htmldir . '/ferien_lib.php')) {
+    fwrite(STDERR, "ferien_lib.php nicht gefunden (gesucht in $fer_htmldir)\n");
+    exit(1);
+}
+require_once $fer_htmldir . '/ferien_lib.php';
 
 /*
  * Nur ein Lauf gleichzeitig.
