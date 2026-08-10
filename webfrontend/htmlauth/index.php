@@ -206,7 +206,7 @@ function fe_e($s) { return htmlspecialchars((string) $s, ENT_QUOTES, 'UTF-8'); }
 function fe_d($iso) { return preg_match('/^\d{4}-\d{2}-\d{2}$/', (string) $iso) ? date('d.m.Y', strtotime($iso)) : '-'; }
 
 $fe_frame = class_exists('LBWeb', false);
-if ($fe_frame) { LBWeb::lbheader('Ferien und Feiertage', 'https://wiki.loxberry.de/', ''); }
+if ($fe_frame) { LBWeb::lbheader('Ferien und Feiertage', 'https://wiki.loxberry.de/', 'help.html'); }
 $fe_host = fe_e(isset($_SERVER['HTTP_HOST']) ? $_SERVER['HTTP_HOST'] : '<loxberry-ip>');
 ?>
 <style>

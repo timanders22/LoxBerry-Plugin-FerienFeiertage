@@ -1,27 +1,27 @@
-<h2>Ferien und Feiertage</h2>
+<h2><TMPL_VAR HILFE.K01></h2>
 
-<p>Liefert <b>Schulferien und gesetzliche Feiertage</b> an Loxone — automatisch, ohne jährliches Nachpflegen von Terminlisten. Damit lassen sich Wecker, Morgen-Briefing, Rollladen- und Heizzeiten an freie Tage anpassen.</p>
+<p><TMPL_VAR HILFE.K02></p>
 
-<p>Datenquelle: <b>openholidaysapi.org</b> (amtliche Daten, kostenlos, kein Konto). Unterstützt Deutschland, Österreich, Schweiz und weitere Länder mit ihren Bundesländern/Kantonen.</p>
+<p><TMPL_VAR HILFE.K03></p>
 
-<p>Kompatibel mit LoxBerry 3.x und <b>LoxBerry 4</b> (reines PHP, PHP 7.4 und 8.x).</p>
+<p><TMPL_VAR HILFE.K04></p>
 
-<h3>Funktionen</h3>
+<h3><TMPL_VAR HILFE.K05></h3>
 
-<ul><li><b>Heute und morgen</b> getrennt ausgewertet: Ferien, Feiertag, Wochenende, schulfrei, Schultag</li><li><b><code>MSCHULTAG</code></b> — „morgen ist Schultag": der Schlüsselwert für Wecker- und Abendlogik, ohne den man Ferien immer zu spät bemerkt</li><li><b>Brückentage</b> werden erkannt (Werktag zwischen Feiertag und Wochenende) — inklusive Jahresübersicht im Januar, gut für die Urlaubsplanung</li><li><b>Countdown</b>: Tage bis zu den nächsten Ferien, verbleibende Ferientage, Tage bis zum nächsten Feiertag, Name des laufenden Feiertags/der Ferien</li><li><b>Arbeitsort/Gemeinde</b> für die drei Feiertage, die nicht im ganzen Bundesland gelten: Friedensfest (nur Stadt Augsburg), Mariä Himmelfahrt (in Bayern nur in den ~1.700 überwiegend katholischen Gemeinden) und Fronleichnam (in Sachsen und Thüringen nur in bestimmten katholischen Gemeinden). Die Datenquelle kennt davon nur Augsburg — die beiden anderen Fälle rechnet das Plugin selbst (Fronleichnam über das Osterdatum + 60 Tage)</li><li><b>Eigene Termine</b> (bis zu 6): Betriebsferien, Urlaub, schulfreie Tage — wahlweise „wie Ferien", „wie Feiertag" oder <b>„Urlaub (abwesend)"</b></li><li><b>Urlaubsmodus</b>: Termine der Art „Urlaub (abwesend)" liefern zusätzlich <code>URLAUB</code>, <code>MURLAUB</code>, <code>URLAUBIN</code>, <code>URLAUBREST</code>, <code>URLAUBDAUER</code> und <code>URLAUBENDE</code>. Damit fährt die Haussteuerung automatisch in den Urlaubsmodus (Anwesenheitssimulation, Temperaturabsenkung, Steckdosen aus) und hebt ihn am letzten Urlaubstag rechtzeitig wieder auf, damit das Haus zur Rückkehr warm ist</li><li><b>Vorabend-Ansage</b> (TTS) „Morgen ist schulfrei" und Push-Auslöser für Loxone</li><li><b>MQTT</b> über das LoxBerry MQTT Gateway, <b>JSON</b> für Drittsoftware</li><li>Daten für 18 Monate im Voraus, lokal gespeichert (läuft auch ohne Internet weiter), automatisches Nachladen vor dem Auslaufen — kein Jahreswechsel-Problem</li><li>Reiter: Einstellungen, Einbindung in Loxone (Schritt-für-Schritt inkl. kompletter Baustein-Liste), Brückentage, Kommende Ferien, Kommende Feiertage, Test, Protokoll</li></ul>
+<ul><li><TMPL_VAR HILFE.K06></li><li><TMPL_VAR HILFE.K07></li><li><TMPL_VAR HILFE.K08></li><li><TMPL_VAR HILFE.K09></li><li><TMPL_VAR HILFE.K10></li><li><TMPL_VAR HILFE.K11></li><li><TMPL_VAR HILFE.K12></li><li><TMPL_VAR HILFE.K13></li><li><TMPL_VAR HILFE.K14></li><li><TMPL_VAR HILFE.K15></li><li><TMPL_VAR HILFE.K16></li></ul>
 
-<h3>Endpunkte</h3>
+<h3><TMPL_VAR HILFE.K17></h3>
 
 <table class="sm-tbl">
-<tr><th>Aufruf</th><th>Zweck</th></tr>
-<tr><td><code>/plugins/ferien/ferien.php</code></td><td>Loxone-Zeile <code>FERIEN;OK=..;SCHULTAG=..;MSCHULTAG=..;BRUECKE=..;FERIENIN=..;URLAUB=..;URLAUBENDE=..;…</code></td></tr>
-<tr><td><code>/plugins/ferien/ferien.php?debug=1</code></td><td>Ferien-, Feiertags- und Brückentagsliste im Klartext</td></tr>
-<tr><td><code>/plugins/ferien/ferien.php?refresh=1</code></td><td>Daten sofort neu abrufen</td></tr>
-<tr><td><code>/plugins/ferien/ferien.php?json=1</code></td><td>kompletter Zustand als JSON</td></tr>
-<tr><td><code>/plugins/ferien/ferien.php?say=1</code></td><td>Test-Ansage</td></tr>
-<tr><td><code>/plugins/ferien/ferien.php?ptest=1</code></td><td>Test-Pushnachricht auslösen</td></tr>
+<tr><th><TMPL_VAR HILFE.K20></th><th><TMPL_VAR HILFE.K21></th></tr>
+<tr><td><TMPL_VAR HILFE.K22></td><td><TMPL_VAR HILFE.K23></td></tr>
+<tr><td><TMPL_VAR HILFE.K24></td><td><TMPL_VAR HILFE.K25></td></tr>
+<tr><td><TMPL_VAR HILFE.K26></td><td><TMPL_VAR HILFE.K27></td></tr>
+<tr><td><TMPL_VAR HILFE.K28></td><td><TMPL_VAR HILFE.K29></td></tr>
+<tr><td><TMPL_VAR HILFE.K30></td><td><TMPL_VAR HILFE.K31></td></tr>
+<tr><td><TMPL_VAR HILFE.K32></td><td><TMPL_VAR HILFE.K33></td></tr>
 </table>
 
-<h3>Datenschutz</h3>
+<h3><TMPL_VAR HILFE.K18></h3>
 
-<p>Es sind <b>keine persönlichen Daten</b> im Plugin enthalten. Alle Einstellungen liegen lokal (<code>config/plugins/ferien/ferien.json</code>). Externe Verbindungen gibt es ausschließlich zur öffentlichen OpenHolidays-API (ohne Kennung).</p>
+<p><TMPL_VAR HILFE.K19></p>
