@@ -54,7 +54,7 @@ $fe_saved = false; $fe_err = ''; $fe_note = '';
 /* Wer einen Reiter hinzufuegt, muss DREI Stellen mitziehen: die Reiterleiste,
    den Bereich (sm-pane mit gleicher id) und diese Positivliste. Fehlt der
    Name hier, springt die Seite nach jedem Absenden zurueck auf Einstellungen. */
-$fe_muster = '/^tab-(settings|loxone|bridge|vacation|holiday|test|log)$/';
+$fe_muster = '/^tab-(settings|mqtt|loxone|bridge|vacation|holiday|test|log)$/';
 $fe_tab = preg_match($fe_muster, (string) (isset($_POST['activetab']) ? $_POST['activetab'] : ''))
     ? (string) $_POST['activetab'] : 'tab-settings';
 
@@ -116,6 +116,25 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['fetchnow']) && functi
     $fe_note = $fe_ok ? ('Daten abgerufen (' . $fe_q . ').') : 'Abruf FEHLGESCHLAGEN - Internetverbindung pruefen (Protokoll beachten).';
 }
 
+// ---------- MQTT speichern (eigener Reiter seit 1.1.5, Hausstandard) ----------
+// NICHT den save-Handler mitbenutzen: der setzt Haken per isset() und wuerde
+// beim Absenden des MQTT-Formulars die Einstellungs-Haken auf 0 stellen.
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['mqtt_save'])) {
+    $fe_new = function_exists('fer_config') ? fer_config() : array();
+    if (!is_array($fe_new)) { $fe_new = array(); }
+    $fe_new['mqtt_enabled'] = isset($_POST['mqtt_enabled']) ? 1 : 0;
+    $fe_new['mqtt_topic'] = preg_replace('#[^\w/\-]#', '', (string) (isset($_POST['mqtt_topic']) ? $_POST['mqtt_topic'] : 'ferien')) ?: 'ferien';
+    if (!is_dir($fe_cfgdir)) { @mkdir($fe_cfgdir, 0775, true); }
+    $fe_json = json_encode($fe_new, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+    if ($fe_json !== false && @file_put_contents($fe_cfgfile, $fe_json) !== false) {
+        $fe_saved = true;
+        @copy($fe_cfgfile, $fe_bkfile);
+    } else {
+        $fe_err = 'Konfiguration konnte nicht gespeichert werden: ' . $fe_cfgfile;
+    }
+    $fe_tab = 'tab-mqtt';
+}
+
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['save'])) {
     // Der Stand VOR dem Speichern - daran wird spaeter erkannt, ob sich die
     // Region geaendert hat und die Termine neu geholt werden muessen.
@@ -132,8 +151,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['save'])) {
     $fe_new['locality'] = in_array($fe_loc, array('', 'DE-BY-AU', 'BY-EV', 'SN-KATH', 'TH-KATH'), true) ? $fe_loc : '';
     $fe_new['local_holidays'] = isset($_POST['local_holidays']) ? 1 : 0;
     $fe_new['bridge'] = isset($_POST['bridge']) ? 1 : 0;
-    $fe_new['mqtt_enabled'] = isset($_POST['mqtt_enabled']) ? 1 : 0;
-    $fe_new['mqtt_topic'] = preg_replace('#[^\w/\-]#', '', (string) (isset($_POST['mqtt_topic']) ? $_POST['mqtt_topic'] : 'ferien')) ?: 'ferien';
+    // MQTT wohnt seit 1.1.5 im eigenen Reiter mit eigenem Formular - hier
+    // aus dem Bestand uebernehmen, sonst loescht 'Speichern' die Werte.
+    $fe_new['mqtt_enabled'] = isset($fe_vorher['mqtt_enabled']) ? (int) $fe_vorher['mqtt_enabled'] : 0;
+    $fe_new['mqtt_topic'] = isset($fe_vorher['mqtt_topic']) && $fe_vorher['mqtt_topic'] !== '' ? $fe_vorher['mqtt_topic'] : 'ferien';
     // Eigene Termine
     $fe_new['own'] = array();
     $fe_on = isset($_POST['own_name']) ? (array) $_POST['own_name'] : array();
@@ -265,6 +286,8 @@ $fe_host = fe_e(isset($_SERVER['HTTP_HOST']) ? $_SERVER['HTTP_HOST'] : '<loxberr
 .sm-info { background: #e3f2fd; border: 1px solid #90caf9; font-size: 0.9em; }
 .sm-mono { font-family: ui-monospace, monospace; background: #f5f5f5; padding: 2px 6px; border-radius: 4px; }
 .sm-small { font-size: 0.82em; color: #666; margin-top: 3px; }
+.sm-hinweis { border: 1px solid #cfe3b0; background: #f2f8ea; border-radius: 6px;
+    padding: 10px 12px; margin: 12px 0; font-size: 0.9em; }
 .sm-tabs { display: flex; gap: 4px; margin: 14px 0 0; border-bottom: 2px solid #6dac20; flex-wrap: wrap; }
 .sm-tab { background: #eee; border: 1px solid #ccc; border-bottom: 0; border-radius: 8px 8px 0 0; padding: 9px 18px; cursor: pointer; font-size: 0.95em; color: #444 !important; text-shadow: none !important;
   display: inline-block; text-decoration: none !important; }
@@ -346,6 +369,7 @@ $fe_host = fe_e(isset($_SERVER['HTTP_HOST']) ? $_SERVER['HTTP_HOST'] : '<loxberr
    nicht jeder Reiterwechsel die Seite neu laedt. */ ?>
 <div class="sm-tabs">
     <a class="sm-tab<?= fe_aktiv('tab-settings') ?>" data-pane="tab-settings" href="index.php?form=settings"><?php echo fer_t('REITER.EINSTELLUNGEN'); ?></a>
+    <a class="sm-tab<?= fe_aktiv('tab-mqtt') ?>" data-pane="tab-mqtt" href="index.php?form=mqtt"><?php echo fer_t('REITER.MQTT'); ?></a>
     <a class="sm-tab<?= fe_aktiv('tab-loxone') ?>" data-pane="tab-loxone" href="index.php?form=loxone"><?php echo fer_t('REITER.LOXONE'); ?></a>
     <a class="sm-tab<?= fe_aktiv('tab-bridge') ?>" data-pane="tab-bridge" href="index.php?form=bridge"><?php echo fer_t('REITER.BRUECKENTAGE'); ?></a>
     <a class="sm-tab<?= fe_aktiv('tab-vacation') ?>" data-pane="tab-vacation" href="index.php?form=vacation"><?php echo fer_t('REITER.FERIEN'); ?></a>
@@ -520,6 +544,21 @@ $fe_host = fe_e(isset($_SERVER['HTTP_HOST']) ? $_SERVER['HTTP_HOST'] : '<loxberr
     <?php echo fer_t('TEXT.DER_ORIGINALE_LOXONE_AUDIOSERVER_B'); ?> <b><?php echo fer_t('TEXT.KEINE_HTTP_TTS_SCHNITTSTELLE'); ?></b><?php echo fer_t('TEXT.IN_DIESEM_MODUS_SPRICHT_DAS_PLUGIN'); ?> <span class="sm-mono">ANN=1</span>.
 </div>
 
+<button data-role="none" class="sm-btn" type="submit"><?php echo fer_t('TEXT.SPEICHERN'); ?></button>
+</form>
+<form action="index.php" method="post" style="margin-top:8px;">
+    <input data-role="none" type="hidden" name="fetchnow" value="1">
+    <input data-role="none" type="hidden" name="activetab" value="tab-settings">
+    <button data-role="none" class="sm-btn" type="submit" style="background:#607d8b;margin-top:0;"><?php echo fer_t('TEXT.JETZT_ABRUFEN'); ?></button>
+</form>
+</div>
+
+<!-- ================= Einbindung in Loxone ================= -->
+<!-- ================= Reiter: MQTT (eigener Reiter seit 1.1.5, Hausstandard) ================= -->
+<div class="sm-pane<?= fe_aktiv('tab-mqtt') ?>" id="tab-mqtt">
+<form action="index.php" method="post">
+<input data-role="none" type="hidden" name="mqtt_save" value="1">
+<input data-role="none" type="hidden" name="activetab" value="tab-mqtt">
 <h2><?php echo fer_t('TEXT.MQTT_OPTIONAL'); ?></h2>
 <?php if (function_exists('fer_mqtt_gateway_autostart') && fer_mqtt_gateway_autostart() === false) { ?><div class="sm-alert sm-warn"><b>MQTT:</b> <?php echo fer_t('TEXT.W_AUTOSTART'); ?></div><?php } ?>
 <label style="display:inline-flex;align-items:center;gap:6px;">
@@ -539,14 +578,8 @@ $fe_host = fe_e(isset($_SERVER['HTTP_HOST']) ? $_SERVER['HTTP_HOST'] : '<loxberr
 
 <button data-role="none" class="sm-btn" type="submit"><?php echo fer_t('TEXT.SPEICHERN'); ?></button>
 </form>
-<form action="index.php" method="post" style="margin-top:8px;">
-    <input data-role="none" type="hidden" name="fetchnow" value="1">
-    <input data-role="none" type="hidden" name="activetab" value="tab-settings">
-    <button data-role="none" class="sm-btn" type="submit" style="background:#607d8b;margin-top:0;"><?php echo fer_t('TEXT.JETZT_ABRUFEN'); ?></button>
-</form>
 </div>
 
-<!-- ================= Einbindung in Loxone ================= -->
 <div class="sm-pane<?= fe_aktiv('tab-loxone') ?>" id="tab-loxone">
 <h2><?php echo fer_t('TEXT.EINBINDUNG_IN_LOXONE_SCHRITT_FR_SC'); ?></h2>
 <p><?php echo fer_t('TEXT.DER_MINISERVER_BEKOMMT_FERTIG_AUSG'); ?> <b><?php echo fer_t('TEXT.IST_HEUTE_SCHULFREI_IST_MORGEN_SCH'); ?></b>
