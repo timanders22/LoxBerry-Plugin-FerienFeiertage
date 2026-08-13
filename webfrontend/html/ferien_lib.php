@@ -947,3 +947,110 @@ function fer_t($schluessel)
     list($a, $s) = array_pad(explode('.', $schluessel, 2), 2, '');
     return isset($texte[$a][$s]) ? $texte[$a][$s] : $schluessel;
 }
+
+/* ---------------- Loxone-Vorlage (Hausstandard "Alles auf einmal anlegen") ---------------- */
+/** name => array(analog, min, max, einheit, kommentar).
+ *  Die Suchmuster funktionieren nur, weil in der Ausgabezeile jedes
+ *  Heute-Feld VOR seinem M-Gegenstueck steht (siehe Kommentar in ferien.php). */
+function fer_felder() {
+    return array(
+        'OK'          => array(0, 0, 1,   '',     '1 = Daten gueltig'),
+        'FERIEN'      => array(0, 0, 1,   '',     'heute Ferien'),
+        'FEIERTAG'    => array(0, 0, 1,   '',     'heute Feiertag'),
+        'WOCHENENDE'  => array(0, 0, 1,   '',     'heute Wochenende'),
+        'SCHULFREI'   => array(0, 0, 1,   '',     'heute schulfrei'),
+        'SCHULTAG'    => array(0, 0, 1,   '',     'heute Schultag'),
+        'BRUECKE'     => array(0, 0, 1,   '',     'heute Brueckentag'),
+        'MFERIEN'     => array(0, 0, 1,   '',     'morgen Ferien'),
+        'MFEIERTAG'   => array(0, 0, 1,   '',     'morgen Feiertag'),
+        'MSCHULFREI'  => array(0, 0, 1,   '',     'morgen schulfrei'),
+        'MSCHULTAG'   => array(0, 0, 1,   '',     'morgen Schultag'),
+        'MBRUECKE'    => array(0, 0, 1,   '',     'morgen Brueckentag'),
+        'FERIENIN'    => array(1, 0, 365, 'Tage', 'naechste Ferien beginnen in'),
+        'FERIENREST'  => array(1, 0, 365, 'Tage', 'laufende Ferien: Resttage'),
+        'FERIENDAUER' => array(1, 0, 365, 'Tage', 'naechste/laufende Ferien: Dauer'),
+        'FEIERTAGIN'  => array(1, 0, 365, 'Tage', 'naechster Feiertag in'),
+        'URLAUB'      => array(0, 0, 1,   '',     'heute Urlaub (eigene Termine)'),
+        'MURLAUB'     => array(0, 0, 1,   '',     'morgen Urlaub'),
+        'URLAUBIN'    => array(1, 0, 365, 'Tage', 'naechster Urlaub beginnt in'),
+        'URLAUBREST'  => array(1, 0, 365, 'Tage', 'laufender Urlaub: Resttage'),
+        'URLAUBDAUER' => array(1, 0, 365, 'Tage', 'Urlaub: Dauer'),
+        'URLAUBENDE'  => array(0, 0, 1,   '',     'letzter Urlaubstag'),
+        'WARN'        => array(0, 0, 1,   '',     'Warnhinweis aktiv'),
+        'ANN'         => array(0, 0, 1,   '',     'Meldefenster aktiv'),
+        'AUDIO'       => array(0, 0, 1,   '',     'Ansage freigegeben'),
+        'PUSH'        => array(0, 0, 1,   '',     'Push freigegeben'),
+        'PTEST'       => array(0, 0, 1,   '',     'Test-Push ausloesen'),
+    );
+}
+/** Gepruefter PHP-Nachbau des LoxoneTemplateBuilder - Attributreihenfolge,
+ *  CRLF und der Tabulator vor den Kindelementen entsprechen dem Original.
+ *  Uebernommen aus LoxBerry-Plugin-APC-UPS, nur das Kuerzel getauscht. */
+function fer_xml_virtual_in_http($kopf, $cmds) {
+    $crlf = "\r\n";
+    $o = '<?xml version="1.0" encoding="utf-8"?>' . $crlf;
+    $o .= '<VirtualInHttp HintText="" ';
+    $o .= 'Title="' . fer_vx($kopf['title']) . '" ';
+    $o .= 'Comment="' . fer_vx(isset($kopf['comment']) ? $kopf['comment'] : '') . '" ';
+    $o .= 'Address="' . fer_vx(isset($kopf['address']) ? $kopf['address'] : '') . '" ';
+    $o .= 'PollingTime="' . fer_vx(isset($kopf['polling']) ? $kopf['polling'] : '300') . '"';
+    $o .= '>' . $crlf;
+    $o .= "\t" . '<Info templateType="2" minVersion="17010727"/>' . $crlf; // wie Original-Export aus Loxone Config 17.1
+    foreach ($cmds as $c) {
+        $o .= "\t" . '<VirtualInHttpCmd ';
+        $o .= 'Title="' . fer_vx($c['title']) . '" ';
+        $o .= 'Comment="' . fer_vx($c['comment']) . '" ';
+        $o .= 'Check="' . fer_vx($c['check']) . '" ';
+        $o .= 'Signed="' . ($c['min'] < 0 ? 'true' : 'false') . '" ';
+        $o .= 'Analog="' . ($c['analog'] ? 'true' : 'false') . '" ';
+        $o .= 'SourceValLow="0" DestValLow="0" SourceValHigh="1" DestValHigh="1" DefVal="0" ';
+        $o .= 'MinVal="' . (int) $c['min'] . '" ';
+        $o .= 'MaxVal="' . (int) $c['max'] . '" ';
+        $o .= 'Unit="' . fer_vx(isset($c['unit']) ? $c['unit'] : '<v>') . '" ';
+        $o .= 'HintText=""';
+        $o .= '/>' . $crlf;
+    }
+    $o .= '</VirtualInHttp>' . $crlf;
+    return $o;
+}
+
+function fer_vx($s) {
+    return htmlspecialchars((string) $s, ENT_QUOTES | ENT_XML1, 'UTF-8');
+}
+
+/** Hausstandard: Gateway-Autostart aus general.json (PLUGIN_HAUSREGELN Abschnitt 3). */
+function fer_mqtt_gateway_autostart() {
+    $home = getenv('LBHOMEDIR') ?: '/opt/loxberry';
+    $gj = $home . '/config/system/general.json';
+    if (!is_file($gj)) { return null; }
+    $d = json_decode((string) @file_get_contents($gj), true);
+    if (!is_array($d) || !isset($d['Mqtt'])) { return null; }
+    return !empty($d['Mqtt']['Gatewayautostart']);
+}
+
+/** Vorlage fuer den Import in Loxone Config. Rueckgabe: array(name, inhalt) */
+function fer_vorlage() {
+    $host = isset($_SERVER['HTTP_HOST']) && $_SERVER['HTTP_HOST'] !== ''
+        ? preg_replace('/[^A-Za-z0-9\.\-:]/', '', (string) $_SERVER['HTTP_HOST'])
+        : (gethostname() ?: 'loxberry');
+    $ordner = getenv('LBPPLUGINDIR') ?: 'ferien';
+    $cmds = array();
+    foreach (fer_felder() as $name => $f) {
+        list($analog, $min, $max, $einheit, $text) = $f;
+        $cmds[] = array(
+            'title' => 'FERIEN_' . $name,
+            'comment' => $text . ($einheit !== '' ? ' [' . $einheit . ']' : ''),
+            'check' => '\i' . $name . '=\i\v',
+            'unit' => ($einheit !== '' ? '<v.1> ' . $einheit : '<v.1>'),
+            'analog' => $analog, 'min' => $min, 'max' => $max,
+        );
+    }
+    return array('VI_ferien.xml', fer_xml_virtual_in_http(array(
+        'title' => 'Ferien und Feiertage',
+        'address' => 'http://' . $host . '/plugins/' . $ordner . '/ferien.php',
+        'polling' => '300',
+        'comment' => 'Erzeugt vom LoxBerry-Plugin Ferien und Feiertage (' . date('d.m.Y') . '). '
+                   . 'Loxone Config legt beim Import neu an und ueberschreibt nichts - '
+                   . 'zweimal eingelesen ergibt doppelte Bausteine.',
+    ), $cmds));
+}

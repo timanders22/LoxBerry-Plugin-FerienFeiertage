@@ -57,6 +57,15 @@ $fe_saved = false; $fe_err = ''; $fe_note = '';
 $fe_muster = '/^tab-(settings|loxone|bridge|vacation|holiday|test|log)$/';
 $fe_tab = preg_match($fe_muster, (string) (isset($_POST['activetab']) ? $_POST['activetab'] : ''))
     ? (string) $_POST['activetab'] : 'tab-settings';
+
+// ---------- Loxone-Vorlage herunterladen (Hausstandard) ----------
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['vorlage']) && function_exists('fer_vorlage')) {
+    list($fe_vname, $fe_vinhalt) = fer_vorlage();
+    header('Content-Type: application/x-download');
+    header('Content-Disposition: attachment; filename="' . $fe_vname . '"');
+    echo $fe_vinhalt;
+    exit;
+}
 // Die Reiter sind echte Verweise. Wer sie anklickt (oder ein Lesezeichen
 // darauf setzt), landet ueber ?form= im richtigen Bereich - auch dann, wenn
 // im Browser kein JavaScript laeuft.
@@ -512,6 +521,7 @@ $fe_host = fe_e(isset($_SERVER['HTTP_HOST']) ? $_SERVER['HTTP_HOST'] : '<loxberr
 </div>
 
 <h2><?php echo fer_t('TEXT.MQTT_OPTIONAL'); ?></h2>
+<?php if (function_exists('fer_mqtt_gateway_autostart') && fer_mqtt_gateway_autostart() === false) { ?><div class="sm-alert sm-warn"><b>MQTT:</b> <?php echo fer_t('TEXT.W_AUTOSTART'); ?></div><?php } ?>
 <label style="display:inline-flex;align-items:center;gap:6px;">
     <input data-role="none" type="checkbox" name="mqtt_enabled" <?= !empty($fe_cfg['mqtt_enabled']) ? 'checked' : '' ?>> <?php echo fer_t('TEXT.ZUSTAND_PER_MQTT_VERFFENTLICHEN'); ?>
 </label>
@@ -576,6 +586,14 @@ $fe_host = fe_e(isset($_SERVER['HTTP_HOST']) ? $_SERVER['HTTP_HOST'] : '<loxberr
 <div class="sm-step"><b><?php echo fer_t('TEXT.SCHRITT_3_KACHELN_FR_DIE_APP'); ?></b><br>
 <?php echo fer_t('TEXT.FERIENIN_UND_FERIENREST_ALS_ANALOG'); ?> <span class="sm-mono"><?php echo fer_t('TEXT.V_0_TAGE'); ?></span> <?php echo fer_t('TEXT.FERIEN_IN_X_TAGEN_IST_ERFAHRUNGSGE'); ?>
 </div>
+
+<h2><?php echo fer_t('TEXT.H_VORLAGE'); ?></h2>
+<div class="sm-hinweis"><?php echo fer_t('TEXT.H_VORLAGE_TEXT'); ?></div>
+<form action="index.php" method="post" style="margin-bottom:14px;">
+  <input data-role="none" type="hidden" name="activetab" value="tab-loxone">
+  <input data-role="none" type="hidden" name="vorlage" value="1">
+  <button data-role="none" class="sm-btn" type="submit" style="background:#546e7a;"><?php echo fer_t('TEXT.K_VORLAGE'); ?></button>
+</form>
 
 <div class="sm-step"><b><?php echo fer_t('TEXT.SCHRITT_4_KOMPLETTE_BAUSTEIN_LISTE'); ?></b><br>
 <b><?php echo fer_t('TEXT.4A_WECKER_UND_BRIEFING_NUR_AN_SCHU'); ?></b>
