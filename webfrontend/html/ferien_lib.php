@@ -660,9 +660,20 @@ function fer_tts_url($text) {
     if ($mode === 'audioserver') {
         return null;
     }
-    if ((string) $tts['ip'] === '') {
-        return '';
+    if ($mode === 'musicserver' && (string) $tts['ip'] === '') {
+        return '';   // ohne IP laesst sich die Music-Server-Adresse nicht bauen
     }
+
+    /* Zonenliste EINMAL fuer alle Modi normalisieren. Vorher wurde nur im
+     * Modus musicserver je Zone getrimmt; in den Vorlagen-Modi ging die
+     * Eingabe roh in {zones} - aus "2, 4, 6" wurde eine Adresse mit
+     * Leerzeichen. */
+    $zl = array();
+    foreach (explode(',', (string) $tts['zones']) as $z) {
+        $z = trim($z);
+        if ($z !== '') { $zl[] = $z; }
+    }
+    $tts['zones'] = implode(',', $zl);
     if ($mode === 'musicserver') {
         $vol = max(1, min(100, (int) $tts['volume']));
         $zones = array();
@@ -677,6 +688,13 @@ function fer_tts_url($text) {
     $tpl = trim((string) $tts['template']);
     if ($tpl === '') {
         $tpl = 'http://{ip}:{port}/tts?text={text}&zone={zones}&vol={vol}';
+    }
+    /* Die IP wird nur verlangt, wenn die Vorlage sie auch verwendet.
+     * Vorher stand die Pruefung unbedingt am Anfang der Funktion - eine
+     * eigene Vorlage ohne {ip} war damit unbenutzbar (AWM-1.2.0-Fund,
+     * hier nachgezogen). */
+    if ((string) $tts['ip'] === '' && strpos($tpl, '{ip}') !== false) {
+        return '';
     }
     return str_replace(array('{ip}', '{port}', '{zones}', '{vol}', '{lang}', '{text}'),
         array($tts['ip'], (int) $tts['port'], $tts['zones'], (int) $tts['volume'], $tts['lang'], rawurlencode($text)), $tpl);
