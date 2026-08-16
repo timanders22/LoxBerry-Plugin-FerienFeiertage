@@ -104,6 +104,24 @@ if (!function_exists('lb_wurzel_ermitteln')) {
 
 function fe_aktiv($id) { global $fe_tab; return $fe_tab === $id ? ' sm-active' : ''; }
 
+// ---------- Neues Aktionstoken erzeugen (ab 1.1.7) ----------
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['token_neu'])) {
+    $fe_cfg_tok = function_exists('fer_config') ? fer_config() : array();
+    if (!is_array($fe_cfg_tok)) { $fe_cfg_tok = array(); }
+    $fe_cfg_tok['aktionstoken'] = function_exists('fer_token_erzeugen')
+        ? fer_token_erzeugen() : bin2hex(random_bytes(12));
+    if (!is_dir($fe_cfgdir)) { @mkdir($fe_cfgdir, 0775, true); }
+    $fe_json_tok = json_encode($fe_cfg_tok, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+    // json_encode liefert bei ungueltigem UTF-8 false, und file_put_contents
+    // schriebe dann eine Datei mit NULL Bytes - und meldete das als Erfolg.
+    if ($fe_json_tok !== false && @file_put_contents($fe_cfgfile, $fe_json_tok) !== false) {
+        @copy($fe_cfgfile, $fe_bkfile);
+        $fe_note = 'Neues Token erzeugt. Die Adressen in Loxone muessen angepasst werden '
+                 . '- die alten funktionieren nicht mehr.';
+    }
+    $fe_tab = 'tab-loxone';
+}
+
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['clearlog'])) {
     @mkdir(dirname($fe_logfile), 0775, true);
     @file_put_contents($fe_logfile, '[' . date('Y-m-d H:i:s') . "] Protokoll geleert (Admin-Oberflaeche)\n");
@@ -155,6 +173,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['save'])) {
     // aus dem Bestand uebernehmen, sonst loescht 'Speichern' die Werte.
     $fe_new['mqtt_enabled'] = isset($fe_vorher['mqtt_enabled']) ? (int) $fe_vorher['mqtt_enabled'] : 0;
     $fe_new['mqtt_topic'] = isset($fe_vorher['mqtt_topic']) && $fe_vorher['mqtt_topic'] !== '' ? $fe_vorher['mqtt_topic'] : 'ferien';
+    // Dasselbe gilt fuer das Aktionstoken (ab 1.1.7). $fe_new wird hier von
+    // Grund auf neu gebaut - genau daran gingen am 13.08.2026 in drei anderen
+    // Linien die Token verloren, und mit ihnen alle Adressen in Loxone.
+    $fe_new['aktionstoken'] = isset($fe_vorher['aktionstoken']) ? (string) $fe_vorher['aktionstoken'] : '';
     // Eigene Termine
     $fe_new['own'] = array();
     $fe_on = isset($_POST['own_name']) ? (array) $_POST['own_name'] : array();
@@ -249,7 +271,19 @@ $fe_cfg = function_exists('fer_config') ? fer_config() : array();
 if (!is_array($fe_cfg)) { $fe_cfg = array(); }
 $fe_cfg += array('country' => 'DE', 'subdivision' => 'DE-BY', 'school' => 1, 'public' => 1,
     'locality' => '', 'local_holidays' => 0, 'bridge' => 1, 'own' => array(), 'mqtt_enabled' => 0, 'mqtt_topic' => 'ferien',
-    'notify' => array(), 'tts' => array());
+    'notify' => array(), 'tts' => array(), 'aktionstoken' => '');
+
+// Beim ersten Aufruf ein Token erzeugen, damit die Adressen fuer Loxone sofort
+// benutzbar sind (schuetzt ?say= und ?ptest= im unangemeldeten ferien.php).
+if (empty($fe_cfg['aktionstoken'])) {
+    $fe_cfg['aktionstoken'] = function_exists('fer_token_erzeugen')
+        ? fer_token_erzeugen() : bin2hex(random_bytes(12));
+    if (!is_dir($fe_cfgdir)) { @mkdir($fe_cfgdir, 0775, true); }
+    $fe_json_init = json_encode($fe_cfg, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+    if ($fe_json_init !== false && @file_put_contents($fe_cfgfile, $fe_json_init) !== false) {
+        @copy($fe_cfgfile, $fe_bkfile);
+    }
+}
 $fe_notify = is_array($fe_cfg['notify']) ? $fe_cfg['notify'] : array();
 $fe_notify += array('audio' => 0, 'push' => 0, 'time' => '19:00', 'freetag' => 1, 'ferienstart' => 1, 'bridge_month' => 1);
 $fe_tts = is_array($fe_cfg['tts']) ? $fe_cfg['tts'] : array();
@@ -674,6 +708,23 @@ $fe_host = fe_e(isset($_SERVER['HTTP_HOST']) ? $_SERVER['HTTP_HOST'] : '<loxberr
 <div class="sm-step"><b><?php echo fer_t('TEXT.SCHRITT_5_MQTT_ALTERNATIVE_JSON'); ?></b><br>
 <?php echo fer_t('TEXT.ALLE_WERTE_GIBT_ES_AUCH_BER_DAS_LO'); ?> <span class="sm-mono">http://<?= $fe_host ?>/plugins/<?= fe_e($fe_plugin) ?><?php echo fer_t('TEXT.FERIEN_PHP_JSON_1'); ?></span>
 </div>
+
+<div class="sm-step"><b><?php echo fer_t('TEXT.AKTIONSTOKEN'); ?></b><br>
+<?php echo fer_t('TEXT.TOKEN_ERKLAERUNG'); ?>
+<table class="sm-tbl">
+<tr><th><?php echo fer_t('TEXT.EIGENSCHAFT'); ?></th><th><?php echo fer_t('TEXT.WERT'); ?></th></tr>
+<tr><td><?php echo fer_t('TEXT.AKTUELLES_TOKEN'); ?></td><td><span class="sm-mono"><?= fe_e($fe_cfg['aktionstoken']) ?></span></td></tr>
+<tr><td><span class="sm-mono">?say=1</span></td><td><span class="sm-mono">/plugins/<?= fe_e($fe_plugin) ?>/ferien.php?say=1&amp;token=<?= fe_e($fe_cfg['aktionstoken']) ?></span></td></tr>
+<tr><td><span class="sm-mono">?ptest=1</span></td><td><span class="sm-mono">/plugins/<?= fe_e($fe_plugin) ?>/ferien.php?ptest=1&amp;token=<?= fe_e($fe_cfg['aktionstoken']) ?></span></td></tr>
+<tr><td><span class="sm-mono">?selftest=1</span></td><td><span class="sm-mono">/plugins/<?= fe_e($fe_plugin) ?>/ferien.php?selftest=1&amp;token=<?= fe_e($fe_cfg['aktionstoken']) ?></span></td></tr>
+</table>
+<div class="sm-knopfreihe sm-b-aktion">
+  <form method="post" action="index.php">
+    <input data-role="none" type="hidden" name="activetab" value="tab-loxone">
+    <button data-role="none" type="submit" name="token_neu" value="1"><?php echo fer_t('TEXT.K_TOKEN_NEU'); ?></button>
+  </form>
+</div>
+</div>
 </div>
 
 <!-- ================= Test ================= -->
@@ -699,8 +750,8 @@ $fe_host = fe_e(isset($_SERVER['HTTP_HOST']) ? $_SERVER['HTTP_HOST'] : '<loxberr
 
 <h3 class="sm-h3"><?php echo fer_t('TEXT.LST_ETWAS_AUS'); ?></h3>
 <div class="sm-knopfreihe">
-<a class="sm-btn sm-b-aktion"  href="/plugins/<?= fe_e($fe_plugin) ?>/ferien.php?say=1" target="_blank"><?php echo fer_t('TEXT.TEST_ANSAGE'); ?></a>
-<a class="sm-btn sm-b-aktion"  href="/plugins/<?= fe_e($fe_plugin) ?>/ferien.php?ptest=1" target="_blank"><?php echo fer_t('TEXT.TEST_PUSHNACHRICHT'); ?></a>
+<a class="sm-btn sm-b-aktion"  href="/plugins/<?= fe_e($fe_plugin) ?>/ferien.php?say=1&amp;token=<?= fe_e($fe_cfg['aktionstoken']) ?>" target="_blank"><?php echo fer_t('TEXT.TEST_ANSAGE'); ?></a>
+<a class="sm-btn sm-b-aktion"  href="/plugins/<?= fe_e($fe_plugin) ?>/ferien.php?ptest=1&amp;token=<?= fe_e($fe_cfg['aktionstoken']) ?>" target="_blank"><?php echo fer_t('TEXT.TEST_PUSHNACHRICHT'); ?></a>
 </div>
 
 

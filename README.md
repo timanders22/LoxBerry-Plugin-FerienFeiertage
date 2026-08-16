@@ -49,8 +49,9 @@ Kompatibel mit LoxBerry 3.x und **LoxBerry 4** (reines PHP, PHP 7.4 und 8.x).
 | `/plugins/ferien/ferien.php?debug=1` | Ferien-, Feiertags- und Brückentagsliste im Klartext |
 | `/plugins/ferien/ferien.php?refresh=1` | Daten sofort neu abrufen |
 | `/plugins/ferien/ferien.php?json=1` | kompletter Zustand als JSON |
-| `/plugins/ferien/ferien.php?say=1` | Test-Ansage |
-| `/plugins/ferien/ferien.php?ptest=1` | Test-Pushnachricht auslösen |
+| `/plugins/ferien/ferien.php?say=1&token=…` | Test-Ansage **(Token nötig)** |
+| `/plugins/ferien/ferien.php?ptest=1&token=…` | Test-Pushnachricht auslösen **(Token nötig)** |
+| `/plugins/ferien/ferien.php?selftest=1&token=…` | nur prüfen, ob das Token stimmt — löst nichts aus |
 
 ## Datenschutz
 
@@ -63,6 +64,40 @@ ausschließlich zur öffentlichen OpenHolidays-API (ohne Kennung).
 MIT — siehe [LICENSE](LICENSE).
 
 ## Änderungen
+
+### 1.1.7
+
+**Der MQTT-Weg liefert jetzt alles, was der HTTP-Weg liefert.** Bisher
+veröffentlichte das Plugin über MQTT 23 Werte, über HTTP aber 27: es fehlten
+die vier Melde-Merker `ann` (Meldefenster), `audio` und `push` (Freigaben aus
+der Konfiguration) sowie `ptest` (Test-Push). Wer auf MQTT umstellte, verlor
+damit genau die Werte, mit denen sich Ansage und Pushnachricht im Miniserver
+steuern und **prüfen** lassen — der Test-Push löste über MQTT schlicht nicht
+mehr aus.
+
+Drei Änderungen, damit das wirklich wirkt:
+
+- Die vier Merker kommen aus **einer** Funktion (`fer_meldeflags()`), die
+  beide Wege benutzen. HTTP und MQTT können nicht mehr auseinanderlaufen.
+- Sie stehen jetzt auch in der **Signatur** des Cron-Laufs. Ohne das wären
+  sie zwar in der Nachricht gewesen, die Nachricht aber nicht verschickt
+  worden: `ann` und `ptest` ändern sich allein durch Zeitablauf, nicht durch
+  einen Zustandswechsel — ein gesetzter `ptest` wäre bis zum halbstündlichen
+  Lebenszeichen liegengeblieben, sein Fenster ist aber nur fünf Minuten breit.
+- `?ptest=1` veröffentlicht **sofort**, statt bis zu eine Minute auf den
+  nächsten Cron-Lauf zu warten. Ein Test, der erst eine Minute später wirkt,
+  sieht aus wie ein Test, der nicht wirkt.
+
+**Aktionstoken für die beiden auslösenden Aufrufe.** `?say=1` (das Haus
+spricht) und `?ptest=1` (Pushnachricht aufs Telefon) lagen bisher offen im
+Heimnetz — jedes Gerät konnte sie auslösen. Sie verlangen jetzt ein Token aus
+dem Reiter *Einbindung in Loxone*; ohne passendes Token antworten sie mit
+HTTP 403. Die abfragenden Aufrufe bleiben offen, sie ändern nichts.
+
+Dazu neu: **`?selftest=1&token=…`** beantwortet die Tokenfrage, ohne etwas
+auszulösen — Hausstandard für alle Aktionsendpunkte. Das Token wird beim
+ersten Aufruf der Oberfläche erzeugt und überlebt jedes Speichern; ein Knopf
+erzeugt auf Wunsch ein neues.
 
 ### 1.1.1
 

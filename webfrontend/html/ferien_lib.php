@@ -102,6 +102,7 @@ function fer_config() {
         'mqtt_topic' => 'ferien',
         'notify' => array(),
         'tts' => array(),
+        'aktionstoken' => '',        // schuetzt ?say= und ?ptest= (unangemeldeter Endpunkt)
     );
     if (!is_array($cfg['own'])) { $cfg['own'] = array(); }
     if (!is_array($cfg['notify'])) { $cfg['notify'] = array(); }
@@ -603,6 +604,11 @@ function fer_mqtt_publish($st = null) {
         'feiertag_in' => $st['feiertag_naechster']['in'],
         'feiertag_name' => $st['feiertag_naechster']['name'] !== '' ? $st['feiertag_naechster']['name'] : '-',
     );
+    /* ann, audio, push und ptest fehlten hier. In der Vorlage fuer Loxone
+     * (fer_felder) stehen sie seit jeher, ueber HTTP kamen sie auch - nur
+     * der MQTT-Weg lieferte sie nicht. Wer umstellte, merkte es erst, wenn
+     * der Test-Push nicht mehr ausloeste. */
+    $m = array_merge($m, fer_meldeflags($st));
     $s = @socket_create(AF_INET, SOCK_DGRAM, SOL_UDP);
     if (!$s) {
         fer_log_if_changed('mqtt', 'UDP-Socket liess sich nicht anlegen -'
@@ -785,9 +791,47 @@ function fer_ann_active($st = null) {
     return (time() >= $start && time() < $start + 600) ? 1 : 0;
 }
 
+/** Ein Aktionstoken erzeugen.
+ *
+ * Der Zeichenvorrat laesst i, l, o und 0/1 weg: das Token steht in der
+ * Oberflaeche zum Abschreiben, und diese Zeichen verwechselt man dabei.
+ * Uebernommen aus dem Saugroboter-Plugin, damit alle Linien dasselbe tun.
+ */
+function fer_token_erzeugen($laenge = 24) {
+    $zeichen = 'abcdefghijkmnpqrstuvwxyz23456789';
+    $t = '';
+    for ($i = 0; $i < $laenge; $i++) {
+        $t .= $zeichen[random_int(0, strlen($zeichen) - 1)];
+    }
+    return $t;
+}
+
 function fer_ptest_active() {
     $f = fer_tmpdir() . '/ptest';
     return (is_file($f) && time() - filemtime($f) < 300) ? 1 : 0;
+}
+
+/**
+ * Die vier Meldeflags an EINER Stelle: ann, audio, push, ptest.
+ *
+ * Sie standen bisher nur in der HTTP-Antwort. Wer auf MQTT umstellte,
+ * verlor sie ersatzlos: kein Meldefenster, keine Freigaben und vor allem
+ * kein PTEST, also keine Moeglichkeit mehr, den Push-Weg zu pruefen, ohne
+ * auf den naechsten Ferienbeginn zu warten.
+ *
+ * Seit 1.1.7 liefert diese Funktion die Werte fuer beide Wege. Sie koennen
+ * damit nicht mehr auseinanderlaufen - genau das war der Grund, sie
+ * herauszuziehen statt die Rechnung ein zweites Mal hinzuschreiben.
+ */
+function fer_meldeflags($st = null)
+{
+    $cfg = fer_config();
+    return array(
+        'ann'   => fer_ann_active($st),
+        'audio' => empty($cfg['notify']['audio']) ? 0 : 1,
+        'push'  => empty($cfg['notify']['push']) ? 0 : 1,
+        'ptest' => fer_ptest_active(),
+    );
 }
 
 /**

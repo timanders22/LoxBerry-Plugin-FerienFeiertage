@@ -69,7 +69,15 @@ $st = fer_state($force);
 
 fer_announce_check();
 
-$sig = json_encode(array($st['heute'], $st['morgen'], $st['naechste'], $st['ok'], $st['warnung']));
+/* Die Meldeflags gehoeren in die Signatur, sonst waeren sie zwar in der
+ * Nachricht - aber die Nachricht ginge nicht raus. ann und ptest aendern
+ * sich naemlich OHNE Zustandswechsel, allein durch Zeitablauf. Ohne sie in
+ * der Signatur bliebe ein ptest bis zum naechsten Zustandswechsel oder bis
+ * zum halbstuendlichen Lebenszeichen liegen - sein Fenster ist aber nur
+ * fuenf Minuten breit. */
+$sig = json_encode(array($st['heute'], $st['morgen'], $st['naechste'], $st['ok'], $st['warnung'],
+                         fer_meldeflags($st)));
+if ($sig === false) { $sig = 'unlesbar'; }
 $sigf = fer_tmpdir() . '/mqtt_sig.txt';
 $beat = fer_tmpdir() . '/mqtt_beat';
 $old = is_file($sigf) ? (string) file_get_contents($sigf) : '';

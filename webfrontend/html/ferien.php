@@ -14,8 +14,14 @@
  *   ?debug=1         -> Ferien- und Feiertagsliste im Klartext
  *   ?refresh=1       -> Daten sofort neu abrufen
  *   ?json=1          -> kompletter Zustand als JSON
- *   ?say=1           -> Test: Vorabend-Ansage abspielen
- *   ?ptest=1         -> Test-Pushnachricht ausloesen (PTEST=1 fuer 5 Minuten)
+ *
+ * Die beiden Aufrufe, die etwas AUSLOESEN, verlangen seit 1.1.7 ein Token aus
+ * dem Reiter "Einbindung in Loxone". Ohne passendes Token antworten sie mit
+ * HTTP 403. Die abfragenden Aufrufe bleiben offen - sie aendern nichts.
+ *
+ *   ?say=1&token=T     -> Test: Vorabend-Ansage abspielen
+ *   ?ptest=1&token=T   -> Test-Pushnachricht ausloesen (PTEST=1 fuer 5 Minuten)
+ *   ?selftest=1&token=T -> nur pruefen, ob das Token stimmt; loest nichts aus
  */
 
 require_once __DIR__ . '/ferien_lib.php';
@@ -32,7 +38,50 @@ if (isset($_GET['json'])) {
 
 header('Content-Type: text/plain; charset=utf-8');
 
+/** Ist ein gueltiges Aktionstoken mitgeschickt worden?
+ *
+ * Ohne eingerichtetes Token ist die Antwort NEIN - ein leeres Soll darf
+ * nicht auf ein leeres Ist passen, sonst schuetzt die Pruefung genau die
+ * Anlage nicht, bei der noch nie jemand ein Token gesetzt hat. Die
+ * Oberflaeche legt beim ersten Aufruf eines an.
+ */
+function fer_token_ok() {
+    $cfg = fer_config();
+    $soll = isset($cfg['aktionstoken']) ? (string) $cfg['aktionstoken'] : '';
+    if ($soll === '') { return false; }
+    return hash_equals($soll, isset($_GET['token']) ? (string) $_GET['token'] : '');
+}
+
+/* ---------- Selbsttest: Token pruefen, ohne etwas auszuloesen ----------
+ * Hausregel: jeder Aktionsendpunkt beantwortet ?selftest=1&token=... , ohne
+ * dass etwas passiert. Sonst laesst sich nicht feststellen, ob die Adresse im
+ * Miniserver noch stimmt, ohne wirklich etwas auszuloesen.
+ */
+if (isset($_GET['selftest'])) {
+    $fe_cfg_st = fer_config();
+    $fe_soll_st = isset($fe_cfg_st['aktionstoken']) ? (string) $fe_cfg_st['aktionstoken'] : '';
+    if ($fe_soll_st === '') {
+        http_response_code(403);
+        echo "SELFTEST;OK=0;ERR=KEIN_TOKEN_EINGERICHTET\n";
+        exit;
+    }
+    if (!hash_equals($fe_soll_st, isset($_GET['token']) ? (string) $_GET['token'] : '')) {
+        http_response_code(403);
+        echo "SELFTEST;OK=0;ERR=TOKEN\n";
+        exit;
+    }
+    echo "SELFTEST;OK=1;TOKEN=OK\n";
+    exit;
+}
+
 if (isset($_GET['say'])) {
+    /* Seit 1.1.7 tokenpflichtig: der Aufruf laesst das Haus sprechen. Ohne
+     * Token konnte jedes Geraet im Heimnetz die Ansage ausloesen. */
+    if (!fer_token_ok()) {
+        http_response_code(403);
+        echo "SAY;OK=0;ERR=TOKEN\n";
+        exit;
+    }
     $st = fer_state();
     $text = fer_announce_text($st);
     if ($text === '') {
@@ -44,8 +93,23 @@ if (isset($_GET['say'])) {
 }
 
 if (isset($_GET['ptest'])) {
+    /* Seit 1.1.7 tokenpflichtig - Hausstandard fuer alle Aktionsendpunkte.
+     * Der Aufruf setzt PTEST=1 fuer fuenf Minuten; das Loxone-Programm
+     * schickt daraufhin eine echte Pushnachricht, und seit dieser Fassung
+     * geht zusaetzlich sofort eine MQTT-Meldung heraus. Ohne Token konnte
+     * jedes Geraet im Netz dem Anwender Meldungen aufs Telefon schicken. */
+    if (!fer_token_ok()) {
+        http_response_code(403);
+        echo "PTEST;OK=0;ERR=TOKEN\n";
+        exit;
+    }
     @file_put_contents(fer_tmpdir() . '/ptest', '1');
     fer_log('Test-Pushnachricht angefordert (PTEST=1 fuer 5 Minuten)');
+    /* Sofort melden, statt bis zu einer Minute auf den Cron zu warten.
+     * Ueber HTTP holt sich der Miniserver den Merker beim naechsten Abruf;
+     * ueber MQTT muss ihn das Plugin schicken - und ein Test, der erst eine
+     * Minute spaeter wirkt, sieht aus wie ein Test, der nicht wirkt. */
+    fer_mqtt_publish();
     echo "PTEST;OK=1;DAUER=300\nHinweis: Loxone pollt alle 300 s - die Push-Nachricht kommt innerhalb von 5 Minuten,\nsofern der Test-Benachrichtigungsbaustein laut Anleitung (Schritt 4) verdrahtet ist.\n";
     exit;
 }
@@ -53,6 +117,8 @@ if (isset($_GET['ptest'])) {
 list($ok, $quelle) = fer_fetch(isset($_GET['refresh']));
 $st = fer_state(isset($_GET['refresh']));
 $cfg = fer_config();
+/* Dieselbe Quelle wie die MQTT-Meldung - siehe fer_meldeflags(). */
+$flags = fer_meldeflags($st);
 
 if (isset($_GET['debug'])) {
     $d = fer_data();
@@ -121,7 +187,4 @@ printf("FERIEN;OK=%d;FERIEN=%d;FEIERTAG=%d;WOCHENENDE=%d;SCHULFREI=%d;SCHULTAG=%
     $st['heute']['urlaub'], $st['morgen']['urlaub'],
     $st['urlaub']['in'], $st['urlaub']['rest'], $st['urlaub']['dauer'], $st['urlaub']['letzter_tag'],
     $st['warnung'],
-    fer_ann_active($st),
-    empty($cfg['notify']['audio']) ? 0 : 1,
-    empty($cfg['notify']['push']) ? 0 : 1,
-    fer_ptest_active());
+    $flags['ann'], $flags['audio'], $flags['push'], $flags['ptest']);
