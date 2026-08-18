@@ -14,6 +14,8 @@
  *
  * Keine persoenlichen Daten im Code - alles kommt aus der lokalen Konfiguration.
  * Kompatibel mit PHP 7.4 und PHP 8.x (LoxBerry 3.x/4.x).
+ *
+ * Fassung 1.2.0.
  */
 
 error_reporting(E_ALL & ~E_DEPRECATED & ~E_NOTICE);
@@ -103,6 +105,49 @@ function fer_config() {
         'notify' => array(),
         'tts' => array(),
         'aktionstoken' => '',        // schuetzt ?say= und ?ptest= (unangemeldeter Endpunkt)
+
+        /* --- ab 1.2.0 ---------------------------------------------------
+         * Alle neuen Schluessel haben BEWUSST den Vorgabewert, der das
+         * bisherige Verhalten fortsetzt. Sie fehlen in jeder bestehenden
+         * Konfiguration; das += oben traegt sie nach, und nichts aendert
+         * sich, bis jemand sie in der Oberflaeche umstellt. Das ist der
+         * Aktualisierungsfall, den eine Neuinstallation nie durchlaeuft.
+         */
+        'subdivision2' => '',        // zweite Region, NUR Schulferien (zweites Kind,
+                                     // anderes Bundesland). Leer = aus.
+        'group' => '',               // Schulart (groupCode der Datenquelle), z. B.
+                                     // DE-MV-ABS/DE-MV-BBS. Leer = alle.
+        'bridge_mode' => 'klassisch', // 'klassisch' = Fr nach Do-Feiertag / Mo vor
+                                     // Di-Feiertag, wie bisher.
+                                     // 'erweitert' = zusaetzlich Werktage, die
+                                     // zwischen zwei freien Bloecken liegen
+                                     // (die Tage zwischen Weihnachten und Neujahr).
+        'bridge_luecke' => 4,        // erweitert: hoechstens so viele Werktage am Stueck.
+                                     // Die 4 ist gemessen, nicht gegriffen: die Tage
+                                     // zwischen Weihnachten und Neujahr sind eine Kette
+                                     // aus VIER Werktagen (28.-31.12.2026, 27.-30.12.2027).
+                                     // Mit 3 faellt genau der Fall heraus, um dessentwillen
+                                     // es den erweiterten Modus gibt.
+                                     // Gemessen fuer DE-BY ueber 366 Tage:
+                                     //   Luecke 1 ->   2 Brueckentage
+                                     //   Luecke 2 ->   6
+                                     //   Luecke 3 ->  12 (Weihnachten fehlt)
+                                     //   Luecke 4 ->  32 (Weihnachten dabei)
+                                     //   Luecke 5 -> 254 - jede gewoehnliche Woche hat
+                                     //               fuenf Werktage, damit waere alles
+                                     //               eine Bruecke. Deshalb ist 4 die
+                                     //               Obergrenze, nicht nur die Vorgabe.
+        'typ_streng' => 0,           // 1 = nur 'Public' zaehlt als gesetzlicher
+                                     // Feiertag; 'Bank' und 'Optional' nicht.
+                                     // Fuer DE/AT ohne Wirkung - gemessen am
+                                     // 18.08.2026: DE-BY 2026 liefert 14 Eintraege,
+                                     // ausnahmslos Public. Wirkung hat es in LU
+                                     // (Karfreitag ist dort 'Bank') und CH ('Optional').
+        'halbtag_frei' => 1,         // 1 = ein halber Feiertag zaehlt als frei, wie bisher
+        'ics_url' => '',             // Kalender-Abonnement (ICS) fuer eigene Termine
+        'ics_typ' => 'urlaub',       // wie die Kalendereintraege gewertet werden
+        'ics_filter' => '',          // nur Termine, deren Titel dies enthaelt (leer = alle)
+        'urlaub_vorlauf' => 1,       // Tage vor der Rueckkehr, an denen URLAUBHEIM=1 wird
     );
     if (!is_array($cfg['own'])) { $cfg['own'] = array(); }
     if (!is_array($cfg['notify'])) { $cfg['notify'] = array(); }
@@ -238,6 +283,66 @@ function fer_datafile() {
 }
 
 /**
+ * Den Namen eines Eintrags in der gewuenschten Sprache holen.
+ *
+ * Ausgelagert, weil ihn seit 1.2.0 drei Stellen brauchen: die beiden
+ * Endpunkte der Hauptregion und der Abruf der zweiten Region. Eine zweite
+ * Abschrift waere eine zweite Stelle, die auseinanderlaufen kann.
+ */
+function fer_name($e, $lang) {
+    if (!isset($e['name'][0]['text'])) { return ''; }
+    foreach ($e['name'] as $n) {
+        if (isset($n['language']) && strtoupper($n['language']) === strtoupper($lang)) {
+            return (string) $n['text'];
+        }
+    }
+    return (string) $e['name'][0]['text'];
+}
+
+/**
+ * Aus einer Antwort der Datenquelle einen eigenen Datensatz bauen.
+ *
+ * Bis 1.1.7 bestand er aus genau drei Schluesseln - von, bis, name. Alles
+ * andere wurde verworfen, obwohl die Quelle es mitliefert. Gemessen am
+ * 18.08.2026 an der Schnittstelle selbst fuehrt ein Eintrag ausserdem:
+ *
+ *   type           Public | Bank | Optional | School | EndOfLessons | BackToSchool
+ *   temporalScope  FullDay | HalfDay
+ *   comment        z. B. "ab 12:00 Uhr" - die Uhrzeit des halben Tages steht
+ *                  NUR hier, es gibt kein eigenes Feld dafuer
+ *   nationwide     gilt im ganzen Land
+ *
+ * Was daran haengt, ist nicht theoretisch: Luxemburg fuehrt Karfreitag als
+ * 'Bank' (kein allgemein arbeitsfreier Tag), die Schweiz drei Halbtage,
+ * Frankreich sechs 'EndOfLessons'-Zeitraeume, die sich mit den Ferien
+ * ueberlappen und ohne 'type' als zweiter Ferienblock mitzaehlen.
+ *
+ * Fuer die eigene Anlage ist es folgenlos - DE-BY 2026 liefert 14 Eintraege,
+ * ausnahmslos Public und FullDay. Es wird erst zum Fehler, wenn jemand das
+ * Laenderfeld benutzt, und das bietet zehn Laender an.
+ */
+function fer_rec($e, $name) {
+    $hinweis = '';
+    if (isset($e['comment']) && is_array($e['comment'])) {
+        foreach ($e['comment'] as $c) {
+            if (isset($c['text']) && trim((string) $c['text']) !== '') {
+                $hinweis = trim((string) $c['text']);
+                break;
+            }
+        }
+    }
+    return array(
+        'von'  => substr((string) $e['startDate'], 0, 10),
+        'bis'  => substr((string) (isset($e['endDate']) ? $e['endDate'] : $e['startDate']), 0, 10),
+        'name' => (string) $name,
+        'art'  => isset($e['type']) ? (string) $e['type'] : '',
+        'halbtag' => (isset($e['temporalScope']) && $e['temporalScope'] === 'HalfDay') ? 1 : 0,
+        'hinweis' => $hinweis,
+        'bundesweit' => !empty($e['nationwide']) ? 1 : 0,
+    );
+}
+
+/**
  * Laedt Ferien und Feiertage fuer die naechsten 18 Monate.
  * Rueckgabe: [ok, quelle]. Die Daten liegen persistent in data/termine.json,
  * damit das Plugin auch ohne Internet weiterarbeitet.
@@ -260,14 +365,23 @@ function fer_fetch($force = false) {
     $q = 'countryIsoCode=' . rawurlencode($land) . '&languageIsoCode=' . rawurlencode($lang)
        . ($sub !== '' ? '&subdivisionCode=' . rawurlencode($sub) : '')
        . '&validFrom=' . $von . '&validTo=' . $bis;
+    /* Schulart (groupCode). Die Datenquelle fuehrt das nur dort, wo ein Land
+     * seine Ferien nach Schulart trennt - gemessen am 18.08.2026 sind das in
+     * Deutschland genau zwei Gruppen, beide fuer Mecklenburg-Vorpommern
+     * (DE-MV-ABS "Allgemeinbildende Schulen", DE-MV-BBS "Berufliche Schulen").
+     * Ohne den Zusatz bekommt man dort beide vermischt. */
+    $gruppe = preg_replace('/[^A-Z0-9\-]/', '', strtoupper((string) $cfg['group']));
+    $qs = $q . ($gruppe !== '' ? '&groupCode=' . rawurlencode($gruppe) : '');
     $out = array('von' => $von, 'bis' => $bis, 'stand' => date('c'),
-                 'land' => $land, 'sub' => $sub, 'ferien' => array(), 'feiertage' => array());
+                 'land' => $land, 'sub' => $sub, 'gruppe' => $gruppe,
+                 'ferien' => array(), 'feiertage' => array(), 'ferien2' => array(),
+                 'sub2' => '');
     $fehler = 0;
     foreach (array('school' => 'SchoolHolidays', 'public' => 'PublicHolidays') as $key => $ep) {
         if (empty($cfg[$key])) {
             continue;
         }
-        $js = fer_http($base . $ep . '?' . $q);
+        $js = fer_http($base . $ep . '?' . ($ep === 'SchoolHolidays' ? $qs : $q));
         $d = @json_decode((string) $js, true);
         if (!is_array($d)) {
             $fehler++;
@@ -288,17 +402,38 @@ function fer_fetch($force = false) {
                 }
                 if (!$passt) { continue; }
             }
-            $name = '';
-            if (isset($e['name'][0]['text'])) {
-                foreach ($e['name'] as $n) {
-                    if (isset($n['language']) && strtoupper($n['language']) === $lang) { $name = $n['text']; break; }
-                }
-                if ($name === '') { $name = $e['name'][0]['text']; }
-            }
-            $rec = array('von' => substr($e['startDate'], 0, 10),
-                         'bis' => substr(isset($e['endDate']) ? $e['endDate'] : $e['startDate'], 0, 10),
-                         'name' => $name);
+            $name = fer_name($e, $lang);
+            $rec = fer_rec($e, $name);
             if ($ep === 'SchoolHolidays') { $out['ferien'][] = $rec; } else { $out['feiertage'][] = $rec; }
+        }
+    }
+
+    /* Zweite Region - NUR Schulferien.
+     *
+     * Der Fall ist ein Haushalt mit zwei Kindern in zwei Bundeslaendern (oder
+     * ein Pendler mit Arbeitsort anderswo). Gesetzliche Feiertage werden
+     * BEWUSST nicht ein zweites Mal geholt: sie haengen am Wohnort, nicht an
+     * der Schule, und zwei Feiertagslisten wuerden die Brueckentags- und
+     * Schulfrei-Rechnung mehrdeutig machen. Was die zweite Region liefert,
+     * steht getrennt in 'ferien2' und geht als eigene Feldgruppe an Loxone.
+     */
+    $sub2 = preg_replace('/[^A-Z0-9\-]/', '', strtoupper((string) $cfg['subdivision2']));
+    if ($sub2 !== '' && $sub2 !== $sub && !empty($cfg['school'])) {
+        $q2 = 'countryIsoCode=' . rawurlencode($land) . '&languageIsoCode=' . rawurlencode($lang)
+            . '&subdivisionCode=' . rawurlencode($sub2)
+            . '&validFrom=' . $von . '&validTo=' . $bis;
+        $js2 = fer_http($base . 'SchoolHolidays?' . $q2);
+        $d2 = @json_decode((string) $js2, true);
+        if (is_array($d2)) {
+            $out['sub2'] = $sub2;
+            foreach ($d2 as $e) {
+                if (!isset($e['startDate'])) { continue; }
+                $name = fer_name($e, $lang);
+                $out['ferien2'][] = fer_rec($e, $name);
+            }
+            usort($out['ferien2'], function ($a, $b) { return strcmp($a['von'], $b['von']); });
+        } else {
+            $fehler++;
         }
     }
     if ($fehler && !$out['ferien'] && !$out['feiertage']) {
@@ -315,8 +450,103 @@ function fer_fetch($force = false) {
     fer_json_schreiben($f, $out);
     @unlink(fer_tmpdir() . '/state.json');
     fer_log('Daten abgerufen: ' . count($out['ferien']) . ' Ferienzeitraeume, '
-        . count($out['feiertage']) . ' Feiertage (' . $land . ($sub !== '' ? '/' . $sub : '') . ', bis ' . $bis . ')');
+        . count($out['feiertage']) . ' Feiertage (' . $land . ($sub !== '' ? '/' . $sub : '')
+        . ($gruppe !== '' ? ', Schulart ' . $gruppe : '') . ', bis ' . $bis . ')'
+        . ($out['sub2'] !== '' ? ' + ' . count($out['ferien2']) . ' Ferienzeitraeume fuer ' . $out['sub2'] : ''));
     return array(1, 'frisch');
+}
+
+/* ---------------- Eigene Termine aus einem Kalender (ICS) ---------------- */
+
+/**
+ * Ein Kalender-Abonnement lesen und daraus eigene Termine machen.
+ *
+ * Warum ueberhaupt: die sechs Zeilen der Oberflaeche muessen von Hand
+ * gepflegt werden, im Format 2026-08-03. Wer sich vertippt, verliert die
+ * Zeile beim Speichern kommentarlos. Der Urlaub steht ohnehin im
+ * Familienkalender - Google, Nextcloud und iCloud geben ihn als ICS heraus.
+ *
+ * Was diese Funktion BEWUSST nicht kann, und warum es hier steht statt in
+ * einer Wunschliste:
+ *
+ *  - Wiederholungen (RRULE) werden uebersprungen. Ein Urlaub wiederholt sich
+ *    nicht, und eine halbe Wiederholungsrechnung waere schlimmer als keine:
+ *    sie erzeugte Termine, die es nicht gibt.
+ *  - Termine mit Uhrzeit werden uebersprungen. Dieses Plugin rechnet in
+ *    ganzen Tagen; ein Zahnarzttermin um 14 Uhr ist kein Urlaubstag. Genommen
+ *    werden nur Ganztagstermine (DTSTART;VALUE=DATE).
+ *  - Zeitzonen spielen damit keine Rolle.
+ *
+ * DTEND ist bei Ganztagsterminen EXKLUSIV - ein eintaegiger Termin am 3.8.
+ * hat DTSTART 20260803 und DTEND 20260804. Wer das uebersieht, verlaengert
+ * jeden Urlaub um einen Tag; die Haussteuerung faehrt dann einen Tag zu
+ * spaet wieder hoch. Deshalb wird hier ein Tag abgezogen.
+ *
+ * Rueckgabe: Liste im selben Aufbau wie cfg['own'], oder leer.
+ */
+function fer_ics_lesen($text, $filter = '') {
+    $aus = array();
+    // Fortsetzungszeilen aufloesen: ICS bricht lange Zeilen um und ruecket die
+    // Fortsetzung mit einem Leerzeichen oder Tabulator ein.
+    $text = str_replace(array("\r\n", "\r"), "\n", (string) $text);
+    $text = preg_replace('/\n[ \t]/', '', $text);
+    $bloecke = preg_split('/BEGIN:VEVENT/', $text);
+    array_shift($bloecke);
+    foreach ($bloecke as $b) {
+        $b = substr($b, 0, strpos($b, 'END:VEVENT') === false ? strlen($b) : strpos($b, 'END:VEVENT'));
+        if (stripos($b, 'RRULE') !== false) { continue; }
+        if (!preg_match('/DTSTART[^:\n]*;VALUE=DATE[^:\n]*:(\d{8})/i', $b, $ms)) { continue; }
+        $von = substr($ms[1], 0, 4) . '-' . substr($ms[1], 4, 2) . '-' . substr($ms[1], 6, 2);
+        $bis = $von;
+        if (preg_match('/DTEND[^:\n]*;VALUE=DATE[^:\n]*:(\d{8})/i', $b, $me)) {
+            $roh = substr($me[1], 0, 4) . '-' . substr($me[1], 4, 2) . '-' . substr($me[1], 6, 2);
+            // DTEND ist exklusiv - siehe Kommentar oben.
+            $bis = date('Y-m-d', strtotime($roh . ' -1 day'));
+            if ($bis < $von) { $bis = $von; }
+        }
+        $name = '';
+        if (preg_match('/\nSUMMARY[^:\n]*:(.*)/', "\n" . $b, $mn)) {
+            $name = trim(str_replace(array('\\,', '\\;', '\\n', '\\N'), array(',', ';', ' ', ' '), $mn[1]));
+        }
+        if ($name === '') { $name = 'Kalendertermin'; }
+        if ($filter !== '' && stripos($name, $filter) === false) { continue; }
+        $aus[] = array('von' => $von, 'bis' => $bis, 'name' => $name);
+    }
+    usort($aus, function ($a, $b) { return strcmp($a['von'], $b['von']); });
+    return $aus;
+}
+
+/**
+ * Den Kalender holen und zwischenspeichern.
+ *
+ * Der Zwischenspeicher liegt unter data/ und NICHT unter /tmp: /tmp ist auf
+ * dem LoxBerry eine Ramdisk, und nach jedem Neustart waeren die Termine weg,
+ * bis der Kalender wieder erreichbar ist. Faellt der Abruf aus, gilt der
+ * letzte erfolgreiche Stand weiter - dieselbe Ueberlegung wie bei den
+ * Ferien selbst.
+ */
+function fer_ics_holen($force = false) {
+    $cfg = fer_config();
+    $url = trim((string) $cfg['ics_url']);
+    if ($url === '' || !preg_match('#^https?://#i', $url)) { return array(); }
+    $f = fer_datadir() . '/kalender.json';
+    if (!$force && is_file($f) && time() - filemtime($f) < 6 * 3600) {
+        $c = json_decode((string) file_get_contents($f), true);
+        if (is_array($c) && isset($c['termine'])) { return (array) $c['termine']; }
+    }
+    $roh = fer_http($url, 20);
+    if ($roh === false || stripos((string) $roh, 'BEGIN:VCALENDAR') === false) {
+        fer_log_if_changed('ics', 'Kalender nicht erreichbar oder keine ICS-Datei: ' . $url);
+        if (is_file($f)) {
+            $c = json_decode((string) file_get_contents($f), true);
+            if (is_array($c) && isset($c['termine'])) { return (array) $c['termine']; }
+        }
+        return array();
+    }
+    $termine = fer_ics_lesen($roh, trim((string) $cfg['ics_filter']));
+    fer_json_schreiben($f, array('stand' => date('c'), 'termine' => $termine));
+    fer_log_if_changed('ics', count($termine) . ' Termine aus dem Kalender uebernommen');
+    return $termine;
 }
 
 /**
@@ -376,7 +606,54 @@ function fer_data() {
     }
     // Eigene Zeitraeume ergaenzen
     if (!isset($d['urlaub']) || !is_array($d['urlaub'])) { $d['urlaub'] = array(); }
+    if (!isset($d['ferien2']) || !is_array($d['ferien2'])) { $d['ferien2'] = array(); }
     $cfg = fer_config();
+
+    /* Eintragsarten aussieben - nur wenn ausdruecklich verlangt.
+     *
+     * Der Vorgabewert ist 0, also KEINE Aussiebung. Das ist Absicht: eine
+     * bestehende Anlage soll nach dem Update nicht ploetzlich einen Feiertag
+     * weniger kennen. Wer die Aussiebung einschaltet, bekommt in der
+     * Oberflaeche vorher gesagt, wie viele Eintraege SEINER Region das
+     * betrifft - bei DE/AT sind es null.
+     *
+     * Ein leeres 'art' bedeutet "kommt nicht aus der Datenquelle" (eigener
+     * Termin) oder "aus einer Termindatei vor 1.2.0" und bleibt deshalb immer
+     * drin. Sonst haetten alle bestehenden Anlagen nach dem Update, aber vor
+     * dem naechsten Abruf, gar keine Feiertage mehr.
+     */
+    if (!empty($cfg['typ_streng'])) {
+        $d['feiertage'] = array_values(array_filter((array) $d['feiertage'], function ($e) {
+            $a = isset($e['art']) ? (string) $e['art'] : '';
+            return $a === '' || $a === 'Public';
+        }));
+        $sieb = function ($e) {
+            $a = isset($e['art']) ? (string) $e['art'] : '';
+            return $a === '' || $a === 'School';
+        };
+        $d['ferien'] = array_values(array_filter((array) $d['ferien'], $sieb));
+        $d['ferien2'] = array_values(array_filter((array) $d['ferien2'], $sieb));
+    }
+
+    /* Termine aus dem Kalender-Abonnement - vor den handgepflegten, damit
+     * die Oberflaeche sie in derselben Liste zeigt. Sie tragen 'ics', damit
+     * man ihnen ansieht, woher sie kommen. */
+    $ics_typ = in_array((string) $cfg['ics_typ'], array('ferien', 'feiertag', 'urlaub'), true)
+        ? (string) $cfg['ics_typ'] : 'urlaub';
+    foreach (fer_ics_holen() as $k) {
+        $rec = array('von' => $k['von'], 'bis' => $k['bis'], 'name' => $k['name'],
+                     'eigen' => 1, 'ics' => 1, 'art' => '');
+        if ($ics_typ === 'feiertag') {
+            $d['feiertage'][] = $rec;
+        } elseif ($ics_typ === 'urlaub') {
+            $rec['urlaub'] = 1;
+            $d['urlaub'][] = $rec;
+            $d['ferien'][] = $rec;
+        } else {
+            $d['ferien'][] = $rec;
+        }
+    }
+
     foreach ((array) $cfg['own'] as $o) {
         $o = (array) $o;
         $von = isset($o['von']) ? trim((string) $o['von']) : '';
@@ -400,22 +677,45 @@ function fer_data() {
             $d['ferien'][] = $rec;
         }
     }
-    if ($d['urlaub']) {
-        usort($d['urlaub'], function ($x, $y) { return strcmp($x['von'], $y['von']); });
-    }
+    /* Nach dem Zusammenfuehren neu sortieren.
+     *
+     * Bis 1.1.7 wurden eigene Termine hinten angehaengt und die Liste blieb,
+     * wie sie war. fer_state() nimmt aber den ERSTEN Eintrag, dessen 'bis'
+     * nicht in der Vergangenheit liegt - und das war dann der naechste
+     * Eintrag der Datenquelle, nicht der naechste ueberhaupt. Wer im Mai
+     * Betriebsferien eintrug, bekam als FERIENIN trotzdem die Zahl bis zu
+     * den Sommerferien. Aufgefallen beim Einbauen des Kalender-Abonnements,
+     * das dasselbe Problem noch verschaerft haette.
+     */
+    $nach_datum = function ($x, $y) { return strcmp($x['von'], $y['von']); };
+    usort($d['ferien'], $nach_datum);
+    usort($d['feiertage'], $nach_datum);
+    if ($d['urlaub']) { usort($d['urlaub'], $nach_datum); }
+    if ($d['ferien2']) { usort($d['ferien2'], $nach_datum); }
     return fer_locality_fix($d);
 }
 
 /* ---------------- Auswertung ---------------- */
 
-/** Trifft ein Zeitraum auf das Datum (Y-m-d) zu? Rueckgabe: Name oder ''. */
-function fer_match($liste, $tag) {
+/** Trifft ein Zeitraum auf das Datum (Y-m-d) zu? Rueckgabe: der EINTRAG oder null.
+ *
+ * Seit 1.2.0 braucht der Aufrufer mehr als den Namen: die Art des Eintrags
+ * und die Kennzeichnung als halber Tag haengen am Eintrag, nicht am Datum.
+ * fer_match() darunter bleibt unveraendert - es gibt weiterhin den Namen
+ * zurueck, und alle bisherigen Aufrufstellen rechnen damit weiter. */
+function fer_match_e($liste, $tag) {
     foreach ((array) $liste as $e) {
         if ($tag >= $e['von'] && $tag <= $e['bis']) {
-            return (string) $e['name'];
+            return $e;
         }
     }
-    return '';
+    return null;
+}
+
+/** Trifft ein Zeitraum auf das Datum (Y-m-d) zu? Rueckgabe: Name oder ''. */
+function fer_match($liste, $tag) {
+    $e = fer_match_e($liste, $tag);
+    return $e === null ? '' : (string) $e['name'];
 }
 
 /** Ist der Tag ein Werktag (Mo-Fr)? */
@@ -425,40 +725,163 @@ function fer_werktag($tag) {
 }
 
 /**
- * Brueckentag: Werktag, der zwischen einem Feiertag und dem Wochenende liegt
- * (Freitag nach Donnerstag-Feiertag bzw. Montag vor Dienstag-Feiertag).
+ * Zaehlt ein Eintrag als freier Tag?
+ *
+ * Ein halber Feiertag ist die einzige Stelle, an der das nicht schon aus dem
+ * Vorhandensein folgt. Bis 1.1.7 zaehlte er als ganzer freier Tag, weil das
+ * Plugin 'temporalScope' gar nicht kannte - deshalb ist der Vorgabewert von
+ * 'halbtag_frei' die 1 und nicht die 0. Wer bis 12 Uhr arbeitet, stellt es
+ * um und bekommt an diesem Tag SCHULFREI=0 und HALBTAG=1.
  */
-function fer_bridge($d, $tag) {
-    if (!fer_werktag($tag) || fer_match($d['feiertage'], $tag) !== '') {
-        return 0;
-    }
+function fer_zaehlt_frei($e, $cfg = null) {
+    if ($e === null) { return false; }
+    if ($cfg === null) { $cfg = fer_config(); }
+    if (!empty($e['halbtag']) && empty($cfg['halbtag_frei'])) { return false; }
+    return true;
+}
+
+/** Ist der Tag ohne Ruecksicht auf Schulferien frei - Wochenende oder Feiertag?
+ *
+ * Das ist die Grundlage der Brueckenrechnung. Schulferien gehoeren BEWUSST
+ * nicht dazu: waehrend der Sommerferien waere sonst jeder Werktag von
+ * "freien" Tagen umgeben, und die Brueckenliste haette 40 Eintraege ohne
+ * jeden Wert fuer die Urlaubsplanung. */
+function fer_frei_ohne_ferien($d, $tag, $cfg = null) {
+    if (!fer_werktag($tag)) { return true; }
+    return fer_zaehlt_frei(fer_match_e($d['feiertage'], $tag), $cfg);
+}
+
+/**
+ * Brueckentag.
+ *
+ * KLASSISCH (Vorgabe, unveraendert seit 1.0): Werktag, der unmittelbar
+ * zwischen einem Feiertag und dem Wochenende liegt - Freitag nach einem
+ * Donnerstags-Feiertag, Montag vor einem Dienstags-Feiertag.
+ *
+ * ERWEITERT (neu in 1.2.0, ab Werk AUS): jeder Werktag, der zu einer Kette
+ * von hoechstens 'bridge_luecke' Werktagen gehoert, die auf BEIDEN Seiten
+ * von freien Tagen begrenzt ist.
+ *
+ * Warum es das gibt: gemessen am 18.08.2026 gegen die echten Daten fuer
+ * DE-BY findet die klassische Regel in 900 Tagen genau DREI Brueckentage.
+ * Sie uebersieht dabei geschlossen den 28.-31.12.2026 und den 27.-30.12.2027
+ * - also genau die Tage, fuer die Menschen Urlaub nehmen. Insgesamt lagen
+ * 16 Werktage zwischen zwei Feiertagen, ohne gemeldet zu werden.
+ *
+ * Warum es trotzdem ab Werk aus ist: BRUECKE und MBRUECKE gehen an den
+ * Miniserver, wo sie ueblicherweise an einem Schwellwertschalter haengen.
+ * Eine Umstellung wuerde auf JEDER bestehenden Anlage die Zahl der Impulse
+ * veraendern, ohne dass jemand danach gefragt hat.
+ */
+function fer_bridge($d, $tag, $cfg = null) {
+    if ($cfg === null) { $cfg = fer_config(); }
+    if (!fer_werktag($tag)) { return 0; }
+    if (fer_zaehlt_frei(fer_match_e($d['feiertage'], $tag), $cfg)) { return 0; }
+
     $w = (int) date('N', strtotime($tag));
     $vor = date('Y-m-d', strtotime($tag . ' -1 day'));
     $nach = date('Y-m-d', strtotime($tag . ' +1 day'));
-    if ($w === 5 && fer_match($d['feiertage'], $vor) !== '') { return 1; } // Fr nach Do-Feiertag
-    if ($w === 1 && fer_match($d['feiertage'], $nach) !== '') { return 1; } // Mo vor Di-Feiertag
-    return 0;
+    $fvor  = fer_zaehlt_frei(fer_match_e($d['feiertage'], $vor), $cfg);
+    $fnach = fer_zaehlt_frei(fer_match_e($d['feiertage'], $nach), $cfg);
+    if ($w === 5 && $fvor)  { return 1; } // Fr nach Do-Feiertag
+    if ($w === 1 && $fnach) { return 1; } // Mo vor Di-Feiertag
+
+    if ((string) $cfg['bridge_mode'] !== 'erweitert') { return 0; }
+
+    /* Die Kette der Werktage um diesen Tag herum abschreiten - erst
+     * rueckwaerts bis zum ersten freien Tag, dann vorwaerts. Die harte
+     * Obergrenze von 14 Schritten je Richtung steht da, weil eine Schleife
+     * ueber fremde Daten ohne Obergrenze frueher oder spaeter haengt. */
+    /* Die Obergrenze 4 ist gemessen: eine gewoehnliche Woche hat fuenf
+     * Werktage, mit 5 waere jeder Werktag des Jahres ein Brueckentag
+     * (254 statt 32 in 366 Tagen). Siehe fer_config(). */
+    $luecke = max(1, min(4, (int) $cfg['bridge_luecke']));
+    $kette = 1;
+    for ($i = 1; $i <= 14; $i++) {
+        $t = date('Y-m-d', strtotime($tag . ' -' . $i . ' day'));
+        if (fer_frei_ohne_ferien($d, $t, $cfg)) { break; }
+        $kette++;
+        if ($kette > $luecke) { return 0; }
+    }
+    if ($i > 14) { return 0; }   // kein freier Tag gefunden - keine Bruecke
+    for ($k = 1; $k <= 14; $k++) {
+        $t = date('Y-m-d', strtotime($tag . ' +' . $k . ' day'));
+        if (fer_frei_ohne_ferien($d, $t, $cfg)) { break; }
+        $kette++;
+        if ($kette > $luecke) { return 0; }
+    }
+    if ($k > 14) { return 0; }
+    return 1;
+}
+
+/**
+ * Wie viele freie Tage am Stueck beginnen an diesem Tag?
+ *
+ * Der Wert, an dem eine Heizungsabsenkung haengt - und der einzige, der ein
+ * Wochenende von den Sommerferien unterscheidet. Gemessen fuer DE-BY ueber
+ * 500 Tage: 44 Bloecke mit genau 2 Tagen, aber neun mit 9 Tagen und mehr,
+ * der laengste 45. Ein Merker "heute ist frei" kann das nicht ausdruecken.
+ *
+ * Die Obergrenze von 90 Tagen ist eine harte Schleifengrenze, kein Messwert:
+ * sie liegt weit ueber allem, was vorkommt (laengster gemessener Block 45),
+ * und verhindert, dass fehlerhafte Fremddaten die Schleife festhalten.
+ */
+function fer_frei_am_stueck($d, $tag, $cfg = null) {
+    if ($cfg === null) { $cfg = fer_config(); }
+    $n = 0;
+    for ($i = 0; $i < 90; $i++) {
+        $t = date('Y-m-d', strtotime($tag . ' +' . $i . ' day'));
+        $frei = !fer_werktag($t)
+             || fer_zaehlt_frei(fer_match_e($d['ferien'], $t), $cfg)
+             || fer_zaehlt_frei(fer_match_e($d['feiertage'], $t), $cfg);
+        if (!$frei) { break; }
+        $n++;
+    }
+    return $n;
 }
 
 /** Alle Kennzahlen eines Tages. */
-function fer_day($d, $tag) {
-    $ferien = fer_match($d['ferien'], $tag);
-    $urlaub = fer_match(isset($d['urlaub']) ? $d['urlaub'] : array(), $tag);
-    $feiertag = fer_match($d['feiertage'], $tag);
+function fer_day($d, $tag, $cfg = null) {
+    if ($cfg === null) { $cfg = fer_config(); }
+    $eF = fer_match_e($d['ferien'], $tag);
+    $eH = fer_match_e($d['feiertage'], $tag);
+    $eU = fer_match_e(isset($d['urlaub']) ? $d['urlaub'] : array(), $tag);
+    $eF2 = fer_match_e(isset($d['ferien2']) ? $d['ferien2'] : array(), $tag);
     $we = !fer_werktag($tag);
-    $frei = ($ferien !== '' || $feiertag !== '' || $we) ? 1 : 0;
+
+    /* Zaehlt der Eintrag als frei? Bei einem halben Feiertag haengt das an
+     * der Einstellung - siehe fer_zaehlt_frei(). Vorhanden ist er in beiden
+     * Faellen, deshalb sind 'feiertag' und 'schulfrei' zwei verschiedene
+     * Fragen und nicht mehr dieselbe. */
+    $fFrei  = fer_zaehlt_frei($eF, $cfg);
+    $hFrei  = fer_zaehlt_frei($eH, $cfg);
+    $f2Frei = fer_zaehlt_frei($eF2, $cfg);
+    $frei  = ($fFrei || $hFrei || $we) ? 1 : 0;
+    $frei2 = ($f2Frei || $hFrei || $we) ? 1 : 0;
+    $halbtag = ((!empty($eH['halbtag'])) || (!empty($eF['halbtag']))) ? 1 : 0;
+
     return array(
         'datum' => $tag,
-        'ferien' => $ferien !== '' ? 1 : 0,
-        'ferien_name' => $ferien,
-        'feiertag' => $feiertag !== '' ? 1 : 0,
-        'feiertag_name' => $feiertag,
+        'ferien' => $eF !== null ? 1 : 0,
+        'ferien_name' => $eF !== null ? (string) $eF['name'] : '',
+        'feiertag' => $eH !== null ? 1 : 0,
+        'feiertag_name' => $eH !== null ? (string) $eH['name'] : '',
+        'feiertag_art' => ($eH !== null && isset($eH['art'])) ? (string) $eH['art'] : '',
+        'hinweis' => ($eH !== null && isset($eH['hinweis'])) ? (string) $eH['hinweis'] : '',
         'wochenende' => $we ? 1 : 0,
         'schulfrei' => $frei,
         'schultag' => $frei ? 0 : 1,
-        'bruecke' => fer_bridge($d, $tag),
-        'urlaub' => $urlaub !== '' ? 1 : 0,
-        'urlaub_name' => $urlaub,
+        'bruecke' => fer_bridge($d, $tag, $cfg),
+        'urlaub' => $eU !== null ? 1 : 0,
+        'urlaub_name' => $eU !== null ? (string) $eU['name'] : '',
+        // --- neu in 1.2.0 ---
+        'wochentag' => (int) date('N', strtotime($tag)),   // 1 = Montag ... 7 = Sonntag
+        'halbtag' => $halbtag,
+        'freitage' => fer_frei_am_stueck($d, $tag, $cfg),
+        'ferien2' => $eF2 !== null ? 1 : 0,
+        'ferien2_name' => $eF2 !== null ? (string) $eF2['name'] : '',
+        'schulfrei2' => $frei2,
+        'schultag2' => $frei2 ? 0 : 1,
     );
 }
 
@@ -496,15 +919,60 @@ function fer_state($force = false) {
                                 'in' => max(0, $tage), 'dauer' => $dauer, 'rest' => $rest);
         break;
     }
-    // Naechster Feiertag
+    /* Die naechsten Ferien NACH den laufenden.
+     *
+     * 'naechste' oben bricht beim ersten Eintrag ab, dessen 'bis' nicht
+     * vergangen ist - waehrend der Ferien ist das der laufende Eintrag, und
+     * FERIENIN steht dann auf 0. Fuer den Wecker ist das richtig, fuer die
+     * Heizungsplanung nicht: die will wissen, wann die naechste lange Pause
+     * beginnt, und zwar gerade dann, wenn eine laeuft. Deshalb ein eigener
+     * Wert statt einer Aenderung an FERIENIN - das haenge in Loxone an
+     * bestehenden Bausteinen. */
+    $st['naechste_nach'] = array('name' => '', 'von' => '', 'bis' => '', 'in' => -1, 'dauer' => 0);
+    foreach ((array) $d['ferien'] as $e) {
+        if ($e['von'] <= $heute) {
+            continue;                       // laufend oder vergangen
+        }
+        $st['naechste_nach'] = array('name' => $e['name'], 'von' => $e['von'], 'bis' => $e['bis'],
+            'in' => max(0, (int) round((strtotime($e['von']) - strtotime($heute)) / 86400)),
+            'dauer' => (int) round((strtotime($e['bis']) - strtotime($e['von'])) / 86400) + 1);
+        break;
+    }
+
+    // Ferien der zweiten Region (zweites Kind, anderes Bundesland)
+    $st['naechste2'] = array('name' => '', 'von' => '', 'bis' => '', 'in' => -1, 'rest' => 0);
+    foreach ((array) (isset($d['ferien2']) ? $d['ferien2'] : array()) as $e) {
+        if ($e['bis'] < $heute) {
+            continue;
+        }
+        $st['naechste2'] = array('name' => $e['name'], 'von' => $e['von'], 'bis' => $e['bis'],
+            'in' => max(0, (int) round((strtotime($e['von']) - strtotime($heute)) / 86400)),
+            'rest' => $e['von'] <= $heute ? (int) round((strtotime($e['bis']) - strtotime($heute)) / 86400) + 1 : 0);
+        break;
+    }
+
+    // Naechster Feiertag - und der uebernaechste
     $st['feiertag_naechster'] = array('name' => '', 'datum' => '', 'in' => -1);
+    $st['feiertag_zweiter'] = array('name' => '', 'datum' => '', 'in' => -1);
+    $gefunden = 0;
     foreach ((array) $d['feiertage'] as $e) {
         if ($e['bis'] < $heute) {
             continue;
         }
-        $st['feiertag_naechster'] = array('name' => $e['name'], 'datum' => $e['von'],
+        $satz = array('name' => $e['name'], 'datum' => $e['von'],
             'in' => max(0, (int) round((strtotime($e['von']) - strtotime($heute)) / 86400)));
-        break;
+        if ($gefunden === 0) {
+            $st['feiertag_naechster'] = $satz;
+            $gefunden = 1;
+        } else {
+            /* Der uebernaechste ist erst dann einer, wenn er auf einen
+             * ANDEREN Tag faellt. An Weihnachten stehen zwei Feiertage
+             * nebeneinander, und wer die Muellabfuhr danach ausrichtet,
+             * braucht die zweite Verschiebung, nicht denselben Tag zweimal. */
+            if ($satz['datum'] === $st['feiertag_naechster']['datum']) { continue; }
+            $st['feiertag_zweiter'] = $satz;
+            break;
+        }
     }
     // Urlaub / Abwesenheit
     $st['urlaub'] = array('name' => '', 'von' => '', 'bis' => '', 'in' => -1, 'dauer' => 0,
@@ -531,11 +999,44 @@ function fer_state($force = false) {
     if (!empty($cfg['bridge'])) {
         for ($i = 0; $i < 366; $i++) {
             $t = date('Y-m-d', strtotime("+$i day"));
-            if (fer_bridge($d, $t)) {
+            if (fer_bridge($d, $t, $cfg)) {
                 $st['brueckentage'][] = $t;
             }
         }
     }
+    /* Tage bis zum naechsten Brueckentag. Bis 1.1.7 ging von der ganzen
+     * Brueckenliste NICHTS an Loxone - sie stand nur in der Oberflaeche.
+     * -1 heisst "keiner bekannt", nicht "heute". */
+    $st['bruecke_in'] = -1;
+    foreach ($st['brueckentage'] as $t) {
+        if ($t >= $heute) {
+            $st['bruecke_in'] = (int) round((strtotime($t) - strtotime($heute)) / 86400);
+            break;
+        }
+    }
+
+    /* Die beiden Uebergaenge.
+     *
+     * FERIENENDE ist das Gegenstueck zu URLAUBENDE, das es seit 1.1.0 gibt:
+     * heute ist der letzte Ferientag. MERSTERSCHULTAG ist der Abend davor
+     * aus Sicht des Weckers - morgen geht die Schule wieder los.
+     *
+     * Die Bedingung fragt ausdruecklich nach 'ferien' und nicht nach
+     * 'schulfrei': sonst waere jeder Sonntagabend ein "erster Schultag" und
+     * der Merker damit wertlos. */
+    $st['ferienende'] = ($st['heute']['ferien'] && !$st['morgen']['ferien']) ? 1 : 0;
+    $st['merster_schultag'] = ($st['heute']['ferien'] && $st['morgen']['schultag']) ? 1 : 0;
+
+    /* Vorwaermen zur Rueckkehr.
+     *
+     * URLAUBENDE springt erst am letzten Urlaubstag auf 1. Ein Haus, das
+     * erst dann anfaengt zu heizen, ist bei der Ankunft kalt - die README
+     * verspricht seit 1.1.0 das Gegenteil. URLAUBHEIM geht 'urlaub_vorlauf'
+     * Tage frueher an; bei der Vorgabe 1 ist das der vorletzte Urlaubstag,
+     * und URLAUBENDE bleibt unveraendert. */
+    $vorlauf = max(0, min(14, (int) $cfg['urlaub_vorlauf']));
+    $st['urlaub']['heim'] = ($st['urlaub']['aktiv'] && $st['urlaub']['rest'] > 0
+                             && $st['urlaub']['rest'] <= $vorlauf + 1) ? 1 : 0;
     // Warnung, wenn die Daten bald auslaufen
     if ($st['ok'] && $st['reicht_bis'] !== '' && $st['reicht_bis'] < date('Y-m-d', strtotime('+60 days'))) {
         $st['warnung'] = 1;
@@ -586,29 +1087,33 @@ function fer_mqtt_publish($st = null) {
         return;
     }
     $prefix = trim((string) $cfg['mqtt_topic']) !== '' ? trim((string) $cfg['mqtt_topic']) : 'ferien';
-    $m = array(
-        'ok' => $st['ok'], 'warnung' => $st['warnung'],
-        'ferien' => $st['heute']['ferien'], 'feiertag' => $st['heute']['feiertag'],
-        'schulfrei' => $st['heute']['schulfrei'], 'schultag' => $st['heute']['schultag'],
-        'bruecke' => $st['heute']['bruecke'],
-        'name' => ($st['heute']['feiertag_name'] !== '' ? $st['heute']['feiertag_name']
-                  : ($st['heute']['ferien_name'] !== '' ? $st['heute']['ferien_name'] : '-')),
-        'morgen_schulfrei' => $st['morgen']['schulfrei'], 'morgen_schultag' => $st['morgen']['schultag'],
-        'morgen_feiertag' => $st['morgen']['feiertag'], 'morgen_ferien' => $st['morgen']['ferien'],
-        'ferien_in' => $st['naechste']['in'], 'ferien_rest' => $st['naechste']['rest'],
-        'ferien_name' => $st['naechste']['name'] !== '' ? $st['naechste']['name'] : '-',
-        'urlaub' => $st['heute']['urlaub'], 'morgen_urlaub' => $st['morgen']['urlaub'],
-        'urlaub_in' => $st['urlaub']['in'], 'urlaub_rest' => $st['urlaub']['rest'],
-        'urlaub_letzter_tag' => $st['urlaub']['letzter_tag'],
-        'urlaub_name' => $st['urlaub']['name'] !== '' ? $st['urlaub']['name'] : '-',
-        'feiertag_in' => $st['feiertag_naechster']['in'],
-        'feiertag_name' => $st['feiertag_naechster']['name'] !== '' ? $st['feiertag_naechster']['name'] : '-',
-    );
-    /* ann, audio, push und ptest fehlten hier. In der Vorlage fuer Loxone
-     * (fer_felder) stehen sie seit jeher, ueber HTTP kamen sie auch - nur
-     * der MQTT-Weg lieferte sie nicht. Wer umstellte, merkte es erst, wenn
-     * der Test-Push nicht mehr ausloeste. */
-    $m = array_merge($m, fer_meldeflags($st));
+
+    /* Die Themenliste entsteht aus fer_felder() - siehe den langen Kommentar
+     * dort. Bis 1.1.7 stand hier eine zweite, von Hand gepflegte Liste; sie
+     * war um vier Werte kuerzer als die des HTTP-Weges, und weil beide auf
+     * 27 Eintraege kamen, ist es niemandem aufgefallen. */
+    $m = array();
+    $felder = fer_felder();
+    foreach (fer_werte($st) as $name => $wert) {
+        if (isset($felder[$name][5]) && $felder[$name][5] !== '') {
+            $m[$felder[$name][5]] = $wert;
+        }
+    }
+    // Dazu die Textwerte, die ein virtueller HTTP-Eingang nicht lesen kann.
+    $m = array_merge($m, fer_mqtt_texte($st));
+
+    /* function_exists() vor socket_create().
+     *
+     * Ein vorangestelltes @ unterdrueckt Meldungen, aber es faengt keinen
+     * "Call to undefined function" - das ist ein toedlicher Fehler, und der
+     * Cron-Lauf waere an dieser Zeile ohne Eintrag im Protokoll gestorben.
+     * Auf einem LoxBerry ohne php-sockets ist das kein Sonderfall. */
+    if (!function_exists('socket_create')) {
+        fer_log_if_changed('mqtt', 'Die PHP-Erweiterung sockets fehlt - ohne sie'
+            . ' laesst sich das MQTT-Gateway nicht ueber UDP ansprechen.'
+            . ' Der HTTP-Weg (ferien.php) ist davon nicht betroffen.');
+        return;
+    }
     $s = @socket_create(AF_INET, SOCK_DGRAM, SOL_UDP);
     if (!$s) {
         fer_log_if_changed('mqtt', 'UDP-Socket liess sich nicht anlegen -'
@@ -945,6 +1450,65 @@ function fer_subdivisions($land = 'DE') {
     return $out;
 }
 
+/** Auswahlliste der Schularten (groupCode) - fuer die Oberflaeche.
+ *
+ * Die meisten Laender fuehren keine; dann bleibt die Liste leer und die
+ * Oberflaeche zeigt das Feld gar nicht erst an. Gemessen am 18.08.2026
+ * liefert Deutschland genau zwei, beide fuer Mecklenburg-Vorpommern.
+ */
+function fer_gruppen($land = 'DE') {
+    $cache = fer_tmpdir() . '/groups_' . preg_replace('/[^A-Z]/', '', strtoupper($land)) . '.json';
+    if (is_file($cache) && time() - filemtime($cache) < 30 * 86400) {
+        $c = json_decode((string) file_get_contents($cache), true);
+        if (is_array($c)) { return $c; }
+    }
+    $js = fer_http('https://openholidaysapi.org/Groups?countryIsoCode=' . rawurlencode($land)
+        . '&languageIsoCode=DE', 15);
+    $d = @json_decode((string) $js, true);
+    $out = array();
+    if (is_array($d)) {
+        foreach ($d as $e) {
+            $name = fer_name($e, 'DE');
+            if (isset($e['code']) && $name !== '') { $out[$e['code']] = $name; }
+        }
+        // Auch eine LEERE Antwort wird gemerkt - sonst fragt die Oberflaeche
+        // bei jedem Aufbau erneut nach, und bei den meisten Laendern ist die
+        // Antwort dauerhaft leer.
+        fer_json_schreiben($cache, $out);
+    }
+    return $out;
+}
+
+/**
+ * Wie viele Eintraege der VORHANDENEN Daten betrifft eine Einstellung?
+ *
+ * Damit die Oberflaeche nicht "koennte etwas aendern" schreiben muss,
+ * sondern "betrifft auf dieser Anlage 0 Eintraege". Gelesen wird die rohe
+ * Termindatei, NICHT fer_data() - das siebt ja bereits nach derselben
+ * Einstellung und wuerde dann immer null melden.
+ */
+function fer_artstatistik() {
+    $f = fer_datafile();
+    $d = is_file($f) ? json_decode((string) file_get_contents($f), true) : null;
+    $aus = array('feiertage_fremd' => 0, 'ferien_fremd' => 0, 'halbtage' => 0,
+                 'arten' => array(), 'gesamt' => 0);
+    if (!is_array($d)) { return $aus; }
+    foreach (array('feiertage', 'ferien', 'ferien2') as $topf) {
+        foreach ((array) (isset($d[$topf]) ? $d[$topf] : array()) as $e) {
+            $aus['gesamt']++;
+            $a = isset($e['art']) ? (string) $e['art'] : '';
+            if ($a !== '') { $aus['arten'][$a] = (isset($aus['arten'][$a]) ? $aus['arten'][$a] : 0) + 1; }
+            if (!empty($e['halbtag'])) { $aus['halbtage']++; }
+            if ($topf === 'feiertage') {
+                if ($a !== '' && $a !== 'Public') { $aus['feiertage_fremd']++; }
+            } else {
+                if ($a !== '' && $a !== 'School') { $aus['ferien_fremd']++; }
+            }
+        }
+    }
+    return $aus;
+}
+
 /* ==================================================================
  * Sprache (Pflicht: Deutsch und Englisch)
  *
@@ -1010,41 +1574,401 @@ function fer_t($schluessel)
     return isset($texte[$a][$s]) ? $texte[$a][$s] : $schluessel;
 }
 
-/* ---------------- Loxone-Vorlage (Hausstandard "Alles auf einmal anlegen") ---------------- */
-/** name => array(analog, min, max, einheit, kommentar).
- *  Die Suchmuster funktionieren nur, weil in der Ausgabezeile jedes
- *  Heute-Feld VOR seinem M-Gegenstueck steht (siehe Kommentar in ferien.php). */
+/* ---------------- Die Feldliste: EINE Quelle fuer drei Wege ---------------- */
+
+/**
+ * name => array(analog, min, max, einheit, kommentar, MQTT-Thema).
+ *
+ * Aus dieser Liste entstehen seit 1.2.0 ALLE drei Wege: die Textzeile fuer
+ * den Miniserver, die MQTT-Themen und die Importdatei fuer Loxone Config.
+ *
+ * WARUM DAS SO SEIN MUSS
+ *
+ * Bis 1.1.7 stand die MQTT-Liste getrennt in fer_mqtt_publish(). Die
+ * Fassung 1.1.7 hat vier fehlende Merker nachgetragen und in die README
+ * geschrieben, der MQTT-Weg liefere jetzt alles, was der HTTP-Weg liefert.
+ * Nachgemessen am 18.08.2026 stimmte das nicht: beide Wege fuehrten 27
+ * Werte, aber nicht dieselben. Ueber MQTT fehlten WOCHENENDE, MBRUECKE,
+ * FERIENDAUER und URLAUBDAUER; dafuer trug MQTT vier Namenstexte, die es
+ * ueber HTTP nicht gibt. Dass beide Seiten auf 27 kamen, war Zufall - und
+ * genau deshalb ist es niemandem aufgefallen.
+ *
+ * Zwei Listen koennen auseinanderlaufen, eine nicht. Der Reiter Test misst
+ * die Deckung ausserdem nach (fer_selbsttest).
+ *
+ * ZUR REIHENFOLGE - sie ist Teil der Schnittstelle
+ *
+ * Loxone sucht in der Zeile die woertliche Zeichenkette der
+ * Befehlserkennung (z. B. "FERIEN=") und nimmt den ERSTEN Treffer. In
+ * dieser Zeile steht "FERIEN=" aber auch als Teil von "MFERIEN=". Es geht
+ * nur gut, weil jedes Heute-Feld VOR seinem M-Gegenstueck steht. Wer
+ * umsortiert, liefert Loxone stillschweigend den Wert von morgen als den
+ * von heute - ohne Fehlermeldung, nur mit falschen Weckern.
+ *
+ * Dieser Absatz stand bis 1.1.7 als Warnung in ferien.php und wurde von
+ * nichts geprueft. Seit 1.2.0 prueft ihn fer_reihenfolge_pruefen() an der
+ * fertigen Zeile, und der Reiter Test zeigt das Ergebnis.
+ *
+ * ZU MIN = -1
+ *
+ * FERIENIN, FEIERTAGIN, URLAUBIN, BRUECKEIN, FERIENNAECHSTEIN, FEIERTAG2IN
+ * und FERIEN2IN liefern -1, wenn es nichts zu zaehlen gibt. Bis 1.1.7 stand
+ * in der Importdatei trotzdem MinVal="0" - und URLAUBIN=-1 ist der
+ * Normalzustand JEDER Anlage, in der kein Urlaub eingetragen ist. Die
+ * massgebliche Ausfuhr aus Loxone Config (VI_Rasenmaeher, 12.08.2026) traegt
+ * an genau den Feldern, die -1 liefern koennen, MinVal="-1". Danach richtet
+ * sich das hier.
+ */
 function fer_felder() {
     return array(
-        'OK'          => array(0, 0, 1,   '',     '1 = Daten gueltig'),
-        'FERIEN'      => array(0, 0, 1,   '',     'heute Ferien'),
-        'FEIERTAG'    => array(0, 0, 1,   '',     'heute Feiertag'),
-        'WOCHENENDE'  => array(0, 0, 1,   '',     'heute Wochenende'),
-        'SCHULFREI'   => array(0, 0, 1,   '',     'heute schulfrei'),
-        'SCHULTAG'    => array(0, 0, 1,   '',     'heute Schultag'),
-        'BRUECKE'     => array(0, 0, 1,   '',     'heute Brueckentag'),
-        'MFERIEN'     => array(0, 0, 1,   '',     'morgen Ferien'),
-        'MFEIERTAG'   => array(0, 0, 1,   '',     'morgen Feiertag'),
-        'MSCHULFREI'  => array(0, 0, 1,   '',     'morgen schulfrei'),
-        'MSCHULTAG'   => array(0, 0, 1,   '',     'morgen Schultag'),
-        'MBRUECKE'    => array(0, 0, 1,   '',     'morgen Brueckentag'),
-        'FERIENIN'    => array(1, 0, 365, 'Tage', 'naechste Ferien beginnen in'),
-        'FERIENREST'  => array(1, 0, 365, 'Tage', 'laufende Ferien: Resttage'),
-        'FERIENDAUER' => array(1, 0, 365, 'Tage', 'naechste/laufende Ferien: Dauer'),
-        'FEIERTAGIN'  => array(1, 0, 365, 'Tage', 'naechster Feiertag in'),
-        'URLAUB'      => array(0, 0, 1,   '',     'heute Urlaub (eigene Termine)'),
-        'MURLAUB'     => array(0, 0, 1,   '',     'morgen Urlaub'),
-        'URLAUBIN'    => array(1, 0, 365, 'Tage', 'naechster Urlaub beginnt in'),
-        'URLAUBREST'  => array(1, 0, 365, 'Tage', 'laufender Urlaub: Resttage'),
-        'URLAUBDAUER' => array(1, 0, 365, 'Tage', 'Urlaub: Dauer'),
-        'URLAUBENDE'  => array(0, 0, 1,   '',     'letzter Urlaubstag'),
-        'WARN'        => array(0, 0, 1,   '',     'Warnhinweis aktiv'),
-        'ANN'         => array(0, 0, 1,   '',     'Meldefenster aktiv'),
-        'AUDIO'       => array(0, 0, 1,   '',     'Ansage freigegeben'),
-        'PUSH'        => array(0, 0, 1,   '',     'Push freigegeben'),
-        'PTEST'       => array(0, 0, 1,   '',     'Test-Push ausloesen'),
+        // Name              analog min  max  Einheit  Bedeutung                                MQTT-Thema
+        'OK'          => array(0,  0,   1,   '',     '1 = Daten gueltig',                      'ok'),
+        'FERIEN'      => array(0,  0,   1,   '',     'heute Ferien',                           'ferien'),
+        'FEIERTAG'    => array(0,  0,   1,   '',     'heute Feiertag',                         'feiertag'),
+        'WOCHENENDE'  => array(0,  0,   1,   '',     'heute Wochenende',                       'wochenende'),
+        'SCHULFREI'   => array(0,  0,   1,   '',     'heute schulfrei',                        'schulfrei'),
+        'SCHULTAG'    => array(0,  0,   1,   '',     'heute Schultag',                         'schultag'),
+        'BRUECKE'     => array(0,  0,   1,   '',     'heute Brueckentag',                      'bruecke'),
+        'MFERIEN'     => array(0,  0,   1,   '',     'morgen Ferien',                          'morgen_ferien'),
+        'MFEIERTAG'   => array(0,  0,   1,   '',     'morgen Feiertag',                        'morgen_feiertag'),
+        'MSCHULFREI'  => array(0,  0,   1,   '',     'morgen schulfrei',                       'morgen_schulfrei'),
+        'MSCHULTAG'   => array(0,  0,   1,   '',     'morgen Schultag',                        'morgen_schultag'),
+        'MBRUECKE'    => array(0,  0,   1,   '',     'morgen Brueckentag',                     'morgen_bruecke'),
+        'FERIENIN'    => array(1, -1, 365, 'Tage',   'naechste Ferien beginnen in (0 = laufen, -1 = keine bekannt)', 'ferien_in'),
+        'FERIENREST'  => array(1,  0, 365, 'Tage',   'laufende Ferien: Resttage',              'ferien_rest'),
+        'FERIENDAUER' => array(1,  0, 365, 'Tage',   'naechste/laufende Ferien: Dauer',        'ferien_dauer'),
+        'FEIERTAGIN'  => array(1, -1, 365, 'Tage',   'naechster Feiertag in',                  'feiertag_in'),
+        'URLAUB'      => array(0,  0,   1,   '',     'heute Urlaub (eigene Termine)',          'urlaub'),
+        'MURLAUB'     => array(0,  0,   1,   '',     'morgen Urlaub',                          'morgen_urlaub'),
+        'URLAUBIN'    => array(1, -1, 365, 'Tage',   'naechster Urlaub beginnt in (-1 = keiner eingetragen)', 'urlaub_in'),
+        'URLAUBREST'  => array(1,  0, 365, 'Tage',   'laufender Urlaub: Resttage',             'urlaub_rest'),
+        'URLAUBDAUER' => array(1,  0, 365, 'Tage',   'Urlaub: Dauer',                          'urlaub_dauer'),
+        'URLAUBENDE'  => array(0,  0,   1,   '',     'letzter Urlaubstag',                     'urlaub_letzter_tag'),
+        'WARN'        => array(0,  0,   1,   '',     'Warnhinweis aktiv',                      'warnung'),
+        'ANN'         => array(0,  0,   1,   '',     'Meldefenster aktiv',                     'ann'),
+        'AUDIO'       => array(0,  0,   1,   '',     'Ansage freigegeben',                     'audio'),
+        'PUSH'        => array(0,  0,   1,   '',     'Push freigegeben',                       'push'),
+        'PTEST'       => array(0,  0,   1,   '',     'Test-Push ausloesen',                    'ptest'),
+
+        /* --- neu in 1.2.0, hinten angehaengt -----------------------------
+         * Hinten, weil das die einzige Stelle ist, an der ein neues Feld
+         * kein bestehendes verdecken kann - und weil ein bestehender
+         * Miniserver die Zeile dann unveraendert weiterliest. Die
+         * Kollisionsfreiheit ist geprueft, nicht angenommen. */
+        'WOCHENTAG'   => array(1,  1,   7,   '',     'Wochentag heute (1 = Montag ... 7 = Sonntag)', 'wochentag'),
+        'MWOCHENTAG'  => array(1,  1,   7,   '',     'Wochentag morgen',                       'morgen_wochentag'),
+        'FREITAGE'    => array(1,  0, 366, 'Tage',   'freie Tage am Stueck ab heute (0 = heute ist Arbeitstag)', 'freitage'),
+        'MFREITAGE'   => array(1,  0, 366, 'Tage',   'freie Tage am Stueck ab morgen',         'morgen_freitage'),
+        'FERIENENDE'  => array(0,  0,   1,   '',     'heute ist der letzte Ferientag',         'ferien_ende'),
+        'MERSTERSCHULTAG' => array(0, 0, 1, '',      'morgen ist der erste Schultag nach den Ferien', 'morgen_erster_schultag'),
+        'HALBTAG'     => array(0,  0,   1,   '',     'heute ist ein halber Feiertag',          'halbtag'),
+        'MHALBTAG'    => array(0,  0,   1,   '',     'morgen ist ein halber Feiertag',         'morgen_halbtag'),
+        'BRUECKEIN'   => array(1, -1, 366, 'Tage',   'naechster Brueckentag in (-1 = keiner bekannt)', 'bruecke_in'),
+        'FERIENNAECHSTEIN' => array(1, -1, 365, 'Tage', 'naechste Ferien NACH den laufenden beginnen in', 'ferien_naechste_in'),
+        'FEIERTAG2IN' => array(1, -1, 365, 'Tage',   'uebernaechster Feiertag in',             'feiertag2_in'),
+        'URLAUBHEIM'  => array(0,  0,   1,   '',     'Vorwaermen zur Rueckkehr aus dem Urlaub', 'urlaub_heim'),
+        'FERIEN2'     => array(0,  0,   1,   '',     'heute Ferien in der zweiten Region',     'ferien2'),
+        'MFERIEN2'    => array(0,  0,   1,   '',     'morgen Ferien in der zweiten Region',    'morgen_ferien2'),
+        'SCHULFREI2'  => array(0,  0,   1,   '',     'heute schulfrei in der zweiten Region',  'schulfrei2'),
+        'MSCHULFREI2' => array(0,  0,   1,   '',     'morgen schulfrei in der zweiten Region', 'morgen_schulfrei2'),
+        'SCHULTAG2'   => array(0,  0,   1,   '',     'heute Schultag in der zweiten Region',   'schultag2'),
+        'MSCHULTAG2'  => array(0,  0,   1,   '',     'morgen Schultag in der zweiten Region',  'morgen_schultag2'),
+        'FERIEN2IN'   => array(1, -1, 365, 'Tage',   'naechste Ferien der zweiten Region in',  'ferien2_in'),
     );
 }
+
+/**
+ * Die Textwerte, die es NUR ueber MQTT gibt.
+ *
+ * Ein virtueller HTTP-Eingang in Loxone liest Zahlen, keine Zeichenketten -
+ * deshalb stehen die Namen nicht in fer_felder(). Sie hier aufzufuehren
+ * statt sie in fer_mqtt_publish() zu verstecken hat einen Grund: der
+ * Reiter Test vergleicht beide Wege und muss wissen, was absichtlich nur
+ * auf einem von beiden steht. Sonst meldet er jedes Mal vier Fehlstellen.
+ */
+function fer_mqtt_texte($st) {
+    return array(
+        'name' => ($st['heute']['feiertag_name'] !== '' ? $st['heute']['feiertag_name']
+                  : ($st['heute']['ferien_name'] !== '' ? $st['heute']['ferien_name'] : '-')),
+        'ferien_name'   => $st['naechste']['name'] !== '' ? $st['naechste']['name'] : '-',
+        'urlaub_name'   => $st['urlaub']['name'] !== '' ? $st['urlaub']['name'] : '-',
+        'feiertag_name' => $st['feiertag_naechster']['name'] !== '' ? $st['feiertag_naechster']['name'] : '-',
+        'ferien2_name'  => $st['naechste2']['name'] !== '' ? $st['naechste2']['name'] : '-',
+        'feiertag_hinweis' => $st['heute']['hinweis'] !== '' ? $st['heute']['hinweis'] : '-',
+    );
+}
+
+/**
+ * Der Wert jedes Feldes aus fer_felder() - fuer BEIDE Wege.
+ *
+ * Hier und nirgends sonst wird entschieden, was ein Feld bedeutet. Die
+ * Textzeile fuer den Miniserver und die MQTT-Meldung nehmen dasselbe
+ * Ergebnis; sie koennen damit nicht mehr verschiedene Zahlen tragen.
+ */
+function fer_werte($st, $flags = null) {
+    if ($flags === null) { $flags = fer_meldeflags($st); }
+    $h = $st['heute'];
+    $m = $st['morgen'];
+    return array(
+        'OK' => (int) $st['ok'],
+        'FERIEN' => (int) $h['ferien'],
+        'FEIERTAG' => (int) $h['feiertag'],
+        'WOCHENENDE' => (int) $h['wochenende'],
+        'SCHULFREI' => (int) $h['schulfrei'],
+        'SCHULTAG' => (int) $h['schultag'],
+        'BRUECKE' => (int) $h['bruecke'],
+        'MFERIEN' => (int) $m['ferien'],
+        'MFEIERTAG' => (int) $m['feiertag'],
+        'MSCHULFREI' => (int) $m['schulfrei'],
+        'MSCHULTAG' => (int) $m['schultag'],
+        'MBRUECKE' => (int) $m['bruecke'],
+        'FERIENIN' => (int) $st['naechste']['in'],
+        'FERIENREST' => (int) $st['naechste']['rest'],
+        'FERIENDAUER' => (int) $st['naechste']['dauer'],
+        'FEIERTAGIN' => (int) $st['feiertag_naechster']['in'],
+        'URLAUB' => (int) $h['urlaub'],
+        'MURLAUB' => (int) $m['urlaub'],
+        'URLAUBIN' => (int) $st['urlaub']['in'],
+        'URLAUBREST' => (int) $st['urlaub']['rest'],
+        'URLAUBDAUER' => (int) $st['urlaub']['dauer'],
+        'URLAUBENDE' => (int) $st['urlaub']['letzter_tag'],
+        'WARN' => (int) $st['warnung'],
+        'ANN' => (int) $flags['ann'],
+        'AUDIO' => (int) $flags['audio'],
+        'PUSH' => (int) $flags['push'],
+        'PTEST' => (int) $flags['ptest'],
+        'WOCHENTAG' => (int) $h['wochentag'],
+        'MWOCHENTAG' => (int) $m['wochentag'],
+        'FREITAGE' => (int) $h['freitage'],
+        'MFREITAGE' => (int) $m['freitage'],
+        'FERIENENDE' => (int) $st['ferienende'],
+        'MERSTERSCHULTAG' => (int) $st['merster_schultag'],
+        'HALBTAG' => (int) $h['halbtag'],
+        'MHALBTAG' => (int) $m['halbtag'],
+        'BRUECKEIN' => (int) $st['bruecke_in'],
+        'FERIENNAECHSTEIN' => (int) $st['naechste_nach']['in'],
+        'FEIERTAG2IN' => (int) $st['feiertag_zweiter']['in'],
+        'URLAUBHEIM' => (int) $st['urlaub']['heim'],
+        'FERIEN2' => (int) $h['ferien2'],
+        'MFERIEN2' => (int) $m['ferien2'],
+        'SCHULFREI2' => (int) $h['schulfrei2'],
+        'MSCHULFREI2' => (int) $m['schulfrei2'],
+        'SCHULTAG2' => (int) $h['schultag2'],
+        'MSCHULTAG2' => (int) $m['schultag2'],
+        'FERIEN2IN' => (int) $st['naechste2']['in'],
+    );
+}
+
+/**
+ * Die fertige Textzeile fuer den Miniserver.
+ *
+ * Entsteht aus fer_felder() und fer_werte(), nicht aus einem printf mit 46
+ * Argumenten in fester Reihenfolge. Ein Argument zu verschieben war bis
+ * 1.1.7 die leichteste Art, allen Feldern dahinter den falschen Wert zu
+ * geben, ohne dass irgendwo etwas auffaellt.
+ */
+function fer_zeile($st, $flags = null) {
+    $w = fer_werte($st, $flags);
+    $t = 'FERIEN';
+    foreach (fer_felder() as $name => $f) {
+        $t .= ';' . $name . '=' . (isset($w[$name]) ? (int) $w[$name] : 0);
+    }
+    return $t . "\n";
+}
+
+/**
+ * Prueft die Praefix-Falle an der FERTIGEN Zeile.
+ *
+ * Gemessen wird nicht der Name, sondern das, was Loxone tut: den ersten
+ * Treffer von "<NAME>=" nehmen. Gehoert der zu einem anderen Feld, ist das
+ * ein Befund. Rueckgabe: Liste der verdeckten Felder (leer = in Ordnung).
+ *
+ * Geeicht in drei Richtungen (18.08.2026): die bekannte Verdrehung
+ * MFERIEN vor FERIEN wird rot, ein neu erfundener Fall MFERIEN2 vor FERIEN2
+ * wird rot, die ausgelieferte Reihenfolge bleibt gruen - und dieselbe Liste
+ * rueckwaerts wird rot.
+ */
+function fer_reihenfolge_pruefen($namen = null) {
+    if ($namen === null) { $namen = array_keys(fer_felder()); }
+    $z = 'FERIEN';
+    foreach ($namen as $i => $n) { $z .= ';' . $n . '=' . ($i + 1); }
+    $aus = array();
+    foreach ($namen as $n) {
+        $erster = strpos($z, $n . '=');
+        $eigen  = strpos($z, ';' . $n . '=');
+        if ($eigen === false || $erster !== $eigen + 1) { $aus[] = $n; }
+    }
+    return $aus;
+}
+/* ---------------- Selbstpruefung (Reiter Test) ---------------- */
+
+/**
+ * Beantwortet OHNE Loxone: traegt die Einrichtung?
+ *
+ * Aufbau je Zeile: array(frage, ok, hinweis). ok ist true (Haken),
+ * false (Kreuz) oder null (Hinweis - "geht mich nichts an").
+ *
+ * DREI REGELN, DIE HIER EINGEBAUT SIND
+ *
+ * 1. Die Ursache steht VOR der Wirkung. "Sind ueberhaupt Daten da" kommt
+ *    vor "stimmen die Felder" - wer die Reihenfolge umdreht, schickt den
+ *    Leser in die falsche Ecke.
+ * 2. Eine Zusammenfassung darf nicht besser aussehen als ihr schlechtester
+ *    Punkt. Unklare Lagen zaehlen als null und werden NICHT zu den
+ *    bestandenen gezaehlt - sonst entsteht ein "22 von 22", waehrend nichts
+ *    funktioniert.
+ * 3. Wer einen leeren Befund erklaert, muss die Erklaerung belegen koennen.
+ *    "Keine Ferien gefunden" ist nur dann in Ordnung, wenn Schulferien
+ *    abgeschaltet sind - und das wird nachgesehen, nicht angenommen.
+ */
+function fer_selbsttest($basis = '') {
+    $cfg = fer_config();
+    $z = array();
+    $add = function ($frage, $ok, $hinweis = '') use (&$z) {
+        $z[] = array('frage' => $frage, 'ok' => $ok, 'hinweis' => $hinweis);
+    };
+
+    /* --- 1. Die Daten selbst ------------------------------------------- */
+    $d = fer_data();
+    $nf = count((array) $d['ferien']);
+    $nh = count((array) $d['feiertage']);
+    $add('Sind Ferien- oder Feiertagsdaten vorhanden?', ($nf + $nh) > 0,
+        $nf . ' Ferienzeitraeume, ' . $nh . ' Feiertage');
+
+    // Leere Ferienliste erklaeren - aber nur, wenn die Erklaerung stimmt.
+    if ($nf === 0) {
+        $add('Keine Ferien gefunden - ist das erklaerbar?',
+            empty($cfg['school']) ? null : false,
+            empty($cfg['school'])
+                ? 'Schulferien sind in den Einstellungen abgeschaltet, das ist also richtig so.'
+                : 'Schulferien sind eingeschaltet, es kamen aber keine. Region pruefen und neu abrufen.');
+    }
+
+    $st = fer_state();
+    $reicht = (string) $st['reicht_bis'];
+    $add('Reichen die Daten weit genug in die Zukunft?', empty($st['warnung']),
+        $reicht !== '' ? 'bis ' . $reicht : 'kein Enddatum in der Termindatei');
+
+    $f = fer_datafile();
+    $alter = is_file($f) ? (int) floor((time() - filemtime($f)) / 86400) : -1;
+    $add('Wann wurden die Daten zuletzt geholt?', $alter >= 0 && $alter <= 8,
+        $alter < 0 ? 'noch nie - der Abruf ist nie durchgelaufen'
+                   : 'vor ' . $alter . ' Tagen (der Cron holt woechentlich nach)');
+
+    /* --- 2. Die Schnittstelle zu Loxone -------------------------------- */
+    $verdeckt = fer_reihenfolge_pruefen();
+    $add('Verdeckt in der Loxone-Zeile ein Feld ein anderes?', count($verdeckt) === 0,
+        count($verdeckt) === 0
+            ? count(fer_felder()) . ' Felder geprueft, jedes findet sich selbst zuerst'
+            : 'verdeckt: ' . implode(', ', $verdeckt));
+
+    // Deckt der MQTT-Weg alles ab, was der HTTP-Weg fuehrt?
+    $ohne = array();
+    foreach (fer_felder() as $name => $fd) {
+        if (!isset($fd[5]) || $fd[5] === '') { $ohne[] = $name; }
+    }
+    $add('Traegt der MQTT-Weg dieselben Werte wie der HTTP-Weg?', count($ohne) === 0,
+        count($ohne) === 0
+            ? count(fer_felder()) . ' Felder, dazu ' . count(fer_mqtt_texte($st)) . ' Textwerte, die es nur ueber MQTT gibt'
+            : 'ohne MQTT-Thema: ' . implode(', ', $ohne));
+
+    // Ist die Importdatei fuer Loxone Config wohlgeformt?
+    $vorlage = fer_vorlage();
+    $wohl = false;
+    if (function_exists('simplexml_load_string')) {
+        $vorher = libxml_use_internal_errors(true);
+        $wohl = simplexml_load_string($vorlage[1]) !== false;
+        libxml_clear_errors();
+        libxml_use_internal_errors($vorher);
+    }
+    $add('Ist die Importdatei fuer Loxone Config wohlgeformt?',
+        function_exists('simplexml_load_string') ? $wohl : null,
+        function_exists('simplexml_load_string')
+            ? $vorlage[0] . ', ' . strlen($vorlage[1]) . ' Zeichen'
+            : 'simplexml fehlt in dieser PHP-Installation - nicht pruefbar');
+
+    /* --- 3. Der eigene Endpunkt, wirklich aufgerufen -------------------- */
+    $soll = (string) $cfg['aktionstoken'];
+    $add('Ist ein Aktionstoken eingerichtet?', $soll !== '',
+        $soll !== '' ? 'ja - ?say= und ?ptest= sind damit geschuetzt'
+                     : 'nein - die Oberflaeche legt beim naechsten Aufruf eines an');
+
+    if ($basis !== '' && $soll !== '') {
+        /* Drei Sekunden, nicht acht: diese Pruefung laeuft bei jedem
+         * Seitenaufbau des Reiters, und im Fehlerfall wartet der Anwender
+         * sonst vor einer leeren Seite. Die zweite Frage wird nur gestellt,
+         * wenn die erste ueberhaupt eine Antwort bekommen hat. */
+        $antwort = fer_http(rtrim($basis, '/') . '/ferien.php?selftest=1&token=' . rawurlencode($soll), 3);
+        $erreicht = ($antwort !== false && $antwort !== '');
+        $add('Antwortet der eigene Endpunkt?', $erreicht ? (strpos((string) $antwort, 'OK=1') !== false) : null,
+            $erreicht ? trim((string) $antwort)
+                      : 'keine Antwort in 3 s. Am Geraet ist das ein Befund; in einem '
+                      . 'Pruefaufbau mit eingebautem PHP-Server dagegen normal, weil der '
+                      . 'nur eine Anfrage zugleich bedienen kann.');
+        if ($erreicht) {
+            $falsch = fer_http(rtrim($basis, '/') . '/ferien.php?selftest=1&token=falsch', 3);
+            $add('Weist der Endpunkt ein falsches Token ab?',
+                $falsch === false || strpos((string) $falsch, 'ERR=TOKEN') !== false,
+                'erwartet wird HTTP 403 mit ERR=TOKEN');
+        }
+    }
+
+    /* --- 4. MQTT ------------------------------------------------------- */
+    if (!empty($cfg['mqtt_enabled'])) {
+        $add('Ist die PHP-Erweiterung sockets vorhanden?', function_exists('socket_create'),
+            function_exists('socket_create') ? 'ja' : 'nein - ohne sie geht ueber MQTT nichts hinaus');
+        $auto = fer_mqtt_gateway_autostart();
+        $add('Startet das MQTT-Gateway automatisch mit?', $auto === null ? null : $auto,
+            $auto === null ? 'general.json nicht lesbar - nicht pruefbar'
+                           : ($auto ? 'ja' : 'nein - nach einem Neustart kommt nichts an'));
+        $p = fer_paths();
+        $gen = @json_decode((string) @file_get_contents($p['lbhome'] . '/config/system/general.json'), true);
+        $port = 0;
+        if (isset($gen['Mqtt']) && is_array($gen['Mqtt']) && isset($gen['Mqtt']['Udpinport'])) {
+            $port = (int) $gen['Mqtt']['Udpinport'];
+        }
+        $add('Steht ein UDP-Eingangsport des Gateways fest?', $port >= 1 && $port <= 65535,
+            $port ? 'Port ' . $port : 'keiner gefunden - ist das Gateway eingerichtet?');
+    } else {
+        $add('MQTT', null, 'nicht eingeschaltet - die Zeilen dazu entfallen');
+    }
+
+    /* --- 5. Die neuen Wege ---------------------------------------------- */
+    if (trim((string) $cfg['ics_url']) !== '') {
+        $k = fer_ics_holen();
+        $add('Liefert das Kalender-Abonnement Termine?', count($k) > 0,
+            count($k) . ' Ganztagstermine uebernommen (Termine mit Uhrzeit und'
+            . ' Wiederholungen werden bewusst uebergangen)');
+    }
+    if (trim((string) $cfg['subdivision2']) !== '') {
+        $n2 = count((array) (isset($d['ferien2']) ? $d['ferien2'] : array()));
+        $add('Liefert die zweite Region Ferien?', $n2 > 0,
+            $n2 . ' Zeitraeume fuer ' . $cfg['subdivision2']);
+    }
+
+    /* --- 6. Ansage ------------------------------------------------------ */
+    if (!empty($cfg['notify']['audio'])) {
+        $url = fer_tts_url('Probe');
+        $add('Laesst sich eine Ansage-Adresse bilden?', $url === null ? null : ($url !== ''),
+            $url === null ? 'Modus "Original Loxone Audioserver" - die Ansage macht Loxone selbst'
+                          : ($url !== '' ? 'ja' : 'nein - es fehlt die IP des Audio-Servers'));
+    }
+
+    return $z;
+}
+
+/** Zaehlt die Selbstpruefung aus. Ein Hinweis (null) zaehlt NICHT als bestanden. */
+function fer_selbsttest_bilanz($zeilen) {
+    $gut = $schlecht = $offen = 0;
+    foreach ($zeilen as $z) {
+        if ($z['ok'] === null) { $offen++; }
+        elseif ($z['ok']) { $gut++; }
+        else { $schlecht++; }
+    }
+    return array('gut' => $gut, 'schlecht' => $schlecht, 'offen' => $offen,
+                 'gesamt' => $gut + $schlecht);
+}
+
 /** Gepruefter PHP-Nachbau des LoxoneTemplateBuilder - Attributreihenfolge,
  *  CRLF und der Tabulator vor den Kindelementen entsprechen dem Original.
  *  Uebernommen aus LoxBerry-Plugin-APC-UPS, nur das Kuerzel getauscht. */
@@ -1098,7 +2022,14 @@ function fer_vorlage() {
     $ordner = getenv('LBPPLUGINDIR') ?: 'ferien';
     $cmds = array();
     foreach (fer_felder() as $name => $f) {
-        list($analog, $min, $max, $einheit, $text) = $f;
+        // Das sechste Element ist das MQTT-Thema; die Importdatei braucht es
+        // nicht. Ausgeschrieben statt per list(), damit beim naechsten
+        // Anbau auffaellt, dass die Liste sechs Spalten hat.
+        $analog  = $f[0];
+        $min     = $f[1];
+        $max     = $f[2];
+        $einheit = $f[3];
+        $text    = $f[4];
         $cmds[] = array(
             'title' => 'FERIEN_' . $name,
             'comment' => $text . ($einheit !== '' ? ' [' . $einheit . ']' : ''),

@@ -3,14 +3,21 @@
  * Ferien und Feiertage - Miniserver-Endpunkt
  *
  * Aufrufe:
- *   (ohne Parameter) -> FERIEN;OK=..;FERIEN=..;FEIERTAG=..;WOCHENENDE=..;SCHULFREI=..;SCHULTAG=..;BRUECKE=..;
- *                        URLAUB=..;MURLAUB=..;URLAUBIN=..;URLAUBREST=..;URLAUBENDE=..;
- *                       MFERIEN=..;MFEIERTAG=..;MSCHULFREI=..;MSCHULTAG=..;MBRUECKE=..;
- *                       FERIENIN=..;FERIENREST=..;FERIENDAUER=..;FEIERTAGIN=..;WARN=..;ANN=..;AUDIO=..;PUSH=..;PTEST=..
- *                       SCHULTAG=1  -> heute ist ein normaler Schul-/Arbeitstag
- *                       MSCHULTAG=1 -> MORGEN ist Schultag (fuer Wecker und Abendlogik)
- *                       BRUECKE=1   -> Brueckentag (Werktag zwischen Feiertag und Wochenende)
- *                       WARN=1      -> Daten reichen weniger als 60 Tage in die Zukunft
+ *   (ohne Parameter) -> eine Zeile FERIEN;NAME=WERT;... mit allen Feldern aus
+ *                       fer_felder(). Welche das sind, steht dort und NUR dort -
+ *                       diese Aufzaehlung waere sonst eine zweite Stelle, die
+ *                       veralten kann.
+ *
+ *                       Die wichtigsten:
+ *                       SCHULTAG=1       heute ist ein normaler Schul-/Arbeitstag
+ *                       MSCHULTAG=1      MORGEN ist Schultag (Wecker, Abendlogik)
+ *                       FREITAGE=n       freie Tage am Stueck ab heute - die Zahl,
+ *                                        die ein Wochenende von den Sommerferien
+ *                                        unterscheidet (Heizungsabsenkung)
+ *                       MERSTERSCHULTAG=1 morgen geht die Schule wieder los
+ *                       URLAUBHEIM=1     Vorwaermen zur Rueckkehr
+ *                       BRUECKE=1        Brueckentag
+ *                       WARN=1           Daten reichen weniger als 60 Tage voraus
  *   ?debug=1         -> Ferien- und Feiertagsliste im Klartext
  *   ?refresh=1       -> Daten sofort neu abrufen
  *   ?json=1          -> kompletter Zustand als JSON
@@ -134,12 +141,24 @@ if (isset($_GET['debug'])) {
     echo "Kommende Ferien:\n";
     foreach ((array) $d['ferien'] as $e) {
         if ($e['bis'] < date('Y-m-d')) { continue; }
-        printf("  %s bis %s  %s%s\n", $e['von'], $e['bis'], $e['name'], !empty($e['eigen']) ? '  (eigener Termin)' : '');
+        printf("  %s bis %s  %s%s%s\n", $e['von'], $e['bis'], $e['name'],
+            !empty($e['ics']) ? '  (aus dem Kalender)' : (!empty($e['eigen']) ? '  (eigener Termin)' : ''),
+            (isset($e['art']) && $e['art'] !== '' && $e['art'] !== 'School') ? '  [Art: ' . $e['art'] . ']' : '');
+    }
+    if (!empty($d['ferien2'])) {
+        echo "\nKommende Ferien der zweiten Region (" . $cfg['subdivision2'] . "):\n";
+        foreach ((array) $d['ferien2'] as $e) {
+            if ($e['bis'] < date('Y-m-d')) { continue; }
+            printf("  %s bis %s  %s\n", $e['von'], $e['bis'], $e['name']);
+        }
     }
     echo "\nKommende Feiertage:\n";
     foreach ((array) $d['feiertage'] as $e) {
         if ($e['bis'] < date('Y-m-d')) { continue; }
-        printf("  %s  %s%s\n", $e['von'], $e['name'], !empty($e['eigen']) ? '  (eigener Termin)' : '');
+        printf("  %s  %s%s%s%s\n", $e['von'], $e['name'],
+            !empty($e['eigen']) ? '  (eigener Termin)' : '',
+            (isset($e['art']) && $e['art'] !== '' && $e['art'] !== 'Public') ? '  [Art: ' . $e['art'] . ']' : '',
+            !empty($e['halbtag']) ? ('  [halber Tag' . (!empty($e['hinweis']) ? ': ' . $e['hinweis'] : '') . ']') : '');
     }
     echo "\nUrlaub (Abwesenheit):\n";
     if (empty($d['urlaub'])) {
@@ -159,32 +178,25 @@ if (isset($_GET['debug'])) {
 }
 
 /*
+ * Die Zeile entsteht seit 1.2.0 aus fer_zeile() und damit aus fer_felder().
+ *
+ * Vorher stand hier ein printf mit 27 Platzhaltern und 27 Argumenten in
+ * getrennter Reihenfolge - die leichteste Art, allen Feldern hinter einer
+ * verschobenen Stelle den falschen Wert zu geben, ohne dass irgendwo etwas
+ * auffaellt. Jetzt stehen Name, Bedeutung, Grenzen, MQTT-Thema und Wert an
+ * EINER Stelle, und die Loxone-Vorlage entsteht aus derselben.
+ *
  * ACHTUNG - die REIHENFOLGE der Felder ist Teil der Schnittstelle.
  *
  * Loxone sucht in der Zeile die wortwoertliche Zeichenkette der
  * Befehlserkennung (z. B. "FERIEN=") und nimmt den ERSTEN Treffer. In dieser
  * Zeile steht "FERIEN=" aber auch als Teil von "MFERIEN=" - genauso
- * "FEIERTAG=" in "MFEIERTAG=", "SCHULFREI=" in "MSCHULFREI=", "SCHULTAG=" in
- * "MSCHULTAG=", "BRUECKE=" in "MBRUECKE=" und "URLAUB=" in "MURLAUB=".
+ * "FEIERTAG=" in "MFEIERTAG=", "SCHULFREI=" in "MSCHULFREI=" und so fort.
+ * Es geht nur gut, weil jedes Heute-Feld VOR seinem M-Gegenstueck steht.
  *
- * Gutgegangen ist das bisher nur deshalb, weil das Feld fuer HEUTE jeweils
- * VOR seinem M-Gegenstueck steht. Wer die Felder umsortiert - etwa um sie
- * huebscher zu gruppieren -, liefert Loxone stillschweigend den Wert von
- * morgen als den von heute. Es gaebe keine Fehlermeldung, nur falsche
- * Wecker.
- *
- * Wer hier etwas aendert, prueft danach: fuer jedes Feld muss der erste
- * Treffer von "<NAME>=" auch zu diesem Feld gehoeren.
+ * Dieser Absatz war bis 1.1.7 eine Bitte an den naechsten Leser. Seit 1.2.0
+ * prueft fer_reihenfolge_pruefen() es an der fertigen Zeile nach, und der
+ * Reiter Test zeigt das Ergebnis - eine Regel, die ein Werkzeug prueft, ist
+ * hinterlegt; eine Regel in Prosa ist eine Hoffnung.
  */
-printf("FERIEN;OK=%d;FERIEN=%d;FEIERTAG=%d;WOCHENENDE=%d;SCHULFREI=%d;SCHULTAG=%d;BRUECKE=%d;MFERIEN=%d;MFEIERTAG=%d;MSCHULFREI=%d;MSCHULTAG=%d;MBRUECKE=%d;FERIENIN=%d;FERIENREST=%d;FERIENDAUER=%d;FEIERTAGIN=%d;URLAUB=%d;MURLAUB=%d;URLAUBIN=%d;URLAUBREST=%d;URLAUBDAUER=%d;URLAUBENDE=%d;WARN=%d;ANN=%d;AUDIO=%d;PUSH=%d;PTEST=%d\n",
-    $st['ok'],
-    $st['heute']['ferien'], $st['heute']['feiertag'], $st['heute']['wochenende'],
-    $st['heute']['schulfrei'], $st['heute']['schultag'], $st['heute']['bruecke'],
-    $st['morgen']['ferien'], $st['morgen']['feiertag'], $st['morgen']['schulfrei'],
-    $st['morgen']['schultag'], $st['morgen']['bruecke'],
-    $st['naechste']['in'], $st['naechste']['rest'], $st['naechste']['dauer'],
-    $st['feiertag_naechster']['in'],
-    $st['heute']['urlaub'], $st['morgen']['urlaub'],
-    $st['urlaub']['in'], $st['urlaub']['rest'], $st['urlaub']['dauer'], $st['urlaub']['letzter_tag'],
-    $st['warnung'],
-    $flags['ann'], $flags['audio'], $flags['push'], $flags['ptest']);
+echo fer_zeile($st, $flags);
