@@ -85,6 +85,33 @@ MIT — siehe [LICENSE](LICENSE).
 
 ## Änderungen
 
+### 1.2.2
+
+**Aufräumen in den Sprachdateien — keine Änderung am Verhalten.** Je
+Sprache sind 66 Schlüssel entfernt worden, die kein Code mehr liest.
+Sie sind Rückstände aus 1.2.0: seit die Tabelle der Befehlserkennungen im
+Reiter *Einbindung in Loxone* und die Themenliste im Reiter *MQTT* aus
+`fer_felder()` erzeugt werden, stand ihr Inhalt nur noch in den
+ini-Dateien herum.
+
+Warum das nicht bloß Kosmetik ist: 27 dieser Schlüssel führten die
+**alte** Schreibweise der Suchtexte (`\i<NAME>=\i\v`, ohne Semikolon) —
+also genau das Gegenteil dessen, was 1.2.1 eingeführt hat. Weitere neun
+trugen die MQTT-Themennamen, und die englische Datei nannte dort
+`/no_school`, `/schoolday`, `/public_holiday`, während das Plugin seit
+jeher `/schulfrei`, `/schultag`, `/feiertag` veröffentlicht. Genau diese
+neun waren der Befund, den 1.2.0 behoben hat; die Zeilen selbst sind erst
+jetzt verschwunden.
+
+Eine Sprachdatei, die etwas anderes behauptet als der Code tut, ist keine
+Kleinigkeit — sie ist die Stelle, an der jemand nachschlägt.
+
+Vor dem Entfernen gemessen: die Erkennung ist in beide Richtungen geeicht,
+es gibt keine dynamisch zusammengesetzten Schlüssel (442 von 450
+`fer_t()`-Aufrufen sind wörtliche Literale, die übrigen acht sind die
+Funktion selbst und Kommentare), und beide Sprachdateien tragen hinterher
+dieselben 382 Schlüssel. Ungenutzt ist jetzt keiner mehr.
+
 ### 1.2.1
 
 **Der Suchtext der Befehlserkennungen trägt jetzt das Trennzeichen der
