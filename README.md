@@ -85,6 +85,39 @@ MIT — siehe [LICENSE](LICENSE).
 
 ## Änderungen
 
+### 1.2.1
+
+**Der Suchtext der Befehlserkennungen trägt jetzt das Trennzeichen der
+Antwortzeile.** Bis 1.2.0 lautete er `\i<NAME>=\i\v` ohne das Semikolon
+davor. Loxone nimmt die **erste** Fundstelle, und `SCHULTAG=` steckt auch in
+`MSCHULTAG=`. Gutgegangen ist das nur, weil jedes Heute-Feld in der
+Ausgabezeile vor seinem M-Gegenstück steht — eine Wette auf die Sortierung,
+die beim nächsten neuen Feld verloren gehen kann. Mit dem Semikolon ist die
+Frage strukturell erledigt: in der Antwortzeile steht vor jedem Feldnamen
+eines, auch vor dem ersten.
+
+Der Anlass ist kein eigener Vorfall, sondern ein fremder: am 20.08.2026 las
+in drei anderen Plugins ein virtueller Eingang für den Kilometerstand die
+Inspektionsvorgabe — 15.000 statt 48.210, weil sein Suchtext ohne
+Trennzeichen zuerst auf das längere Feld traf. Beide Zahlen sahen aus wie
+ein Kilometerstand, und gemeldet hat sich nichts.
+
+**In diesem Plugin war zum Zeitpunkt der Umstellung kein Feld falsch
+getroffen** — die Prüfung im Reiter Test war und ist grün. Die Änderung
+beseitigt die Abhängigkeit von der Reihenfolge, nicht einen wirkenden
+Fehler.
+
+**Wer bereits importiert hat, muss nichts tun.** Die bestehenden virtuellen
+Eingänge arbeiten unverändert weiter. Der neue Suchtext steckt in der
+Importdatei und in der Tabelle im Reiter *Einbindung in Loxone*; er wirkt
+sich erst aus, wenn jemand neu importiert oder eine Befehlserkennung von
+Hand nachträgt.
+
+Beides — Importdatei und Tabelle — holt den Text jetzt aus **einer**
+Funktion. In den drei fremden Linien war seinerzeit die Vorlage berichtigt
+worden und die Oberfläche nicht; vier Abschriften einer Regel sind vier
+Gelegenheiten, sie an einer Stelle zu vergessen.
+
 ### 1.2.0
 
 **Der MQTT-Weg deckte den HTTP-Weg doch nicht ab.** Die Fassung 1.1.7 hat vier

@@ -1,6 +1,6 @@
 <?php
 /**
- * Ferien und Feiertage - Admin-Oberflaeche (v1.2.0)
+ * Ferien und Feiertage - Admin-Oberflaeche (v1.2.1)
  * Reiter: Einstellungen | MQTT | Einbindung in Loxone | Brueckentage |
  *         Kommende Ferien | Kommende Feiertage | Test | Logdateien
  * Kompatibel mit PHP 7.4 und PHP 8.x (LoxBerry 3.x/4.x).
@@ -989,7 +989,7 @@ $fe_praefix = trim((string) $fe_cfg['mqtt_topic']) !== '' ? trim((string) $fe_cf
 <table class="sm-tbl" style="width:100%;">
 <tr><th><?php echo fer_t('TEXT.BEFEHLSERKENNUNG'); ?></th><th><?php echo fer_t('T12.LX_EINHEIT'); ?></th><th><?php echo fer_t('TEXT.BEDEUTUNG'); ?></th></tr>
 <?php foreach (fer_felder() as $fe_fn => $fe_fd) { ?>
-<tr><td><span class="sm-mono">\i<?= fe_e($fe_fn) ?>=\i\v</span></td>
+<tr><td><span class="sm-mono"><?= fe_e(fer_check($fe_fn)) ?></span></td>
 <td class="sm-small"><?= $fe_fd[3] !== '' ? fe_e($fe_fd[3]) : ($fe_fd[0] ? '' : '0/1') ?></td>
 <td><?= fe_e($fe_fd[4]) ?><?= ($fe_fd[1] < 0) ? ' <span class="sm-small">' . fe_e(fer_t('T12.LX_MINUS1')) . '</span>' : '' ?></td></tr>
 <?php } ?>

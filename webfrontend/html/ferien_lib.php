@@ -15,7 +15,7 @@
  * Keine persoenlichen Daten im Code - alles kommt aus der lokalen Konfiguration.
  * Kompatibel mit PHP 7.4 und PHP 8.x (LoxBerry 3.x/4.x).
  *
- * Fassung 1.2.0.
+ * Fassung 1.2.1.
  */
 
 error_reporting(E_ALL & ~E_DEPRECATED & ~E_NOTICE);
@@ -1969,6 +1969,36 @@ function fer_selbsttest_bilanz($zeilen) {
                  'gesamt' => $gut + $schlecht);
 }
 
+/**
+ * Der Suchtext einer Loxone-Befehlserkennung - an EINER Stelle.
+ *
+ * Vor dem Feldnamen steht das Semikolon, mit dem die Antwortzeile ihre
+ * Felder trennt. Ohne dieses Zeichen haengt die Richtigkeit an der
+ * REIHENFOLGE: Loxone nimmt die erste Fundstelle, und der Name SCHULTAG
+ * steckt als Endstueck auch in MSCHULTAG. Bis 1.2.0 ging das gut, weil
+ * jedes Heute-Feld vor seinem M-Gegenstueck steht - aber das war eine
+ * Wette auf die Sortierung, und beim naechsten neuen Feld waere die Falle
+ * wieder offen gewesen. Mit dem Trennzeichen ist die Frage strukturell
+ * erledigt: in der Antwortzeile steht vor JEDEM Feldnamen eines, auch vor
+ * dem ersten.
+ *
+ * Der Anlass steht in REGELN_3 A11, gemessen am 20.08.2026 an drei fremden
+ * Linien: ein Kilometerstand las die Inspektionsvorgabe, weil sein Suchtext
+ * ohne Trennzeichen zuerst auf das laengere Feld traf. Beide Zahlen sahen
+ * aus wie ein Kilometerstand; gemeldet hat sich nichts.
+ *
+ * EINE Stelle, weil die Regel sonst auseinanderlaeuft: die Importdatei und
+ * die Tabelle im Reiter Einbindung zeigen denselben Text. In den betroffenen
+ * Linien wurde seinerzeit die Vorlage berichtigt und die Oberflaeche nicht.
+ *
+ * Der Erklaertext verzichtet bewusst darauf, die Schreibweise auszuschreiben:
+ * suchmuster_pruefen.py sucht danach und wuerde den Kommentar mitzaehlen.
+ * Wer sie sehen will, liest die Rueckgabe eine Zeile weiter unten.
+ */
+function fer_check($feld) {
+    return '\i;' . $feld . '=\i\v';
+}
+
 /** Gepruefter PHP-Nachbau des LoxoneTemplateBuilder - Attributreihenfolge,
  *  CRLF und der Tabulator vor den Kindelementen entsprechen dem Original.
  *  Uebernommen aus LoxBerry-Plugin-APC-UPS, nur das Kuerzel getauscht. */
@@ -2033,7 +2063,7 @@ function fer_vorlage() {
         $cmds[] = array(
             'title' => 'FERIEN_' . $name,
             'comment' => $text . ($einheit !== '' ? ' [' . $einheit . ']' : ''),
-            'check' => '\i' . $name . '=\i\v',
+            'check' => fer_check($name),
             'unit' => ($einheit !== '' ? '<v.1> ' . $einheit : '<v.1>'),
             'analog' => $analog, 'min' => $min, 'max' => $max,
         );
