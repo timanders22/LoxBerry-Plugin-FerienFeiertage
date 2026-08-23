@@ -2,7 +2,7 @@
 # Ferien und Feiertage - postupgrade (laeuft als Benutzer loxberry)
 ARGV1=$1; ARGV3=$3; ARGV5=$5
 PFOLDER="${ARGV3:-ferien}"; BASE="${ARGV5:-$LBHOMEDIR}"
-SICHER="$BASE/data/plugins/$PFOLDER/upgrade_sicherung"
+SICHER="$BASE/data/plugins/$PFOLDER.upgrade_sicherung"
 
 mkdir -p "$BASE/config/plugins/$PFOLDER" "$BASE/log/plugins/$PFOLDER" \
          "$BASE/data/plugins/$PFOLDER" 2>/dev/null
@@ -40,7 +40,7 @@ fi
 # Stunde weiterbenutzt.
 rm -f /tmp/ferien/state.json /tmp/ferien/mqtt_sig.txt 2>/dev/null
 
-rm -rf "$BASE/data/plugins/$PFOLDER/upgrade_sicherung" 2>/dev/null
+rm -rf "$BASE/data/plugins/$PFOLDER.upgrade_sicherung" 2>/dev/null
 
 # Altlast aus 1.1.0 und frueher: cron.php lag im HTML-Verzeichnis und war damit
 # fuer jeden im Heimnetz per HTTP abrufbar - ein Aufruf stiess einen ganzen

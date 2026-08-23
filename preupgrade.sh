@@ -17,9 +17,18 @@ PFOLDER="${ARGV3:-ferien}"; BASE="${ARGV5:-$LBHOMEDIR}"
 #      ueberschrieben und am Ende geloescht; dass die eigenen Dateien
 #      dazwischen unangetastet bleiben, ist nirgends zugesichert.
 #
-# Deshalb: data/plugins/<ordner>/upgrade_sicherung. Das liegt auf der Karte
+# Deshalb: data/plugins/<ordner>.upgrade_sicherung. Das liegt auf der Karte
 # und uebersteht auch einen Neustart mittendrin.
-SICHER="$BASE/data/plugins/$PFOLDER/upgrade_sicherung"
+# Die Sicherung liegt NEBEN dem Ordner, nicht darin. Gemessen an
+# sbin/plugininstall.pl (Zweig master, 23.08.2026): der Installer ruft
+# &purge_installation nicht nur beim Deinstallieren, sondern auch im
+# Upgrade-Zweig (:886), und deren Rumpf loescht ohne jede Bedingung
+# (:1629 ff.) config/plugins/<x>/, bin/plugins/<x>/, data/plugins/<x>/,
+# templates/plugins/<x>/ und beide webfrontend/-Ordner. Eine Sicherung IN
+# data/plugins/<x>/ wird also von genau dem Schritt vernichtet, den sie
+# ueberdauern soll. Der Punkt im Namen ist der ganze Unterschied:
+# "rm -rf .../<x>/" trifft den Nachbarn "<x>.upgrade_sicherung" nicht.
+SICHER="$BASE/data/plugins/$PFOLDER.upgrade_sicherung"
 
 mkdir -p "$SICHER" 2>/dev/null
 chmod 0700 "$SICHER" 2>/dev/null
