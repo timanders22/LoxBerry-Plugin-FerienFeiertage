@@ -76,6 +76,77 @@ function fer_paths() {
     );
 }
 
+function fer_vorgaben()
+{
+    /* Herausgezogen aus fer_config(): die Vorgaben stehen weiterhin an
+     * EINER Stelle, jetzt aber an einer abrufbaren. Die Sicherung
+     * braucht die Schluesselliste, um Fremdes zu erkennen - ohne sie
+     * koennte sie nur alles durchwinken. */
+    return array(
+    'country' => 'DE',           // DE, AT, CH, ...
+    'subdivision' => 'DE-BY',    // Bundesland/Kanton
+    'lang' => 'DE',
+    'school' => 1,               // Schulferien auswerten
+    'public' => 1,               // gesetzliche Feiertage auswerten
+    'locality' => '',            // Arbeitsort/Gemeinde fuer oertliche Sonderfaelle:
+                                 // '' = alle anderen Gemeinden
+                                 // 'DE-BY-AU' = Stadt Augsburg (mit Friedensfest)
+                                 // 'BY-EV' = bayerische Gemeinde ohne Mariae Himmelfahrt
+                                 // 'SN-KATH'/'TH-KATH' = kath. Gemeinden mit Fronleichnam
+    'local_holidays' => 0,       // alle oertlichen Feiertage der Region mitzaehlen
+    'bridge' => 1,               // Brueckentage erkennen
+    'own' => array(),            // eigene Zeitraeume: [{name, von, bis, typ}]
+    'mqtt_enabled' => 0,
+    'mqtt_topic' => 'ferien',
+    'notify' => array(),
+    'tts' => array(),
+    'aktionstoken' => '',        // schuetzt ?say= und ?ptest= (unangemeldeter Endpunkt)
+
+    /* --- ab 1.2.0 ---------------------------------------------------
+     * Alle neuen Schluessel haben BEWUSST den Vorgabewert, der das
+     * bisherige Verhalten fortsetzt. Sie fehlen in jeder bestehenden
+     * Konfiguration; das += oben traegt sie nach, und nichts aendert
+     * sich, bis jemand sie in der Oberflaeche umstellt. Das ist der
+     * Aktualisierungsfall, den eine Neuinstallation nie durchlaeuft.
+     */
+    'subdivision2' => '',        // zweite Region, NUR Schulferien (zweites Kind,
+                                 // anderes Bundesland). Leer = aus.
+    'group' => '',               // Schulart (groupCode der Datenquelle), z. B.
+                                 // DE-MV-ABS/DE-MV-BBS. Leer = alle.
+    'bridge_mode' => 'klassisch', // 'klassisch' = Fr nach Do-Feiertag / Mo vor
+                                 // Di-Feiertag, wie bisher.
+                                 // 'erweitert' = zusaetzlich Werktage, die
+                                 // zwischen zwei freien Bloecken liegen
+                                 // (die Tage zwischen Weihnachten und Neujahr).
+    'bridge_luecke' => 4,        // erweitert: hoechstens so viele Werktage am Stueck.
+                                 // Die 4 ist gemessen, nicht gegriffen: die Tage
+                                 // zwischen Weihnachten und Neujahr sind eine Kette
+                                 // aus VIER Werktagen (28.-31.12.2026, 27.-30.12.2027).
+                                 // Mit 3 faellt genau der Fall heraus, um dessentwillen
+                                 // es den erweiterten Modus gibt.
+                                 // Gemessen fuer DE-BY ueber 366 Tage:
+                                 //   Luecke 1 ->   2 Brueckentage
+                                 //   Luecke 2 ->   6
+                                 //   Luecke 3 ->  12 (Weihnachten fehlt)
+                                 //   Luecke 4 ->  32 (Weihnachten dabei)
+                                 //   Luecke 5 -> 254 - jede gewoehnliche Woche hat
+                                 //               fuenf Werktage, damit waere alles
+                                 //               eine Bruecke. Deshalb ist 4 die
+                                 //               Obergrenze, nicht nur die Vorgabe.
+    'typ_streng' => 0,           // 1 = nur 'Public' zaehlt als gesetzlicher
+                                 // Feiertag; 'Bank' und 'Optional' nicht.
+                                 // Fuer DE/AT ohne Wirkung - gemessen am
+                                 // 18.08.2026: DE-BY 2026 liefert 14 Eintraege,
+                                 // ausnahmslos Public. Wirkung hat es in LU
+                                 // (Karfreitag ist dort 'Bank') und CH ('Optional').
+    'halbtag_frei' => 1,         // 1 = ein halber Feiertag zaehlt als frei, wie bisher
+    'ics_url' => '',             // Kalender-Abonnement (ICS) fuer eigene Termine
+    'ics_typ' => 'urlaub',       // wie die Kalendereintraege gewertet werden
+    'ics_filter' => '',          // nur Termine, deren Titel dies enthaelt (leer = alle)
+    'urlaub_vorlauf' => 1,       // Tage vor der Rueckkehr, an denen URLAUBHEIM=1 wird
+);
+}
+
 function fer_config() {
     $p = fer_paths();
     if ((!is_file($p['config']) || trim((string) @file_get_contents($p['config'])) === '' || trim((string) @file_get_contents($p['config'])) === '{}') && is_file($p['backup'])) {
@@ -86,69 +157,7 @@ function fer_config() {
     if (!is_array($cfg)) {
         $cfg = array();
     }
-    $cfg += array(
-        'country' => 'DE',           // DE, AT, CH, ...
-        'subdivision' => 'DE-BY',    // Bundesland/Kanton
-        'lang' => 'DE',
-        'school' => 1,               // Schulferien auswerten
-        'public' => 1,               // gesetzliche Feiertage auswerten
-        'locality' => '',            // Arbeitsort/Gemeinde fuer oertliche Sonderfaelle:
-                                     // '' = alle anderen Gemeinden
-                                     // 'DE-BY-AU' = Stadt Augsburg (mit Friedensfest)
-                                     // 'BY-EV' = bayerische Gemeinde ohne Mariae Himmelfahrt
-                                     // 'SN-KATH'/'TH-KATH' = kath. Gemeinden mit Fronleichnam
-        'local_holidays' => 0,       // alle oertlichen Feiertage der Region mitzaehlen
-        'bridge' => 1,               // Brueckentage erkennen
-        'own' => array(),            // eigene Zeitraeume: [{name, von, bis, typ}]
-        'mqtt_enabled' => 0,
-        'mqtt_topic' => 'ferien',
-        'notify' => array(),
-        'tts' => array(),
-        'aktionstoken' => '',        // schuetzt ?say= und ?ptest= (unangemeldeter Endpunkt)
-
-        /* --- ab 1.2.0 ---------------------------------------------------
-         * Alle neuen Schluessel haben BEWUSST den Vorgabewert, der das
-         * bisherige Verhalten fortsetzt. Sie fehlen in jeder bestehenden
-         * Konfiguration; das += oben traegt sie nach, und nichts aendert
-         * sich, bis jemand sie in der Oberflaeche umstellt. Das ist der
-         * Aktualisierungsfall, den eine Neuinstallation nie durchlaeuft.
-         */
-        'subdivision2' => '',        // zweite Region, NUR Schulferien (zweites Kind,
-                                     // anderes Bundesland). Leer = aus.
-        'group' => '',               // Schulart (groupCode der Datenquelle), z. B.
-                                     // DE-MV-ABS/DE-MV-BBS. Leer = alle.
-        'bridge_mode' => 'klassisch', // 'klassisch' = Fr nach Do-Feiertag / Mo vor
-                                     // Di-Feiertag, wie bisher.
-                                     // 'erweitert' = zusaetzlich Werktage, die
-                                     // zwischen zwei freien Bloecken liegen
-                                     // (die Tage zwischen Weihnachten und Neujahr).
-        'bridge_luecke' => 4,        // erweitert: hoechstens so viele Werktage am Stueck.
-                                     // Die 4 ist gemessen, nicht gegriffen: die Tage
-                                     // zwischen Weihnachten und Neujahr sind eine Kette
-                                     // aus VIER Werktagen (28.-31.12.2026, 27.-30.12.2027).
-                                     // Mit 3 faellt genau der Fall heraus, um dessentwillen
-                                     // es den erweiterten Modus gibt.
-                                     // Gemessen fuer DE-BY ueber 366 Tage:
-                                     //   Luecke 1 ->   2 Brueckentage
-                                     //   Luecke 2 ->   6
-                                     //   Luecke 3 ->  12 (Weihnachten fehlt)
-                                     //   Luecke 4 ->  32 (Weihnachten dabei)
-                                     //   Luecke 5 -> 254 - jede gewoehnliche Woche hat
-                                     //               fuenf Werktage, damit waere alles
-                                     //               eine Bruecke. Deshalb ist 4 die
-                                     //               Obergrenze, nicht nur die Vorgabe.
-        'typ_streng' => 0,           // 1 = nur 'Public' zaehlt als gesetzlicher
-                                     // Feiertag; 'Bank' und 'Optional' nicht.
-                                     // Fuer DE/AT ohne Wirkung - gemessen am
-                                     // 18.08.2026: DE-BY 2026 liefert 14 Eintraege,
-                                     // ausnahmslos Public. Wirkung hat es in LU
-                                     // (Karfreitag ist dort 'Bank') und CH ('Optional').
-        'halbtag_frei' => 1,         // 1 = ein halber Feiertag zaehlt als frei, wie bisher
-        'ics_url' => '',             // Kalender-Abonnement (ICS) fuer eigene Termine
-        'ics_typ' => 'urlaub',       // wie die Kalendereintraege gewertet werden
-        'ics_filter' => '',          // nur Termine, deren Titel dies enthaelt (leer = alle)
-        'urlaub_vorlauf' => 1,       // Tage vor der Rueckkehr, an denen URLAUBHEIM=1 wird
-    );
+    $cfg += fer_vorgaben();
     if (!is_array($cfg['own'])) { $cfg['own'] = array(); }
     if (!is_array($cfg['notify'])) { $cfg['notify'] = array(); }
     if (!is_array($cfg['tts'])) { $cfg['tts'] = array(); }
@@ -2076,4 +2085,129 @@ function fer_vorlage() {
                    . 'Loxone Config legt beim Import neu an und ueberschreibt nichts - '
                    . 'zweimal eingelesen ergibt doppelte Bausteine.',
     ), $cmds));
+}
+
+
+/**
+ * Die Fassung des LoxBerry-MQTT-Gateways - 0 heisst "nicht feststellbar".
+ *
+ * Sie steht als Mqtt.Gatewayversion in config/system/general.json (ab Werk
+ * 1) und entscheidet, was der Anwender eintragen muss: unter V1 jedes Thema
+ * von Hand auf der Abo-Seite, ab V2 erscheint die Themengruppe von selbst in
+ * den Subscriptions.
+ *
+ * Die Datei wird hier eigens gelesen, obwohl andere Stellen sie auch lesen.
+ * Das ist Absicht: dieser Baustein passt damit in jedes Plugin, unabhaengig
+ * davon, wie es seinen MQTT-Zustand ermittelt - und er geht nicht kaputt,
+ * wenn jemand jene Funktion umbaut.
+ */
+function fer_gateway_fassung()
+{
+    $home = getenv('LBHOMEDIR');
+    if (!$home && defined('LBHOMEDIR')) {
+        $home = LBHOMEDIR;
+    }
+    if (!$home || !is_dir($home)) {
+        return 0;
+    }
+    $d = @json_decode((string) @file_get_contents(
+        $home . '/config/system/general.json'), true);
+    if (!is_array($d)) {
+        return 0;
+    }
+    foreach (array('Mqtt', 'mqtt') as $ab) {
+        if (!isset($d[$ab]) || !is_array($d[$ab])) {
+            continue;
+        }
+        foreach (array('Gatewayversion', 'gatewayversion') as $sl) {
+            if (isset($d[$ab][$sl]) && (string) $d[$ab][$sl] !== '') {
+                return (int) $d[$ab][$sl];
+            }
+        }
+    }
+    return 0;
+}
+
+/**
+ * Der Hinweis zum MQTT-Abo - in der Fassung, die zum GATEWAY passt.
+ *
+ * Bis hierher stand an der Ausgabestelle unbedingt "Ohne diesen Eintrag
+ * kommt am Miniserver nichts an". Das gilt fuer Gateway V1; ab V2 schickte
+ * der Satz jeden Anwender zu einem Eingabeplatz, den es nicht mehr gibt.
+ *
+ * Drei Ausgaenge: ist die Fassung nicht feststellbar, werden BEIDE Faelle
+ * genannt statt einer behauptet.
+ */
+function fer_abo_text()
+{
+    $f = fer_gateway_fassung();
+    if ($f <= 0) {
+        return fer_t('T12.ABO_UNBEKANNT');
+    }
+    $gemessen = ' <span class="sm-mono">'
+              . sprintf(fer_t('T12.ABO_GEMESSEN'), $f) . '</span>';
+    return fer_t($f >= 2 ? 'T12.ABO_V2' : 'T12.MQ_OHNE') . $gemessen;
+}
+
+
+/**
+ * Den ganzen Konfigurationsstand ablegen - und sagen, ob es geklappt hat.
+ *
+ * Bisher schrieb diese Linie mitten in index.php. Das Zurueckspielen einer
+ * Sicherung braucht aber EINE Stelle, sonst steht die Pruefung "hat es
+ * geklappt?" an vier Orten verschieden da.
+ *
+ * Der Schreibweg ist der, den die Linie ohnehin benutzt - hier wird kein
+ * Verhalten geaendert, nur ein vorhandenes zusammengefasst.
+ */
+function fer_config_speichern($cfg)
+{
+    $p = fer_paths();
+    $js = json_encode($cfg, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE
+                            | JSON_UNESCAPED_SLASHES);
+    if ($js === false) {
+        return false;   /* ungueltiges UTF-8 - lieber gar nicht schreiben
+                           als eine halbe Datei hinterlassen */
+    }
+    @mkdir(dirname($p['config']), 0775, true);
+    return (bool) (@file_put_contents($p['config'], $js) !== false);
+}
+
+
+/**
+ * Eine Sicherungsdatei einlesen - und dabei NICHTS durchgehen lassen.
+ *
+ * Der wichtigste Punkt: eine halb gueltige Datei ueberschreibt GAR NICHTS.
+ * Wer eine Sicherung zurueckspielt, will entweder den ganzen Stand oder
+ * gar keinen - eine zur Haelfte uebernommene Konfiguration ist schlimmer
+ * als die alte, und man sieht es ihr nicht an.
+ *
+ * Unbekannte Schluessel sind eine Beanstandung, kein stiller Verlust: sie
+ * stammen aus einer anderen Fassung oder einem anderen Plugin.
+ *
+ * Rueckgabe: array(Konfiguration|null, Beanstandungen[], uebernommene Werte).
+ */
+function fer_sicherung_lesen($roh)
+{
+    $mangel = array();
+    $daten = json_decode((string) $roh, true);
+    if (!is_array($daten)) {
+        return array(null, array(fer_t('TEXT.SICH_KEIN_JSON')), 0);
+    }
+    $neu = fer_vorgaben();
+    $bekannt = array_keys($neu);
+    $anzahl = 0;
+    foreach ($daten as $k => $w) {
+        if (!in_array($k, $bekannt, true)) {
+            $mangel[] = sprintf(fer_t('TEXT.SICH_FREMD'),
+                                 htmlspecialchars((string) $k, ENT_QUOTES, 'UTF-8'));
+            continue;
+        }
+        $neu[$k] = $w;
+        $anzahl++;
+    }
+    if ($anzahl === 0) {
+        $mangel[] = fer_t('TEXT.SICH_LEER');
+    }
+    return array($mangel ? null : $neu, $mangel, $anzahl);
 }
