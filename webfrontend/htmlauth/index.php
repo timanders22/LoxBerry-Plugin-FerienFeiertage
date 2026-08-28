@@ -135,6 +135,24 @@ if ((!is_file($fe_cfgfile) || trim((string) @file_get_contents($fe_cfgfile)) ===
 
 $fe_saved = false; $fe_err = ''; $fe_note = ''; $fe_mangel = array();
 
+/* ---------------------------------------------------------------- *
+ * Der Wachposten - EIN Posten, vor allen Handlern.
+ * Abgewiesen heisst gemeldet, und es wird NICHTS ausgefuehrt: $_POST
+ * wird geleert, nur der aktive Reiter bleibt stehen, damit der Bediener
+ * nach der Abweisung dort steht, wo er war.
+ * ---------------------------------------------------------------- */
+$fer_wache = fer_wachposten();
+if ($fer_wache !== '') {
+    $fer_reiter_merk = isset($_POST['activetab']) && is_string($_POST['activetab'])
+        ? (string) $_POST['activetab'] : null;
+    $_POST = array();
+    if ($fer_reiter_merk !== null) {
+        $_POST['activetab'] = $fer_reiter_merk;
+    }
+    $fe_mangel[] = $fer_wache;
+}
+
+
 /* Wer einen Reiter hinzufuegt, muss DREI Stellen mitziehen: die Reiterleiste,
    den Bereich (sm-pane mit gleicher id) und diese Positivliste. Fehlt der
    Name hier, springt die Seite nach jedem Absenden zurueck auf Einstellungen. */
@@ -677,6 +695,7 @@ if ($fe_frame) { LBWeb::lbheader('Ferien und Feiertage', 'https://wiki.loxberry.
 <!-- ================= <?php echo fer_t('TEXT.EINSTELLUNGEN'); ?> ================= -->
 <div class="sm-pane<?= fe_aktiv('tab-settings') ?>" id="tab-settings">
 <form action="index.php" method="post" autocomplete="off">
+  <?php echo fer_fmt(); ?>
 <input data-role="none" type="hidden" name="save" value="1">
 <input data-role="none" type="hidden" name="activetab" value="tab-settings">
 
@@ -951,6 +970,7 @@ if ($fe_frame) { LBWeb::lbheader('Ferien und Feiertage', 'https://wiki.loxberry.
 <button data-role="none" class="sm-btn" type="submit"><?php echo fer_t('TEXT.SPEICHERN'); ?></button>
 </form>
 <form action="index.php" method="post" style="margin-top:8px;">
+  <?php echo fer_fmt(); ?>
     <input data-role="none" type="hidden" name="fetchnow" value="1">
     <input data-role="none" type="hidden" name="activetab" value="tab-settings">
     <button data-role="none" class="sm-btn" type="submit" style="background:#607d8b;margin-top:0;"><?php echo fer_t('TEXT.JETZT_ABRUFEN'); ?></button>
@@ -961,6 +981,7 @@ if ($fe_frame) { LBWeb::lbheader('Ferien und Feiertage', 'https://wiki.loxberry.
 <!-- ================= Reiter: MQTT (eigener Reiter seit 1.1.5, Hausstandard) ================= -->
 <div class="sm-pane<?= fe_aktiv('tab-mqtt') ?>" id="tab-mqtt">
 <form action="index.php" method="post">
+  <?php echo fer_fmt(); ?>
 <input data-role="none" type="hidden" name="mqtt_save" value="1">
 <input data-role="none" type="hidden" name="activetab" value="tab-mqtt">
 <h2><?php echo fer_t('TEXT.MQTT_OPTIONAL'); ?></h2>
@@ -1071,6 +1092,7 @@ $fe_praefix = trim((string) $fe_cfg['mqtt_topic']) !== '' ? trim((string) $fe_cf
 <h2><?php echo fer_t('TEXT.H_VORLAGE'); ?></h2>
 <div class="sm-hinweis"><?php echo fer_t('TEXT.H_VORLAGE_TEXT'); ?></div>
 <form action="index.php" method="post" style="margin-bottom:14px;">
+  <?php echo fer_fmt(); ?>
   <input data-role="none" type="hidden" name="activetab" value="tab-loxone">
   <input data-role="none" type="hidden" name="vorlage" value="1">
   <button data-role="none" class="sm-btn" type="submit" style="background:#546e7a;"><?php echo fer_t('TEXT.K_VORLAGE'); ?></button>
@@ -1153,6 +1175,7 @@ $fe_praefix = trim((string) $fe_cfg['mqtt_topic']) !== '' ? trim((string) $fe_cf
 </div>
 <div class="sm-knopfreihe">
   <form method="post" action="index.php">
+    <?php echo fer_fmt(); ?>
     <input data-role="none" type="hidden" name="activetab" value="tab-loxone">
     <?php /* Die Farbklassen greifen auf dem KNOPF, nicht auf der Reihe.
        Bis 1.1.7 stand sm-b-aktion am umgebenden div, und dieser eine Knopf
@@ -1362,6 +1385,7 @@ foreach ((array) $fe_d['feiertage'] as $fe_e2) {
 </div>
 <div class="sm-knopfreihe">
 <form action="index.php" method="post">
+  <?php echo fer_fmt(); ?>
     <input data-role="none" type="hidden" name="clearlog" value="1">
     <input data-role="none" type="hidden" name="activetab" value="tab-log">
     <?php /* Orange, nicht rot: Rot ist im Hausstandard nicht vorgesehen -
@@ -1383,10 +1407,12 @@ foreach ((array) $fe_d['feiertage'] as $fe_e2) {
        Wer beides in ein Formular legt, bekommt entweder keinen Upload oder
        einen Download, der das Speichern verschluckt. -->
   <form action="index.php" method="post">
+    <?php echo fer_fmt(); ?>
     <input data-role="none" type="hidden" name="activetab" value="tab-settings">
     <button data-role="none" class="sm-btn sm-b-lesen" type="submit" name="fer_sichern" value="1"><?= fer_t('TEXT.K_SICHERN') ?></button>
   </form>
   <form action="index.php" method="post" enctype="multipart/form-data">
+    <?php echo fer_fmt(); ?>
     <input data-role="none" type="hidden" name="activetab" value="tab-settings">
     <input data-role="none" type="file" name="fer_sicherung" accept=".json">
     <button data-role="none" class="sm-btn sm-b-aktion" type="submit" name="fer_zurueck" value="1"><?= fer_t('TEXT.K_ZURUECK') ?></button>
