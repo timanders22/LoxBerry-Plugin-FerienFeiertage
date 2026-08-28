@@ -133,7 +133,7 @@ if ((!is_file($fe_cfgfile) || trim((string) @file_get_contents($fe_cfgfile)) ===
     @copy($fe_bkfile, $fe_cfgfile);
 }
 
-$fe_saved = false; $fe_err = ''; $fe_note = ''; $fe_mangel = array();
+$fe_saved = false; $fe_err = ''; $fe_note = ''; $fe_fehler = array();
 
 /* ---------------------------------------------------------------- *
  * Der Wachposten - EIN Posten, vor allen Handlern.
@@ -149,7 +149,7 @@ if ($fer_wache !== '') {
     if ($fer_reiter_merk !== null) {
         $_POST['activetab'] = $fer_reiter_merk;
     }
-    $fe_mangel[] = $fer_wache;
+    $fe_fehler[] = $fer_wache;
 }
 
 
@@ -261,7 +261,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['save'])) {
     /* --- ab 1.2.0 ---------------------------------------------------- */
     $fe_new['subdivision2'] = preg_replace('/[^A-Za-z0-9\-]/', '', (string) (isset($_POST['subdivision2']) ? $_POST['subdivision2'] : ''));
     if ($fe_new['subdivision2'] !== '' && $fe_new['subdivision2'] === $fe_new['subdivision']) {
-        $fe_mangel[] = 'Die zweite Region ist dieselbe wie die erste - sie wurde nicht uebernommen.';
+        $fe_fehler[] = 'Die zweite Region ist dieselbe wie die erste - sie wurde nicht uebernommen.';
         $fe_new['subdivision2'] = '';
     }
     $fe_new['group'] = preg_replace('/[^A-Za-z0-9\-]/', '', (string) (isset($_POST['group']) ? $_POST['group'] : ''));
@@ -272,7 +272,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['save'])) {
      * Brueckentag (254 statt 32 in 366 Tagen, DE-BY, 18.08.2026). */
     $fe_bl = (int) (isset($_POST['bridge_luecke']) ? $_POST['bridge_luecke'] : 4);
     if ($fe_bl < 1 || $fe_bl > 4) {
-        $fe_mangel[] = 'Die Luecke fuer Brueckentage muss zwischen 1 und 4 Werktagen liegen'
+        $fe_fehler[] = 'Die Luecke fuer Brueckentage muss zwischen 1 und 4 Werktagen liegen'
                      . ' - eingetragen war ' . $fe_bl . ', uebernommen wurde 4.';
         $fe_bl = 4;
     }
@@ -284,7 +284,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['save'])) {
         /* Abweisen statt zurechtbiegen. Ein "webcal://"-Verweis, wie ihn
          * Apple ausgibt, ist keine Adresse, die file_get_contents oeffnen
          * kann - stillschweigend ein http davorzusetzen waere geraten. */
-        $fe_mangel[] = 'Die Kalender-Adresse muss mit http:// oder https:// beginnen'
+        $fe_fehler[] = 'Die Kalender-Adresse muss mit http:// oder https:// beginnen'
                      . ' (bei einem webcal://-Verweis das webcal durch https ersetzen).'
                      . ' Sie wurde nicht uebernommen.';
         $fe_iu = isset($fe_vorher['ics_url']) ? (string) $fe_vorher['ics_url'] : '';
@@ -295,7 +295,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['save'])) {
     $fe_new['ics_filter'] = trim((string) (isset($_POST['ics_filter']) ? $_POST['ics_filter'] : ''));
     $fe_uv = (int) (isset($_POST['urlaub_vorlauf']) ? $_POST['urlaub_vorlauf'] : 1);
     if ($fe_uv < 0 || $fe_uv > 14) {
-        $fe_mangel[] = 'Der Vorlauf zur Rueckkehr muss zwischen 0 und 14 Tagen liegen'
+        $fe_fehler[] = 'Der Vorlauf zur Rueckkehr muss zwischen 0 und 14 Tagen liegen'
                      . ' - eingetragen war ' . $fe_uv . ', uebernommen wurde 1.';
         $fe_uv = 1;
     }
@@ -324,7 +324,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['save'])) {
              * nachfolgenden rutschten eine Position nach oben. Der Anwender
              * sah nur "Konfiguration gespeichert" und eine Tabelle ohne
              * seine Eingabe. Melden ist richtig, blockieren nicht. */
-            $fe_mangel[] = 'Zeile ' . ($fe_i + 1) . ' der eigenen Termine'
+            $fe_fehler[] = 'Zeile ' . ($fe_i + 1) . ' der eigenen Termine'
                 . ($fe_zname !== '' ? ' ("' . $fe_zname . '")' : '')
                 . ': "Von" muss JJJJ-MM-TT sein'
                 . ($v === '' ? ' und war leer.' : ', war aber "' . $v . '".')
@@ -332,13 +332,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['save'])) {
             continue;
         }
         if ($b !== '' && !preg_match('/^\d{4}-\d{2}-\d{2}$/', $b)) {
-            $fe_mangel[] = 'Zeile ' . ($fe_i + 1) . ' der eigenen Termine: "Bis" war "'
+            $fe_fehler[] = 'Zeile ' . ($fe_i + 1) . ' der eigenen Termine: "Bis" war "'
                 . $b . '" und damit nicht JJJJ-MM-TT - es gilt jetzt derselbe Tag wie "Von".';
             $b = $v;
         }
         if ($b === '') { $b = $v; }
         if ($b < $v) {
-            $fe_mangel[] = 'Zeile ' . ($fe_i + 1) . ' der eigenen Termine: "Bis" liegt vor "Von"'
+            $fe_fehler[] = 'Zeile ' . ($fe_i + 1) . ' der eigenen Termine: "Bis" liegt vor "Von"'
                 . ' - die beiden Daten wurden getauscht.';
             $fe_tausch = $v; $v = $b; $b = $fe_tausch;
         }
@@ -363,7 +363,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['save'])) {
     $fe_zeit = trim((string) (isset($_POST['notify_time']) ? $_POST['notify_time'] : ''));
     $fe_zeit_alt = isset($fe_vorher['notify']['time']) ? (string) $fe_vorher['notify']['time'] : '19:00';
     if (!preg_match('/^([01]?\d|2[0-3]):([0-5]\d)$/', $fe_zeit)) {
-        $fe_mangel[] = 'Die Meldezeit muss SS:MM zwischen 00:00 und 23:59 sein'
+        $fe_fehler[] = 'Die Meldezeit muss SS:MM zwischen 00:00 und 23:59 sein'
                      . ($fe_zeit === '' ? ' und war leer.' : ', war aber "' . $fe_zeit . '".')
                      . ' Es gilt weiterhin ' . $fe_zeit_alt . '.';
         $fe_zeit = $fe_zeit_alt;
@@ -499,7 +499,6 @@ if (is_file($fe_logfile)) {
     $fe_loglines = array_slice(array_reverse(file($fe_logfile, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES) ?: array()), 0, 300);
 }
 
-function fe_e($s) { return htmlspecialchars((string) $s, ENT_QUOTES, 'UTF-8'); }
 function fe_d($iso) { return preg_match('/^\d{4}-\d{2}-\d{2}$/', (string) $iso) ? date('d.m.Y', strtotime($iso)) : '-'; }
 
 $fe_frame = class_exists('LBWeb', false);
@@ -538,12 +537,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['fer_zurueck'])) {
     } elseif ((int) $_FILES['fer_sicherung']['size'] > 262144) {
         $fe_note = fer_t('TEXT.SICH_ZU_GROSS');
     } else {
-        list($fer_neu, $fer_mangel, $fer_n) = fer_sicherung_lesen(
+        list($fer_neu, $fer_fehler, $fer_n) = fer_sicherung_lesen(
             (string) @file_get_contents($_FILES['fer_sicherung']['tmp_name']));
         if ($fer_neu === null) {
             /* ALLE Beanstandungen, nicht nur die erste - und geaendert
              * wird nichts. */
-            $fe_note = fer_t('TEXT.SICH_ABGELEHNT') . ' ' . implode(' ', $fer_mangel);
+            $fe_note = fer_t('TEXT.SICH_ABGELEHNT') . ' ' . implode(' ', $fer_fehler);
         } elseif (fer_config_speichern($fer_neu)) {
             $fe_note = sprintf(fer_t('TEXT.SICH_UEBERNOMMEN'), $fer_n);
         } else {
@@ -616,8 +615,8 @@ if ($fe_frame) { LBWeb::lbheader('Ferien und Feiertage', 'https://wiki.loxberry.
    Das Speichern hat stattgefunden - nur einzelne Eingaben nicht so, wie sie
    dastanden. Wer das rot faerbt, laesst den Anwender glauben, es sei nichts
    gespeichert worden. */ ?>
-<?php if ($fe_mangel) { ?><div class="sm-alert sm-warn"><b><?php echo fer_t('TEXT.M_BEANSTANDUNG'); ?></b>
-<ul style="margin:6px 0 0 18px;padding:0;"><?php foreach ($fe_mangel as $fe_m) { ?><li><?= fe_e($fe_m) ?></li><?php } ?></ul></div><?php } ?>
+<?php if ($fe_fehler) { ?><div class="sm-alert sm-warn"><b><?php echo fer_t('TEXT.M_BEANSTANDUNG'); ?></b>
+<ul style="margin:6px 0 0 18px;padding:0;"><?php foreach ($fe_fehler as $fe_m) { ?><li><?= fe_e($fe_m) ?></li><?php } ?></ul></div><?php } ?>
 
 <?php if (!empty($fe_st)) { ?>
 <div class="sm-alert sm-info">
