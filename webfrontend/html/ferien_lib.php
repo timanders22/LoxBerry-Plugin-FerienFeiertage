@@ -61,7 +61,7 @@ function fer_paths() {
             'config' => $lbhomedir . '/config/plugins/' . $plugindir . '/ferien.json',
             'backup' => $lbhomedir . '/config/plugins/' . $plugindir . '.backup.json',
             'log' => $lbhomedir . '/log/plugins/' . $plugindir . '/ferien.log',
-            'data' => $lbhomedir . '/data/plugins/' . $plugindir,
+            'datadir' => $lbhomedir . '/data/plugins/' . $plugindir,
             'tmp' => '/tmp/ferien',
             'lbhome' => $lbhomedir,
         );
@@ -70,7 +70,7 @@ function fer_paths() {
         'config' => dirname(dirname(__DIR__)) . '/config/ferien.json',
         'backup' => dirname(dirname(__DIR__)) . '/config/ferien.backup.json',
         'log' => sys_get_temp_dir() . '/ferien/ferien.log',
-        'data' => sys_get_temp_dir() . '/ferien/data',
+        'datadir' => sys_get_temp_dir() . '/ferien/data',
         'tmp' => sys_get_temp_dir() . '/ferien',
         'lbhome' => '',
     );
@@ -252,8 +252,8 @@ function fer_tmpdir() {
 }
 function fer_datadir() {
     $p = fer_paths();
-    if (!is_dir($p['data'])) { @mkdir($p['data'], 0775, true); }
-    return $p['data'];
+    if (!is_dir($p['datadir'])) { @mkdir($p['datadir'], 0775, true); }
+    return $p['datadir'];
 }
 
 /* ---------------- Protokoll ---------------- */
@@ -2243,7 +2243,7 @@ function fer_merkwort()
         return $wort;
     }
     $pfade = fer_paths();
-    $verz  = isset($pfade['data']) ? $pfade['data'] : '';
+    $verz  = isset($pfade['datadir']) ? $pfade['datadir'] : '';
     if ($verz === '') {
         return '';
     }
