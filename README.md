@@ -109,6 +109,12 @@ MIT — siehe [LICENSE](LICENSE).
 
 ## Änderungen
 
+Die Freigabenotiz zu jeder Fassung steht bei den Releases:
+<https://github.com/timanders22/LoxBerry-Plugin-FerienFeiertage/releases>
+
+Was hier noch steht, beschreibt einzelne Fassungen ausführlicher, als es auf
+die Release-Seite passt. Maßgeblich ist die Release-Seite.
+
 ### 1.2.2
 
 **Aufräumen in den Sprachdateien — keine Änderung am Verhalten.** Je
