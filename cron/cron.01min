@@ -5,5 +5,5 @@
 # nur von hier aufgerufen, ueber die PHP-Kommandozeile; im HTML-Verzeichnis
 # war es zusaetzlich fuer jeden im Heimnetz per HTTP abrufbar.
 #
-# REPLACELBPBINDIR wird bei der Installation durch den bin-Pfad des Plugins ersetzt.
+# Den bin-Pfad des Plugins setzt der Installer in der Befehlszeile ein.
 php "REPLACELBPBINDIR/cron.php" >/dev/null 2>&1

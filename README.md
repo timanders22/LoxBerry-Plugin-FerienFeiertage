@@ -10,6 +10,13 @@ Bundesländern/Kantonen.
 
 Kompatibel mit LoxBerry 3.x und **LoxBerry 4** (reines PHP, PHP 7.4 und 8.x).
 
+## Neu in 1.2.12
+
+- **Tabellen mit Eingabefeldern rollen seitlich, statt abgeschnitten zu werden.**
+  Die Oberfläche von LoxBerry schneidet breite Inhalte ab, ohne dass die Seite
+  seitlich rollt; an BatterieBMS waren so zwei Einstellungen je Speicher nicht
+  erreichbar. Diese Tabellen stehen jetzt im Rollbehälter der Hausform.
+
 ## Neu in 1.2.11
 
 - **Das Auswahlfeld zeichnet seinen Pfeil selbst.** Bis 1.2.10 kam er von der

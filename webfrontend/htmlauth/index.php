@@ -587,6 +587,11 @@ if ($fe_frame) { LBWeb::lbheader('Ferien und Feiertage', 'https://wiki.loxberry.
 .sm-tbl { border-collapse: collapse; margin: 8px 0; }
 .sm-tbl th, .sm-tbl td { border: 1px solid #ddd; padding: 6px 10px; text-align: left; font-size: 0.9em; }
 .sm-tbl th { background: #f0f0f0; }
+/* Wortgetreu aus VORLAGE_hausstandard.css.html (B54, 17.09.2026): jede Tabelle
+   mit Eingabefeldern kommt in .sm-breit. lb-content schneidet seitlich ab; an
+   BatterieBMS waren so zwei Spalten im Browser nicht erreichbar. */
+.sm-breit { overflow-x: auto; -webkit-overflow-scrolling: touch; margin: 10px 0; }
+.sm-breit .sm-tbl { margin: 0; min-width: 760px; }
 .sm-wrap .sm-btn, .sm-wrap a.sm-btn, .sm-wrap button { text-shadow: none !important; box-shadow: none !important; }
 .sm-wrap a.sm-btn, .sm-wrap a.sm-btn:visited, .sm-wrap a.sm-btn:hover { color: #fff !important; text-decoration: none; }
 
@@ -900,6 +905,7 @@ if ($fe_frame) { LBWeb::lbheader('Ferien und Feiertage', 'https://wiki.loxberry.
 &bull; <b><?php echo fer_t('TEXT.URLAUB_ABWESEND_2'); ?></b> <?php echo fer_t('TEXT.BEDEUTET_DAS_HAUS_IST_LEER_ZUSTZLI'); ?>
 <span class="sm-mono"><?php echo fer_t('TEXT.URLAUB_1'); ?></span> <?php echo fer_t('TEXT.GESETZT_DAMIT_LOXONE_AUTOMATISCH_I'); ?> <b><?php echo fer_t('TEXT.URLAUBSMODUS'); ?></b> <?php echo fer_t('TEXT.GEHEN_KANN_ANWESENHEITSSIMULATION_'); ?> <span class="sm-mono"><?php echo fer_t('TEXT.URLAUBENDE_1'); ?></span> <?php echo fer_t('TEXT.AM_LETZTEN_URLAUBSTAG_LSST_SICH_DA'); ?><br>
 <?php echo fer_t('TEXT.DAS_DATUM_BEZEICHNET_GANZE_TAGE_AB'); ?> <span class="sm-mono"><?php echo fer_t('TEXT.URLAUBENDE'); ?></span> <?php echo fer_t('TEXT.WIEDER_AUF_SCHRITT4D_EIN_VORZIEHEN'); ?></div>
+<div class="sm-breit">
 <table class="sm-tbl" style="width:100%;">
 <tr><th style="width:30%;"><?php echo fer_t('TEXT.BEZEICHNUNG'); ?></th><th style="width:20%;"><?php echo fer_t('TEXT.VON_JJJJ_MM_TT'); ?></th><th style="width:20%;">bis</th><th style="width:24%;">Art</th></tr>
 <?php for ($fe_i = 0; $fe_i < 6; $fe_i++) {
@@ -917,6 +923,7 @@ if ($fe_frame) { LBWeb::lbheader('Ferien und Feiertage', 'https://wiki.loxberry.
 </tr>
 <?php } ?>
 </table>
+</div>
 
 <h2><?php echo fer_t('TEXT.BENACHRICHTIGUNGEN'); ?></h2>
 <div style="margin-bottom:10px;">
