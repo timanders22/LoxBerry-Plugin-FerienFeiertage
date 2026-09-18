@@ -33,9 +33,47 @@ SICHER="$BASE/data/plugins/$PFOLDER.upgrade_sicherung"
 mkdir -p "$SICHER" 2>/dev/null
 chmod 0700 "$SICHER" 2>/dev/null
 
-if [ -f "$BASE/config/plugins/$PFOLDER/ferien.json" ]; then
-    cp -p "$BASE/config/plugins/$PFOLDER/ferien.json" "$SICHER/ferien.json" 2>/dev/null
-    echo "<OK> Konfiguration gesichert."
+# Traegt die Datei das Aktionstoken? Dieselbe Frage wie fer_config_hat_inhalt()
+# in ferien_lib.php; gleichlautend in preupgrade.sh, postinstall.sh und
+# postupgrade.sh. Entschieden wird nach INHALT, nicht nach Form oder Groesse:
+# eine abgeschnittene ferien.json ist weder leer noch "{}".
+# Rueckgabe: 0 ja, 1 nein, 2 nicht pruefbar (kein php im Pfad).
+fer_traegt_token() {
+    [ -s "$1" ] || return 1
+    command -v php >/dev/null 2>&1 || return 2
+    php -r '$d = json_decode((string) @file_get_contents($argv[1]), true);
+        exit(is_array($d) && isset($d["aktionstoken"]) && is_string($d["aktionstoken"])
+             && trim($d["aktionstoken"]) !== "" ? 0 : 1);' -- "$1" 2>/dev/null
+    case $? in 0) return 0 ;; 1) return 1 ;; *) return 2 ;; esac
+}
+
+# Zwei Regeln fuer die Sicherung, beide gemessen am 18.09.2026 in WSL
+# (Pruefung-FerienFeiertage-1.2.14, messe_haken.sh):
+#  1. Ein Stand OHNE Aktionstoken verdraengt keine Sicherung MIT (Fall K11:
+#     eine liegengebliebene Sicherung aus einem abgebrochenen Lauf wurde von
+#     einem "{}" ueberschrieben).
+#  2. Die neue Sicherung entsteht daneben und kommt erst nach dem Vergleich
+#     per Umbenennen an ihren Platz. Ein cp direkt auf die Sicherung kappt sie
+#     zuerst; scheiterte das Schreiben (volle Karte, nachgestellt mit
+#     ulimit -f 0), blieb sie mit 0 Byte zurueck (Fall K12).
+CF="$BASE/config/plugins/$PFOLDER/ferien.json"
+if [ -f "$CF" ]; then
+    fer_traegt_token "$CF"; CF_RC=$?
+    fer_traegt_token "$SICHER/ferien.json"; SI_RC=$?
+    if [ "$CF_RC" = 1 ] && [ "$SI_RC" = 0 ]; then
+        echo "<WARNING> ferien.json traegt kein Aktionstoken, die vorhandene Update-Sicherung"
+        echo "<WARNING> schon - sie bleibt unveraendert: $SICHER/ferien.json"
+    elif cp -p "$CF" "$SICHER/ferien.json.neu" 2>/dev/null \
+         && cmp -s "$CF" "$SICHER/ferien.json.neu" \
+         && mv -f "$SICHER/ferien.json.neu" "$SICHER/ferien.json" 2>/dev/null; then
+        echo "<OK> Konfiguration gesichert."
+    else
+        rm -f "$SICHER/ferien.json.neu" 2>/dev/null
+        echo "<WARNING> Die Konfiguration liess sich NICHT sichern (Platz? Rechte?): $SICHER"
+        if [ -f "$SICHER/ferien.json" ]; then
+            echo "<WARNING> Die vorhandene Sicherung bleibt unveraendert."
+        fi
+    fi
 else
     echo "<INFO> Keine Konfiguration vorhanden - nichts zu sichern."
 fi

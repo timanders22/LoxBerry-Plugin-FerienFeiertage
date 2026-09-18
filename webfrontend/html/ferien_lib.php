@@ -280,8 +280,30 @@ function fer_zweitschrift_ziehen($quelle, $ziel, array $neu, array $felder, $rec
             . 'traegt nicht, was dort steht (' . implode(', ', $fehlt) . '): ' . $ziel);
         return false;
     }
-    if (!@copy($quelle, $ziel)) { return false; }
-    if ($rechte !== null) { @chmod($ziel, $rechte); }
+    /* Nicht copy(): copy() oeffnet das Ziel mit O_TRUNC, die heile
+     * Zweitschrift ist sofort leer und wird erst danach gefuellt. Scheitert
+     * das Schreiben (volle Karte), bleibt sie mit 0 Byte zurueck - gemessen
+     * 18.09.2026 in WSL unter ulimit -f 0 (Pruefung-FerienFeiertage-1.2.14,
+     * Fall P5; Bauart Bestand-2026-09-18/klasse-D, Abschnitt 4b). Deshalb wie
+     * fer_json_schreiben(): Nebendatei, dann rename(). Die Nebendatei bekommt
+     * die Rechte VOR dem Inhalt, und zwar die der Quelle (CLAUDE.md 9:
+     * gleiche Rechte wie das Original) - copy() legte eine fehlende
+     * Zweitschrift mit den Vorgaberechten an, gemessen 644 neben einer
+     * Konfiguration mit 600 (Fall P7). */
+    $roh = @file_get_contents($quelle);
+    if ($roh === false) { return false; }
+    $modus = ($rechte !== null) ? $rechte : (@fileperms($quelle) & 0777);
+    $tmp = $ziel . '.' . getmypid() . '.' . mt_rand(1000, 9999) . '.neu';
+    if (@file_put_contents($tmp, '') === false) { return false; }
+    if ($modus) { @chmod($tmp, $modus); }
+    if (@file_put_contents($tmp, $roh) !== strlen($roh)) {
+        @unlink($tmp);
+        return false;
+    }
+    if (!@rename($tmp, $ziel)) {
+        @unlink($tmp);
+        return false;
+    }
     return true;
 }
 
@@ -2181,8 +2203,17 @@ function fer_vx($s) {
 
 /** Hausstandard: Gateway-Autostart aus general.json (PLUGIN_HAUSREGELN Abschnitt 3). */
 function fer_mqtt_gateway_autostart() {
-    $home = getenv('LBHOMEDIR') ?: '/opt/loxberry';
-    $gj = $home . '/config/system/general.json';
+    /* Die Wurzel wird GELESEN - LBHOMEDIR, sonst aufwaerts gesucht
+     * (fer_paths()) -, nicht auf einen festen Systempfad geraten. Bis 1.2.13
+     * stand hier ein harter Rueckfall: ohne LBHOMEDIR (Cron, Kommandozeile)
+     * las die Funktion eine general.json, die es nicht gab, und meldete
+     * "nicht pruefbar", waehrend fer_selbsttest() dieselbe Datei ueber
+     * fer_paths() fand. Gemessen 18.09.2026 in WSL (PHP 8.3.6, env -i) und
+     * unter Windows-PHP 7.4.33/8.4.24: null statt false
+     * (Pruefung-FerienFeiertage-1.2.14, P1/G1; Bestand-2026-09-18/klasse-H). */
+    $p = fer_paths();
+    if ($p['lbhome'] === '') { return null; }
+    $gj = $p['lbhome'] . '/config/system/general.json';
     if (!is_file($gj)) { return null; }
     $d = json_decode((string) @file_get_contents($gj), true);
     if (!is_array($d) || !isset($d['Mqtt'])) { return null; }

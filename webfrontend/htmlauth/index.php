@@ -147,9 +147,10 @@ if (!function_exists('fer_config')) {
  * geschlossen aus, statt auf die alte Bauart zurueckzufallen. */
 if (function_exists('fer_selbstheilung')) { fer_selbstheilung(); }
 
-/* Die Zweitschrift wird an vier Stellen dieser Datei nachgezogen. Sie gehen
- * seit 1.2.13 alle durch diesen einen Aufruf, damit die Wache nicht an einer
- * der vier vergessen wird: eine Zweitschrift MIT Aktionstoken darf nie durch
+/* Die Zweitschrift wird an fuenf Stellen dieser Datei nachgezogen (die
+ * fuenfte, "Einstellungen zurueckspielen", kam mit 1.2.14 dazu). Sie gehen
+ * alle durch diesen einen Aufruf, damit die Wache nicht an einer von ihnen
+ * vergessen wird: eine Zweitschrift MIT Aktionstoken darf nie durch
  * einen Stand OHNE ersetzt werden (fer_zweitschrift_ziehen(), ferien_lib.php).
  * Fehlt die Bibliothek, bleibt die Zweitschrift unangetastet. */
 function fe_zweitschrift($quelle, $ziel, $stand)
@@ -597,6 +598,16 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['fer_zurueck'])) {
              * wird nichts. */
             $fe_note = fer_t('TEXT.SICH_ABGELEHNT') . ' ' . implode(' ', $fer_fehler);
         } elseif (fer_config_speichern($fer_neu)) {
+            /* Die Zweitschrift mitziehen. Bis 1.2.13 blieb sie auf dem Stand
+             * VOR dem Zurueckspielen stehen, und die naechste Selbstheilung
+             * (abgeschnittene Konfiguration, Upgrade-Luecke) holte genau
+             * diesen alten Stand zurueck - das Zurueckspielen war still
+             * rueckgaengig gemacht, samt altem Aktionstoken. Gemessen
+             * 18.09.2026 unter php-cgi 7.4.33 und 8.4.24
+             * (Pruefung-FerienFeiertage-1.2.14, R1/R2). Die Wache in
+             * fe_zweitschrift() gilt auch hier: eine Datei ohne Aktionstoken
+             * ersetzt keine Zweitschrift mit (R3). */
+            fe_zweitschrift($fe_cfgfile, $fe_bkfile, $fer_neu);
             $fe_note = sprintf(fer_t('TEXT.SICH_UEBERNOMMEN'), $fer_n);
         } else {
             $fe_note = fer_t('TEXT.SICH_SCHREIBFEHLER');

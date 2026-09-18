@@ -10,6 +10,32 @@ Bundesländern/Kantonen.
 
 Kompatibel mit LoxBerry 3.x und **LoxBerry 4** (reines PHP, PHP 7.4 und 8.x).
 
+## Neu in 1.2.14
+
+- **Die Hakenskripte entscheiden nach dem Inhalt, nicht nach der Größe.**
+  `postinstall.sh` und `postupgrade.sh` fragten bis 1.2.13, ob `ferien.json`
+  fehlt, leer ist oder `{}` enthält. Eine **abgeschnittene** Datei ist nichts
+  davon; sie wurde nicht aus der Sicherungskopie geheilt, und Aktionstoken und
+  Bundesland blieben verloren. Jetzt heißt es wie in der Oberfläche: trägt die
+  Datei das Aktionstoken? Der verdrängte Stand bleibt als `ferien.json.kaputt`
+  (0600) liegen, und eine Sicherungskopie ohne Aktionstoken heilt nichts.
+- **Die Update-Sicherung wird nicht mehr gekappt.** `preupgrade.sh` legt die
+  neue Sicherung daneben an und benennt sie erst nach dem Vergleich um; ein
+  Stand ohne Aktionstoken ersetzt keine Sicherung mit. `postupgrade.sh` räumt
+  die Sicherung erst weg, wenn ihr Inhalt angekommen ist — bisher fiel sie auch
+  dann, wenn das Zurückstellen an einer vollen Karte gescheitert war.
+- **Die Zweitschrift wird ebenso unteilbar nachgezogen** (Nebendatei, dann
+  Umbenennen) und bekommt die Rechte der Konfiguration.
+- **„Einstellungen zurückspielen" zieht die Zweitschrift mit.** Bis 1.2.13
+  blieb sie auf dem alten Stand, und die nächste Selbstheilung machte das
+  Zurückspielen still rückgängig — samt altem Aktionstoken.
+- **Die Prüfung „Startet das MQTT-Gateway automatisch mit?" liest die
+  LoxBerry-Wurzel**, statt ohne `LBHOMEDIR` auf einen festen Pfad zu raten.
+
+Gemessen am 18.09.2026 in WSL/Ubuntu (bash, PHP 8.3.6) und unter Windows-PHP
+7.4.33 und 8.4.24, jeweils vorher rot und nachher grün, mit Kontrollfällen.
+Nicht am Gerät gemessen.
+
 ## Neu in 1.2.13
 
 - **Die Selbstheilung entscheidet nach dem Inhalt der Konfiguration, nicht nach
