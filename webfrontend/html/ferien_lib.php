@@ -147,12 +147,147 @@ function fer_vorgaben()
 );
 }
 
+/**
+ * Traegt diese Datei ueberhaupt etwas?
+ *
+ * Nicht "ist sie leer?", sondern "laesst sie sich als JSON-Objekt mit
+ * mindestens einem Schluessel lesen?". Der Unterschied ist gemessen
+ * (18.09.2026, WSL/Ubuntu, PHP 8.3.6, Pruefung-FerienFeiertage-1.2.13):
+ * eine ABGESCHNITTENE ferien.json - weder leer noch "{}", aber fuer
+ * json_decode unbrauchbar - ging bis 1.2.12 an BEIDEN Heilstellen vorbei.
+ * Der unangemeldete Endpunkt antwortete danach
+ * "SELFTEST;OK=0;ERR=KEIN_TOKEN_EINGERICHTET", und der naechste Aufruf der
+ * Oberflaeche wuerfelte ein neues Aktionstoken und kopierte es ueber die
+ * Zweitschrift: jede Loxone-Adresse mit dem alten Token bekommt HTTP 403.
+ * Bauart: Sprachsteuerung 0.11.7 (sp_inhalt_oder_null()), Intercom 2.2.11.
+ *
+ * Rueckgabe: die gelesenen Daten oder null, wenn die Datei nichts traegt.
+ */
+function fer_inhalt_oder_null($pfad)
+{
+    if (!is_file($pfad)) { return null; }
+    $roh = trim((string) @file_get_contents($pfad));
+    if ($roh === '') { return null; }
+    $d = json_decode($roh, true);
+    if (!is_array($d) || $d === array()) { return null; }
+    return $d;
+}
+
+/**
+ * Traegt diese Konfiguration das, was nur sie tragen kann?
+ *
+ * Das Aktionstoken. Es steht in JEDER Loxone-Adresse dieses Plugins
+ * (?say=, ?ptest=, ?selftest=); geht es verloren, scheitern alle virtuellen
+ * Eingaenge im Miniserver, und es gibt keinen Weg, es zurueckzurechnen.
+ * Alles andere - Bundesland, Meldezeit, eigene Termine - laesst sich in der
+ * Oberflaeche noch einmal eintragen.
+ *
+ * Eine Konfiguration OHNE Token gibt es auf keinem Weg der Oberflaeche:
+ * index.php fuellt es beim ersten Seitenaufbau. Steht dort keines, ist die
+ * Datei nicht aus einem gespeicherten Stand hervorgegangen - dann wird aus
+ * der Zweitschrift geheilt, statt ein NEUES Token zu wuerfeln.
+ */
+function fer_config_hat_inhalt($c)
+{
+    return is_array($c) && $c !== array()
+        && trim((string) (isset($c['aktionstoken']) ? $c['aktionstoken'] : '')) !== '';
+}
+
+/**
+ * Die Heilungsentscheidung - EINE Funktion, ZWEI Aufrufer.
+ *
+ * Aufgerufen wird sie aus fer_config() (gilt fuer jeden Weg, auch fuer den
+ * unangemeldeten Endpunkt und den Cron) und ganz oben in
+ * webfrontend/htmlauth/index.php, wo bis 1.2.12 eine wortgleiche Abschrift
+ * derselben Entscheidung stand. Zwei Abschriften laufen auseinander; die
+ * eine greift dann an der anderen vorbei.
+ *
+ * Entschieden wird nach INHALT, nicht nach Form: nicht "fehlt die Datei,
+ * ist sie leer oder '{}'", sondern "traegt sie noch das Aktionstoken".
+ * Geheilt wird nur aus einer Zweitschrift, die selbst Inhalt traegt - ein
+ * Stand ohne Aktionstoken darf keinen anderen ersetzen, in keiner der
+ * beiden Richtungen. Was vorher in der Datei stand, wird nicht weggeworfen,
+ * sondern liegt als ferien.json.kaputt daneben (0600: es koennen Zugangs-
+ * daten darin stehen). Der reine Aktualisierungsfall "{}" hinterlaesst
+ * keine .kaputt-Datei - dort ging nichts verloren.
+ *
+ * Rueckgabe: true, wenn wirklich geheilt wurde.
+ */
+function fer_selbstheilung()
+{
+    $p = fer_paths();
+    if (fer_config_hat_inhalt(fer_inhalt_oder_null($p['config']))) {
+        return false;
+    }
+    if (!fer_config_hat_inhalt(fer_inhalt_oder_null($p['backup']))) {
+        return false;
+    }
+    @mkdir(dirname($p['config']), 0775, true);
+    $alt = is_file($p['config']) ? (string) @file_get_contents($p['config']) : '';
+    $rest = preg_replace('/\s+/', '', $alt);
+    $verdraengt = ($rest !== '' && $rest !== '{}' && $rest !== '[]');
+    if ($verdraengt) {
+        @copy($p['config'], $p['config'] . '.kaputt');
+        @chmod($p['config'] . '.kaputt', 0600);
+    }
+    if (!@copy($p['backup'], $p['config'])) {
+        return false;
+    }
+    fer_log('Die Konfiguration trug kein Aktionstoken und wurde aus der Zweitschrift '
+        . 'wiederhergestellt: ' . $p['backup']
+        . ($verdraengt ? ' (der vorherige Inhalt liegt unter ' . $p['config'] . '.kaputt)' : '')
+        . '.');
+    return true;
+}
+
+/**
+ * Was die Zweitschrift traegt und der neue Stand nicht.
+ *
+ * Leere Rueckgabe heisst: die Zweitschrift darf erneuert werden. Verglichen
+ * wird, ob ein SCHLUESSEL fehlt oder leer ist, nicht ob sich ein Wert
+ * geaendert hat. Ein leeres Aktionstoken gibt es auf keinem Weg der
+ * Oberflaeche und gilt deshalb als fehlend: gemessen am 18.09.2026 schrieb
+ * der Knopf "Speichern" bei unlesbarer Konfiguration ein leeres Token in
+ * die Zweitschrift und zerstoerte damit den einzigen Rueckweg.
+ *
+ * Bauart uebernommen aus Sprachsteuerung 0.11.7 / Intercom 2.2.11: eine
+ * Zweitschrift MIT Inhalt wird nie durch einen Stand OHNE Inhalt ersetzt.
+ * Das Speichern selbst wird nicht verhindert - nur der Rueckweg bleibt
+ * stehen, und das Protokoll sagt es.
+ */
+function fer_zweitschrift_fehlt($sicherung, array $neu, array $felder)
+{
+    $z = fer_inhalt_oder_null($sicherung);
+    if ($z === null) { return array(); }
+    $fehlt = array();
+    foreach ($felder as $feld) {
+        if (!array_key_exists($feld, $z)) { continue; }
+        $hat_z = is_string($z[$feld]) ? (trim($z[$feld]) !== '') : !empty($z[$feld]);
+        if (!$hat_z) { continue; }
+        $hat_n = array_key_exists($feld, $neu)
+               && (is_string($neu[$feld]) ? (trim($neu[$feld]) !== '') : true);
+        if (!$hat_n) { $fehlt[] = $feld; }
+    }
+    return $fehlt;
+}
+
+/** Die Zweitschrift erneuern - oder begruendet nicht. */
+function fer_zweitschrift_ziehen($quelle, $ziel, array $neu, array $felder, $rechte = null)
+{
+    $fehlt = fer_zweitschrift_fehlt($ziel, $neu, $felder);
+    if ($fehlt) {
+        fer_log('WARNUNG: Die Zweitschrift bleibt unveraendert - der gespeicherte Stand '
+            . 'traegt nicht, was dort steht (' . implode(', ', $fehlt) . '): ' . $ziel);
+        return false;
+    }
+    if (!@copy($quelle, $ziel)) { return false; }
+    if ($rechte !== null) { @chmod($ziel, $rechte); }
+    return true;
+}
+
 function fer_config() {
     $p = fer_paths();
-    if ((!is_file($p['config']) || trim((string) @file_get_contents($p['config'])) === '' || trim((string) @file_get_contents($p['config'])) === '{}') && is_file($p['backup'])) {
-        @mkdir(dirname($p['config']), 0775, true);
-        @copy($p['backup'], $p['config']);
-    }
+    fer_selbstheilung();
     $cfg = is_file($p['config']) ? (json_decode((string) file_get_contents($p['config']), true) ?: array()) : array();
     if (!is_array($cfg)) {
         $cfg = array();

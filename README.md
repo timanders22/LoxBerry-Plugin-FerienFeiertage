@@ -10,6 +10,42 @@ Bundesländern/Kantonen.
 
 Kompatibel mit LoxBerry 3.x und **LoxBerry 4** (reines PHP, PHP 7.4 und 8.x).
 
+## Neu in 1.2.13
+
+- **Die Selbstheilung entscheidet nach dem Inhalt der Konfiguration, nicht nach
+  ihrer Form.** Bis 1.2.12 wurde nur gefragt: fehlt `ferien.json`, ist sie leer
+  oder enthält sie `{}`? Eine **abgeschnittene** Datei — etwa nach einem
+  Stromausfall oder auf einem vollen Dateisystem — ist keines davon. Sie ging
+  an der Prüfung vorbei, `json_decode` gab stumm nichts zurück, das Plugin hielt
+  das Aktionstoken für nicht gesetzt, würfelte ein **neues** und kopierte es
+  über die Sicherungskopie. Damit war das alte Token endgültig fort, und jede
+  Adresse im Miniserver (`?say=`, `?ptest=`, `?selftest=`) beantwortete jeden
+  Aufruf mit HTTP 403 — ohne dass irgendwo etwas davon stand.
+  Gemessen am 18.09.2026 in WSL/Ubuntu (PHP 8.3.6) und unter Windows-PHP
+  7.4.33 und 8.4.24, mit Kontrollfall: dieselbe Messung ist an der heilen und
+  an der leeren Datei grün.
+- **„Inhalt" heißt: lesbares JSON-Objekt *und* vorhandenes Aktionstoken.**
+  Wiederhergestellt wird nur aus einer Sicherungskopie, die selbst Inhalt
+  trägt; ein Stand ohne Token ersetzt keinen anderen, in keiner Richtung.
+- **Die Entscheidung steht an genau einer Stelle** (`fer_selbstheilung()` in
+  `ferien_lib.php`). Bis 1.2.12 stand sie zweimal da — wortgleich in
+  `ferien_lib.php` und in `webfrontend/htmlauth/index.php`. Zwei Abschriften
+  laufen auseinander.
+- **Der verdrängte Stand geht nicht verloren:** er bleibt als
+  `ferien.json.kaputt` neben der Konfiguration liegen, mit den Rechten 0600 —
+  es können Zugangsdaten darin stehen. Eine Datei, die nur `{}` enthielt, wird
+  nicht aufgehoben; dort ging nichts verloren.
+- **Die Sicherungskopie wird nie mit einem Stand ohne Aktionstoken
+  überschrieben.** Alle vier Stellen, die sie nachziehen, gehen jetzt durch
+  dieselbe Wache; weist sie ab, steht der Grund im Protokoll und die Kopie
+  bleibt, wie sie war. Gemessen: bis 1.2.12 schrieb ein Klick auf *Speichern*
+  bei unlesbarer Konfiguration ein leeres Token in die Sicherungskopie.
+- **Ein neues Aktionstoken entsteht nur bei einer echten Erstinstallation.**
+  Liegt eine Sicherungskopie mit Token daneben, wird keines gewürfelt: das
+  wäre nicht der Anfang, sondern der endgültige Verlust des alten. Die
+  Oberfläche sagt statt dessen, was los ist, und nennt den Reiter
+  *Logdateien*. Sonst ist an dieser Fassung nichts geändert.
+
 ## Neu in 1.2.12
 
 - **Tabellen mit Eingabefeldern rollen seitlich, statt abgeschnitten zu werden.**

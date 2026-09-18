@@ -128,9 +128,36 @@ if (!function_exists('fer_config')) {
     exit;
 }
 
-if ((!is_file($fe_cfgfile) || trim((string) @file_get_contents($fe_cfgfile)) === '' || trim((string) @file_get_contents($fe_cfgfile)) === '{}') && is_file($fe_bkfile)) {
-    @mkdir($fe_cfgdir, 0775, true);
-    @copy($fe_bkfile, $fe_cfgfile);
+/* Die Selbstheilung - EINE Entscheidung, hier nur aufgerufen.
+ *
+ * Bis 1.2.12 stand an dieser Stelle eine wortgleiche Abschrift der
+ * Entscheidung aus fer_config(): "fehlt die Datei, ist sie leer oder '{}'".
+ * Zwei Abschriften laufen auseinander, und beide entschieden nach der FORM
+ * der Datei statt nach ihrem INHALT. Eine abgeschnittene ferien.json ist
+ * weder leer noch "{}" - sie ging an beiden vorbei, und der Block weiter
+ * unten ("Beim ersten Aufruf ein Token erzeugen") wuerfelte daraufhin ein
+ * neues Aktionstoken und kopierte es ueber die Zweitschrift. Gemessen am
+ * 18.09.2026 in WSL/Ubuntu unter PHP 8.3.6; die Einzelheiten stehen bei
+ * fer_selbstheilung() in ferien_lib.php.
+ *
+ * Der function_exists-Vorbehalt ist der desselben Hauses wie in den
+ * Handlern darunter: html/ und htmlauth/ liegen auf dem Geraet in
+ * getrennten Baeumen, und ein Upgrade kann den einen vor dem anderen
+ * erneuern. Fehlt die Funktion, wird NICHT geheilt - der Schutz faellt
+ * geschlossen aus, statt auf die alte Bauart zurueckzufallen. */
+if (function_exists('fer_selbstheilung')) { fer_selbstheilung(); }
+
+/* Die Zweitschrift wird an vier Stellen dieser Datei nachgezogen. Sie gehen
+ * seit 1.2.13 alle durch diesen einen Aufruf, damit die Wache nicht an einer
+ * der vier vergessen wird: eine Zweitschrift MIT Aktionstoken darf nie durch
+ * einen Stand OHNE ersetzt werden (fer_zweitschrift_ziehen(), ferien_lib.php).
+ * Fehlt die Bibliothek, bleibt die Zweitschrift unangetastet. */
+function fe_zweitschrift($quelle, $ziel, $stand)
+{
+    if (function_exists('fer_zweitschrift_ziehen')) {
+        return fer_zweitschrift_ziehen($quelle, $ziel, (array) $stand, array('aktionstoken'));
+    }
+    return false;
 }
 
 $fe_saved = false; $fe_err = ''; $fe_note = ''; $fe_fehler = array();
@@ -189,7 +216,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['token_neu'])) {
     // json_encode liefert bei ungueltigem UTF-8 false, und file_put_contents
     // schriebe dann eine Datei mit NULL Bytes - und meldete das als Erfolg.
     if ($fe_json_tok !== false && @file_put_contents($fe_cfgfile, $fe_json_tok) !== false) {
-        @copy($fe_cfgfile, $fe_bkfile);
+        fe_zweitschrift($fe_cfgfile, $fe_bkfile, $fe_cfg_tok);
         $fe_note = 'Neues Token erzeugt. Die Adressen in Loxone muessen angepasst werden '
                  . '- die alten funktionieren nicht mehr.';
     }
@@ -220,7 +247,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['mqtt_save'])) {
     $fe_json = json_encode($fe_new, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
     if ($fe_json !== false && @file_put_contents($fe_cfgfile, $fe_json) !== false) {
         $fe_saved = true;
-        @copy($fe_cfgfile, $fe_bkfile);
+        fe_zweitschrift($fe_cfgfile, $fe_bkfile, $fe_new);
     } else {
         $fe_err = 'Konfiguration konnte nicht gespeichert werden: ' . $fe_cfgfile;
     }
@@ -392,7 +419,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['save'])) {
     // schriebe dann eine Datei mit NULL Bytes - und meldete das als Erfolg.
     if ($fe_json !== false && @file_put_contents($fe_cfgfile, $fe_json) !== false) {
         $fe_saved = true;
-        @copy($fe_cfgfile, $fe_bkfile);
+        fe_zweitschrift($fe_cfgfile, $fe_bkfile, $fe_new);
         // Zwischenspeicher raeumen - und zwar den RICHTIGEN.
         //
         // Bis 1.0.1 stand hier zweimal ein fester Pfad unter /tmp/ferien/.
@@ -472,15 +499,41 @@ $fe_cfg += array('country' => 'DE', 'subdivision' => 'DE-BY', 'lang' => 'DE', 's
     'typ_streng' => 0, 'halbtag_frei' => 1, 'ics_url' => '', 'ics_typ' => 'urlaub',
     'ics_filter' => '', 'urlaub_vorlauf' => 1);
 
-// Beim ersten Aufruf ein Token erzeugen, damit die Adressen fuer Loxone sofort
-// benutzbar sind (schuetzt ?say= und ?ptest= im unangemeldeten ferien.php).
-if (empty($fe_cfg['aktionstoken'])) {
+/* Beim ERSTEN Aufruf ein Token erzeugen, damit die Adressen fuer Loxone
+ * sofort benutzbar sind (es schuetzt ?say= und ?ptest= im unangemeldeten
+ * ferien.php).
+ *
+ * "Beim ersten" heisst seit 1.2.13: nur, wenn nicht schon eine Zweitschrift
+ * MIT Aktionstoken danebenliegt. Liegt eine, ist dies keine Erstinstallation,
+ * sondern eine Anlage, deren Konfiguration unlesbar ist und deren
+ * Selbstheilung nicht durchkam - kein Schreibrecht, volles Dateisystem. Ein
+ * NEUES Token waere dann kein Anfang, sondern der endgueltige Verlust des
+ * alten: es steht in jeder Loxone-Adresse und laesst sich nicht
+ * zurueckrechnen.
+ *
+ * Die Zweitschrift-Wache faengt genau diesen Fall NICHT ab, und das ist
+ * gemessen (18.09.2026, Messstelle "wache" des Pruefstands, beide
+ * Heilstellen zurueckgebaut): ein frisch gewuerfeltes Token ist ein
+ * gueltiger Wert und geht durch die Wache hindurch. Deshalb faellt der
+ * Schutz hier geschlossen aus - es wird nichts gewuerfelt und nichts
+ * geschrieben, und der Bediener bekommt den Grund zu lesen. Die naechste
+ * gelungene Selbstheilung holt das alte Token zurueck. */
+$fe_zweit_voll = function_exists('fer_config_hat_inhalt')
+    && function_exists('fer_inhalt_oder_null')
+    && fer_config_hat_inhalt(fer_inhalt_oder_null($fe_bkfile));
+if (empty($fe_cfg['aktionstoken']) && $fe_zweit_voll) {
+    $fe_fehler[] = fer_t('WACHE.KEIN_TOKEN');
+    if (function_exists('fer_log_if_changed')) {
+        fer_log_if_changed('tokenschutz', 'Die Konfiguration traegt kein Aktionstoken, die '
+            . 'Zweitschrift aber schon - es wird KEIN neues erzeugt: ' . $fe_bkfile);
+    }
+} elseif (empty($fe_cfg['aktionstoken'])) {
     $fe_cfg['aktionstoken'] = function_exists('fer_token_erzeugen')
         ? fer_token_erzeugen() : bin2hex(random_bytes(12));
     if (!is_dir($fe_cfgdir)) { @mkdir($fe_cfgdir, 0775, true); }
     $fe_json_init = json_encode($fe_cfg, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
     if ($fe_json_init !== false && @file_put_contents($fe_cfgfile, $fe_json_init) !== false) {
-        @copy($fe_cfgfile, $fe_bkfile);
+        fe_zweitschrift($fe_cfgfile, $fe_bkfile, $fe_cfg);
     }
 }
 $fe_notify = is_array($fe_cfg['notify']) ? $fe_cfg['notify'] : array();
