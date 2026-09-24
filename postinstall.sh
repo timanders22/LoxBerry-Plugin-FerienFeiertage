@@ -64,5 +64,21 @@ if [ -f "$BK" ]; then
         echo "<WARNING> Die Sicherungskopie traegt kein Aktionstoken - nicht zurueckgespielt: $BK"
     fi
 fi
-echo "<OK> Installation abgeschlossen. Bitte Plugin-Oberflaeche oeffnen und Bundesland waehlen."
+# Die Erstanleitung nur, wenn keine eingerichtete Konfiguration vorliegt.
+# postinstall.sh laeuft auch bei jedem Upgrade (Regeln/06); danach war der
+# Rat, das Bundesland zu waehlen, falsch. "Eingerichtet" heisst: ferien.json
+# traegt das Aktionstoken - dieselbe Pruefung wie fuer die Sicherungskopie.
+# Die Oberflaeche schreibt das Token beim ersten Oeffnen zusammen mit Land
+# und Bundesland in die Datei (index.php, "elseif (empty($fe_cfg['aktionstoken']))");
+# ein strengeres Merkmal traegt der Inhalt nicht, denn DE-BY ist Vorgabe und
+# Wahl zugleich.
+if fer_traegt_token "$CF"; then
+    echo "<OK> Installation abgeschlossen, Einstellungen uebernommen."
+elif fer_traegt_token "$BASE/data/plugins/$PFOLDER.upgrade_sicherung/ferien.json"; then
+    # Ohne Sicherungskopie holt erst postupgrade.sh die Konfiguration aus der
+    # Update-Sicherung zurueck und meldet dort, ob es gelang.
+    echo "<OK> Installation abgeschlossen. Die Einstellungen holt postupgrade.sh gleich aus der Update-Sicherung zurueck."
+else
+    echo "<OK> Installation abgeschlossen. Bitte Plugin-Oberflaeche oeffnen und Bundesland waehlen."
+fi
 exit 0

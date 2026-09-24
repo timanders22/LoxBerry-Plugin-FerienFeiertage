@@ -10,6 +10,15 @@ Bundesländern/Kantonen.
 
 Kompatibel mit LoxBerry 3.x und **LoxBerry 4** (reines PHP, PHP 7.4 und 8.x).
 
+## Neu in 1.2.15
+
+**Nach einem Update fordert die Installation nicht mehr dazu auf, das Bundesland zu wählen.**
+Bis 1.2.14 endete `postinstall.sh` immer mit diesem Rat, auch wenn die Einstellungen gerade
+übernommen worden waren. Jetzt steht dort „Einstellungen übernommen", sobald die Konfiguration
+das Aktionstoken trägt (dieselbe Prüfung wie für die Sicherungskopie); die Anleitung erscheint
+nur noch bei der Erstinstallation oder als Warnung, wenn das Zurückstellen der Update-Sicherung
+gescheitert ist. In WSL nachgestellt (`Pruefung-FerienFeiertage-1.2.15/`), nicht am Gerät.
+
 ## Neu in 1.2.14
 
 - **Die Hakenskripte entscheiden nach dem Inhalt, nicht nach der Größe.**

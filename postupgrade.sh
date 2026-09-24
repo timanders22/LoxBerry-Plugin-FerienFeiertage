@@ -107,6 +107,7 @@ if [ ! -f "$SI_CF" ] || cmp -s "$SI_CF" "$CF" || fer_traegt_token "$CF" || [ "$S
 else
     echo "<WARNING> Die Konfiguration ist nicht angekommen - die Update-Sicherung bleibt"
     echo "<WARNING> liegen: $BASE/data/plugins/$PFOLDER.upgrade_sicherung"
+    echo "<WARNING> Bis dahin arbeitet das Plugin mit den Vorgaben. Bitte Plugin-Oberflaeche oeffnen und Bundesland waehlen."
 fi
 
 # Altlast aus 1.1.0 und frueher: cron.php lag im HTML-Verzeichnis und war damit
