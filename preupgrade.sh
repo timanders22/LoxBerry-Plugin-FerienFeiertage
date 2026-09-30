@@ -1,41 +1,48 @@
 #!/bin/bash
 # Ferien und Feiertage - preupgrade (laeuft als Benutzer loxberry)
-ARGV1=$1; ARGV3=$3; ARGV5=$5
+# command <TEMPFOLDER> <NAME> <FOLDER> <VERSION> <BASEFOLDER>
+#
+# BERICHTIGT IN 1.2.16 (I10): hier stand, $ARGV1 sei der Ordner, in den
+# LoxBerry das neue Archiv entpackt. $1 ist aber eine zehnstellige
+# Zufallskennung, kein Pfad (Regeln/06, "$1 an die Upgrade-Skripte ist kein
+# Pfad"). Die Sicherung liegt deshalb NEBEN dem Datenordner, nicht darin:
+# der Installer ruft &purge_installation auch im Upgrade-Zweig
+# (plugininstall.pl :874/:886) und loescht config/plugins/<x>/,
+# data/plugins/<x>/, bin/, templates/ und beide webfrontend-Ordner. Der
+# Punkt im Namen ist der ganze Unterschied: "rm -rf .../<x>/" trifft den
+# Nachbarn "<x>.upgrade_sicherung" nicht.
+ARGV3=$3; ARGV5=$5
 PFOLDER="${ARGV3:-ferien}"; BASE="${ARGV5:-$LBHOMEDIR}"
+# I7 (1.2.16): alles, was diese Skripte anlegen, ist nur fuer loxberry lesbar.
+umask 077
+# Wurzelsuche wie in den uebrigen Hakenskripten (fail-closed): ohne
+# config/plugins, data/plugins UND config/system/general.json wird nichts
+# angefasst (Regeln/06).
+if [ -z "$BASE" ] || [ ! -d "$BASE/config/plugins" ] || [ ! -d "$BASE/data/plugins" ] \
+   || [ ! -f "$BASE/config/system/general.json" ]; then
+    echo "<WARNING> Kein LoxBerry-Wurzelverzeichnis erkannt ('$BASE') - dieses Skript tut nichts."
+    exit 0
+fi
+case "$PFOLDER" in
+    ''|*/*|*..*) echo "<WARNING> Unzulaessiger Ordnername '$PFOLDER' - dieses Skript tut nichts."; exit 0 ;;
+esac
 
-# Die Sicherung liegt BEWUSST NICHT im Installationsverzeichnis ($ARGV1).
-#
-# $ARGV1 ist der Ordner, in den LoxBerry das neue Archiv entpackt. Zwei
-# Gruende sprechen dagegen, dort eigene Dateien abzulegen:
-#
-#   1. Er liegt unter /tmp, und /tmp ist auf dem LoxBerry eine Ramdisk.
-#      Zwischen preupgrade und postupgrade liegt eine Paketinstallation.
-#      Braucht die einen Neustart oder bricht das Update in der Mitte ab,
-#      ist die Ramdisk leer - und mit ihr die einzige Kopie der
-#      Konfiguration.
-#   2. Er gehoert dem Installationsvorgang. Was dort liegt, wird entpackt,
-#      ueberschrieben und am Ende geloescht; dass die eigenen Dateien
-#      dazwischen unangetastet bleiben, ist nirgends zugesichert.
-#
-# Deshalb: data/plugins/<ordner>.upgrade_sicherung. Das liegt auf der Karte
-# und uebersteht auch einen Neustart mittendrin.
-# Die Sicherung liegt NEBEN dem Ordner, nicht darin. Gemessen an
-# sbin/plugininstall.pl (Zweig master, 23.08.2026): der Installer ruft
-# &purge_installation nicht nur beim Deinstallieren, sondern auch im
-# Upgrade-Zweig (:886), und deren Rumpf loescht ohne jede Bedingung
-# (:1629 ff.) config/plugins/<x>/, bin/plugins/<x>/, data/plugins/<x>/,
-# templates/plugins/<x>/ und beide webfrontend/-Ordner. Eine Sicherung IN
-# data/plugins/<x>/ wird also von genau dem Schritt vernichtet, den sie
-# ueberdauern soll. Der Punkt im Namen ist der ganze Unterschied:
-# "rm -rf .../<x>/" trifft den Nachbarn "<x>.upgrade_sicherung" nicht.
+# ---------------------------------------------------------------------------
+# ZUERST die Marke "Aktualisierung laeuft" (I1, Entscheidung 1) - vor jeder
+# Sicherung. Nur mit ihr spielt postinstall.sh zurueck; preinstall.sh legt
+# ohne sie liegengebliebene Bestaende beiseite. Kein Altersvergleich: eine
+# vergessene Marke gilt (Entscheidung 8, Frage 17). postinstall.sh raeumt sie
+# ueber einen trap ab.
+MARKE="$BASE/data/plugins/$PFOLDER.upgrade_laeuft"
+if ! : > "$MARKE" 2>/dev/null; then
+    echo "<WARNING> Die Marke fuer das Update liess sich nicht anlegen: $MARKE - postinstall.sh wird nichts zurueckspielen."
+fi
+
 SICHER="$BASE/data/plugins/$PFOLDER.upgrade_sicherung"
-
-mkdir -p "$SICHER" 2>/dev/null
-chmod 0700 "$SICHER" 2>/dev/null
+NEU="$SICHER.neu"
 
 # Traegt die Datei das Aktionstoken? Dieselbe Frage wie fer_config_hat_inhalt()
-# in ferien_lib.php; gleichlautend in preupgrade.sh, postinstall.sh und
-# postupgrade.sh. Entschieden wird nach INHALT, nicht nach Form oder Groesse:
+# in ferien_lib.php. Entschieden wird nach INHALT, nicht nach Form oder Groesse:
 # eine abgeschnittene ferien.json ist weder leer noch "{}".
 # Rueckgabe: 0 ja, 1 nein, 2 nicht pruefbar (kein php im Pfad).
 fer_traegt_token() {
@@ -47,43 +54,61 @@ fer_traegt_token() {
     case $? in 0) return 0 ;; 1) return 1 ;; *) return 2 ;; esac
 }
 
-# Zwei Regeln fuer die Sicherung, beide gemessen am 18.09.2026 in WSL
-# (Pruefung-FerienFeiertage-1.2.14, messe_haken.sh):
-#  1. Ein Stand OHNE Aktionstoken verdraengt keine Sicherung MIT (Fall K11:
-#     eine liegengebliebene Sicherung aus einem abgebrochenen Lauf wurde von
-#     einem "{}" ueberschrieben).
-#  2. Die neue Sicherung entsteht daneben und kommt erst nach dem Vergleich
-#     per Umbenennen an ihren Platz. Ein cp direkt auf die Sicherung kappt sie
-#     zuerst; scheiterte das Schreiben (volle Karte, nachgestellt mit
-#     ulimit -f 0), blieb sie mit 0 Byte zurueck (Fall K12).
+# I2 (1.2.16): die Sicherung wird JEDES MAL neu gebaut - erst als .neu, dann
+# umbenannt. Bis 1.2.15 kamen neue Dateien in einen vorhandenen Ordner, und
+# eine termine.json aus einem frueheren, abgebrochenen Vorgang blieb darin
+# liegen und wurde beim naechsten Update eingespielt (gemessen: Ferien einer
+# fremden Region, Installer-Pruefer F2c). Entscheidung 1: bei einem Upgrade
+# wird nie ein Bestand aus einem frueheren Vorgang eingespielt.
+rm -rf "${NEU:?}" 2>/dev/null
+if ! mkdir -p "$NEU" 2>/dev/null; then
+    echo "<WARNING> Die Update-Sicherung liess sich nicht anlegen (Platz? Rechte?): $NEU"
+    exit 0
+fi
+chmod 0700 "$NEU" 2>/dev/null
+
 CF="$BASE/config/plugins/$PFOLDER/ferien.json"
 if [ -f "$CF" ]; then
-    fer_traegt_token "$CF"; CF_RC=$?
-    fer_traegt_token "$SICHER/ferien.json"; SI_RC=$?
-    if [ "$CF_RC" = 1 ] && [ "$SI_RC" = 0 ]; then
-        echo "<WARNING> ferien.json traegt kein Aktionstoken, die vorhandene Update-Sicherung"
-        echo "<WARNING> schon - sie bleibt unveraendert: $SICHER/ferien.json"
-    elif cp -p "$CF" "$SICHER/ferien.json.neu" 2>/dev/null \
-         && cmp -s "$CF" "$SICHER/ferien.json.neu" \
-         && mv -f "$SICHER/ferien.json.neu" "$SICHER/ferien.json" 2>/dev/null; then
-        echo "<OK> Konfiguration gesichert."
+    if cp -p "$CF" "$NEU/ferien.json" 2>/dev/null && cmp -s "$CF" "$NEU/ferien.json"; then
+        chmod 0600 "$NEU/ferien.json" 2>/dev/null
+        fer_traegt_token "$CF"
+        case $? in
+            0) echo "<OK> Konfiguration gesichert." ;;
+            1) echo "<WARNING> Die Konfiguration traegt kein Aktionstoken (unlesbar oder abgeschnitten): $CF"
+               echo "<WARNING> Gesichert ist sie trotzdem; postinstall.sh holt das Token aus der Zweitschrift, wenn es eine gibt." ;;
+            *) echo "<OK> Konfiguration gesichert (Inhalt ohne php nicht pruefbar)." ;;
+        esac
     else
-        rm -f "$SICHER/ferien.json.neu" 2>/dev/null
-        echo "<WARNING> Die Konfiguration liess sich NICHT sichern (Platz? Rechte?): $SICHER"
-        if [ -f "$SICHER/ferien.json" ]; then
-            echo "<WARNING> Die vorhandene Sicherung bleibt unveraendert."
-        fi
+        echo "<WARNING> Die Konfiguration liess sich NICHT sichern (Platz? Rechte?): $CF"
     fi
 else
     echo "<INFO> Keine Konfiguration vorhanden - nichts zu sichern."
 fi
-if [ -f "$BASE/log/plugins/$PFOLDER/ferien.log" ]; then
-    cp -p "$BASE/log/plugins/$PFOLDER/ferien.log" "$SICHER/ferien.log" 2>/dev/null
-fi
-# Die abgerufenen Ferien- und Feiertagsdaten mitnehmen. Sie liegen ohnehin
-# unter data/ und werden vom Update nicht angefasst - aber wenn schon eine
-# Sicherung, dann eine vollstaendige.
-if [ -f "$BASE/data/plugins/$PFOLDER/termine.json" ]; then
-    cp -p "$BASE/data/plugins/$PFOLDER/termine.json" "$SICHER/termine.json" 2>/dev/null
+
+# Termine und Kalender-Zwischenspeicher. BERICHTIGT IN 1.2.16 (I10): hier
+# stand, die Termine "werden vom Update nicht angefasst". Der Installer
+# raeumt data/plugins/<ordner>/ beim Update ab (Installer-Pruefer F6: nach
+# purge fehlte termine.json). I4: kalender.json geht mit - sonst fielen
+# URLAUB und URLAUBHEIM nach jedem Update auf 0, bis der Kalender wieder
+# antwortet.
+for F in termine.json kalender.json; do
+    Q="$BASE/data/plugins/$PFOLDER/$F"
+    [ -f "$Q" ] || continue
+    if cp -p "$Q" "$NEU/$F" 2>/dev/null && cmp -s "$Q" "$NEU/$F"; then
+        chmod 0600 "$NEU/$F" 2>/dev/null
+    else
+        rm -f "$NEU/$F" 2>/dev/null
+        echo "<WARNING> $F liess sich NICHT sichern: $Q"
+    fi
+done
+# I3 (1.2.16): ferien.log wird NICHT gesichert. log/plugins/<ordner> raeumt der
+# Installer beim Update gar nicht ab (nur bei "all", plugininstall.pl :1643);
+# das Zurueckkopieren ueberschrieb die Zeilen aus der Luecke, darunter die
+# Meldung, dass aus der Zweitschrift geheilt wurde (Regeln/06).
+
+# Die neue Sicherung an ihren Platz - die alte faellt dabei.
+rm -rf "${SICHER:?}" 2>/dev/null
+if ! mv "$NEU" "$SICHER" 2>/dev/null; then
+    echo "<WARNING> Die Update-Sicherung liess sich nicht an ihren Platz bringen: $SICHER"
 fi
 exit 0

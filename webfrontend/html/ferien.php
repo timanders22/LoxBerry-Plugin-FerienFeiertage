@@ -19,12 +19,25 @@
  *                       BRUECKE=1        Brueckentag
  *                       WARN=1           Daten reichen weniger als 60 Tage voraus
  *   ?debug=1         -> Ferien- und Feiertagsliste im Klartext
- *   ?refresh=1       -> Daten sofort neu abrufen
  *   ?json=1          -> kompletter Zustand als JSON
  *
- * Die beiden Aufrufe, die etwas AUSLOESEN, verlangen seit 1.1.7 ein Token aus
- * dem Reiter "Einbindung in Loxone". Ohne passendes Token antworten sie mit
+ * Ohne Daten der Quelle fuer die eingestellte Region antworten die Zeile und
+ * ?json=1 mit HTTP 503 und GRUND=KEINE_DATEN (Regeln/07, seit 1.2.16) - nicht
+ * mit 200 und Werten, die aus eigenen Terminen oder dem Wochentag geraten
+ * sind. Mit Daten 200; OK=0 heisst dann: sie decken heute oder morgen nicht.
+ *
+ * Die Quelle wird in keinem abfragenden Aufruf gefragt (C5, seit 1.2.16):
+ * abgerufen wird nur im Cron, ueber den Knopf "Jetzt abrufen" und ueber
+ * ?refresh=1 mit Token. Bis 1.2.15 holte schon ein gewoehnlicher Aufruf ohne
+ * Termindatei, und haengende Quelle hiess 40 s Wartezeit.
+ *
+ * Die Aufrufe, die etwas AUSLOESEN oder SCHREIBEN, verlangen ein Token aus dem
+ * Reiter "Einbindung in Loxone". Ohne passendes Token antworten sie mit
  * HTTP 403. Die abfragenden Aufrufe bleiben offen - sie aendern nichts.
+ *
+ *   ?refresh=1&token=T -> Daten sofort neu abrufen (schreibt termine.json);
+ *                         hoechstens einmal je 5 Minuten, sonst HTTP 429.
+ *                         Bis 1.2.15 ohne Token und ohne Bremse (C6).
  *
  *   ?say=1&token=T     -> Test: Vorabend-Ansage abspielen
  *   ?ptest=1&token=T   -> Test-Pushnachricht ausloesen (PTEST=1 fuer 5 Minuten)
@@ -33,10 +46,79 @@
 
 require_once __DIR__ . '/ferien_lib.php';
 
+/* C16 (1.2.16): die Bibliothek stellt beim Einbinden keine Zeitzone mehr ein.
+ * Dieser Endpunkt ist ein eigener Prozess und rechnet in Europe/Berlin. */
+date_default_timezone_set('Europe/Berlin');
+
+/** Ist ein gueltiges Aktionstoken mitgeschickt worden?
+ *
+ * Ohne eingerichtetes Token ist die Antwort NEIN - ein leeres Soll darf
+ * nicht auf ein leeres Ist passen, sonst schuetzt die Pruefung genau die
+ * Anlage nicht, bei der noch nie jemand ein Token gesetzt hat. Die
+ * Oberflaeche legt beim ersten Aufruf eines an.
+ *
+ * C12 (1.2.16): is_string() VOR jeder Umwandlung, auf Soll und Ist. Bis
+ * 1.2.15 ergab "token[]=x" eine Warnung "Array to string conversion" im
+ * Ausgabestrom und damit HTTP 200 statt 403; ein Soll aus einer Sicherung mit
+ * dem Token als Liste wurde zu "Array" und oeffnete den Endpunkt.
+ */
+function fer_token_ok() {
+    $cfg = fer_config();
+    $soll = (isset($cfg['aktionstoken']) && is_string($cfg['aktionstoken'])) ? $cfg['aktionstoken'] : '';
+    if ($soll === '') { return false; }
+    $ist = isset($_GET['token']) ? $_GET['token'] : '';
+    if (!is_string($ist)) { return false; }
+    return hash_equals($soll, $ist);
+}
+
+/**
+ * ?refresh=1 - nur mit Token und hoechstens einmal je 5 Minuten (C6).
+ *
+ * Der Aufruf fragt die fremde Quelle und schreibt termine.json. Bis 1.2.15
+ * ging das ohne Token und ohne Bremse: ein flatternder Baustein erzeugte je
+ * Aufruf zwei Anfragen an openholidaysapi.org, parallel zum Cron - und genau
+ * auf diesem Weg entstand der gemessene Teilausfall (C3).
+ * Rueckgabe: true = jetzt abrufen; sonst endet die Anfrage hier mit 403/429.
+ */
+function fer_refresh_pruefen() {
+    if (!isset($_GET['refresh'])) { return false; }
+    if (!fer_token_ok()) {
+        http_response_code(403);
+        header('Content-Type: text/plain; charset=utf-8');
+        echo "REFRESH;OK=0;ERR=TOKEN\n";
+        exit;
+    }
+    $merk = fer_tmpdir() . '/refresh_letzt';
+    clearstatcache(true, $merk);
+    $alter = is_file($merk) ? time() - (int) filemtime($merk) : 86400;
+    if ($alter >= 0 && $alter < 300) {
+        http_response_code(429);
+        header('Retry-After: ' . (300 - $alter));
+        header('Content-Type: text/plain; charset=utf-8');
+        echo 'REFRESH;OK=0;ERR=GEBREMST;WARTEN=' . (300 - $alter) . "\n";
+        exit;
+    }
+    @touch($merk);
+    return true;
+}
+
+$fer_refresh = fer_refresh_pruefen();
+$fer_quelle = '-';
+if ($fer_refresh) {
+    list($fer_rok, $fer_quelle) = fer_fetch(true);
+}
+
 if (isset($_GET['json'])) {
     header('Content-Type: application/json; charset=utf-8');
-    fer_fetch(isset($_GET['refresh']));
-    $st = fer_state(isset($_GET['refresh']));
+    $st = fer_state($fer_refresh);
+    /* Ohne Daten der Quelle: 503 statt eines Zustands aus eigenen Terminen
+     * (C5). Der Abfahrts-Assistent und AWM-Abfuhr lesen dann ueber ihren
+     * Rueckweg (Bibliothek) - ok=0 wie bisher. */
+    if (empty($st['quelle_da'])) {
+        http_response_code(503);
+        echo json_encode(array('ok' => 0, 'grund' => 'KEINE_DATEN'), JSON_PRETTY_PRINT) . "\n";
+        exit;
+    }
     $st['ann'] = fer_ann_active($st);
     $st['ptest'] = fer_ptest_active();
     echo json_encode($st, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_PRETTY_PRINT);
@@ -45,20 +127,6 @@ if (isset($_GET['json'])) {
 
 header('Content-Type: text/plain; charset=utf-8');
 
-/** Ist ein gueltiges Aktionstoken mitgeschickt worden?
- *
- * Ohne eingerichtetes Token ist die Antwort NEIN - ein leeres Soll darf
- * nicht auf ein leeres Ist passen, sonst schuetzt die Pruefung genau die
- * Anlage nicht, bei der noch nie jemand ein Token gesetzt hat. Die
- * Oberflaeche legt beim ersten Aufruf eines an.
- */
-function fer_token_ok() {
-    $cfg = fer_config();
-    $soll = isset($cfg['aktionstoken']) ? (string) $cfg['aktionstoken'] : '';
-    if ($soll === '') { return false; }
-    return hash_equals($soll, isset($_GET['token']) ? (string) $_GET['token'] : '');
-}
-
 /* ---------- Selbsttest: Token pruefen, ohne etwas auszuloesen ----------
  * Hausregel: jeder Aktionsendpunkt beantwortet ?selftest=1&token=... , ohne
  * dass etwas passiert. Sonst laesst sich nicht feststellen, ob die Adresse im
@@ -66,13 +134,15 @@ function fer_token_ok() {
  */
 if (isset($_GET['selftest'])) {
     $fe_cfg_st = fer_config();
-    $fe_soll_st = isset($fe_cfg_st['aktionstoken']) ? (string) $fe_cfg_st['aktionstoken'] : '';
+    $fe_soll_st = (isset($fe_cfg_st['aktionstoken']) && is_string($fe_cfg_st['aktionstoken']))
+        ? $fe_cfg_st['aktionstoken'] : '';
     if ($fe_soll_st === '') {
         http_response_code(403);
         echo "SELFTEST;OK=0;ERR=KEIN_TOKEN_EINGERICHTET\n";
         exit;
     }
-    if (!hash_equals($fe_soll_st, isset($_GET['token']) ? (string) $_GET['token'] : '')) {
+    $fe_ist_st = isset($_GET['token']) ? $_GET['token'] : '';
+    if (!is_string($fe_ist_st) || !hash_equals($fe_soll_st, $fe_ist_st)) {
         http_response_code(403);
         echo "SELFTEST;OK=0;ERR=TOKEN\n";
         exit;
@@ -121,16 +191,27 @@ if (isset($_GET['ptest'])) {
     exit;
 }
 
-list($ok, $quelle) = fer_fetch(isset($_GET['refresh']));
-$st = fer_state(isset($_GET['refresh']));
+/* Kein Abruf mehr an dieser Stelle (C5): die Zeile liest den gespeicherten
+ * Stand. Bis 1.2.15 stand hier fer_fetch() - ohne Termindatei ging damit
+ * jeder Aufruf ins Netz. */
+$st = fer_state($fer_refresh);
 $cfg = fer_config();
 /* Dieselbe Quelle wie die MQTT-Meldung - siehe fer_meldeflags(). */
 $flags = fer_meldeflags($st);
+$fer_ohne = empty($st['quelle_da']);
+if ($fer_ohne) {
+    http_response_code(503);
+}
 
 if (isset($_GET['debug'])) {
     $d = fer_data();
-    echo 'DEBUG  Region: ' . $cfg['country'] . '/' . $cfg['subdivision'] . '  Quelle: ' . $quelle
-       . '  Stand: ' . substr((string) $st['stand'], 0, 19) . '  Daten bis: ' . $st['reicht_bis'] . "\n";
+    echo 'DEBUG  Region: ' . fe_e_klar($cfg['country']) . '/' . fe_e_klar($cfg['subdivision'])
+       . '  Abruf: ' . $fer_quelle
+       . '  Stand: ' . substr((string) $st['stand'], 0, 19)
+       . '  zuletzt gelungen: ' . ($st['stand_ok'] !== '' ? substr((string) $st['stand_ok'], 0, 19) : '-')
+       . ' (' . (int) $st['alter_tage'] . ' Tage)'
+       . (!empty($st['teilausfall']) ? '  Teilausfall: ' . implode(', ', (array) $st['teilausfall']) : '')
+       . '  Daten bis: ' . $st['reicht_bis'] . "\n";
     echo 'HEUTE  ' . $st['heute']['datum'] . ': schulfrei=' . $st['heute']['schulfrei']
        . ' Ferien=' . ($st['heute']['ferien_name'] !== '' ? $st['heute']['ferien_name'] : '-')
        . ' Feiertag=' . ($st['heute']['feiertag_name'] !== '' ? $st['heute']['feiertag_name'] : '-')
@@ -199,4 +280,17 @@ if (isset($_GET['debug'])) {
  * Reiter Test zeigt das Ergebnis - eine Regel, die ein Werkzeug prueft, ist
  * hinterlegt; eine Regel in Prosa ist eine Hoffnung.
  */
+if ($fer_ohne) {
+    /* 503 ohne Daten (C5, Regeln/07): keine Werte, nur der Grund. Loxone
+     * behaelt dann seine letzten Werte - auch vor dem ersten Abruf gibt es
+     * kein SCHULTAG=1 mehr, das aus dem Wochentag geraten ist. */
+    echo "FERIEN;OK=0;GRUND=KEINE_DATEN\n";
+    exit;
+}
 echo fer_zeile($st, $flags);
+
+/** Ein Wert fuer die Debug-Zeile - auch wenn er (aus einer alten Datei) keine
+ *  Zeichenkette ist. */
+function fe_e_klar($w) {
+    return is_scalar($w) ? (string) $w : '?';
+}

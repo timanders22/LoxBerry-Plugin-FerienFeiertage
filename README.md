@@ -10,6 +10,67 @@ Bundesländern/Kantonen.
 
 Kompatibel mit LoxBerry 3.x und **LoxBerry 4** (reines PHP, PHP 7.4 und 8.x).
 
+## Neu in 1.2.16
+
+Durchgang vom 30.09.2026 mit vier Prüfern (Code, Oberfläche, Installer, MQTT).
+Gemessen an Attrappen für Quelle und Kalender unter PHP 7.4, 8.3 und 8.5; nicht
+am Gerät. Befunde mit Datei:Zeile:
+`Pruefung-Durchgang-2026-09-29/FerienFeiertage_BEFUNDE_UND_VERBESSERUNGEN.md`.
+
+**Falsche Ferien**
+
+* **Scheiterte nur der Abruf der Schulferien** (die Feiertage kamen), wurde die
+  Termindatei ohne Ferien geschrieben und als Erfolg verbucht: mitten in den
+  Herbstferien `FERIEN=0`, `SCHULTAG=1` — bis zu 7 Tage lang, weil die Datei
+  als frisch galt. Jetzt behält jeder gescheiterte Teil seinen gespeicherten
+  Stand, und ein neuer Versuch folgt nach 1 h, 6 h, dann 24 h.
+* **Ein gescheiterter Abruf galt als frisch** („vor 0 Tagen“). Jetzt zählt nur
+  ein gelungener Abruf; das neue Feld `ALTER_TAGE` sagt, wie alt er ist.
+* **Andere Plugins fragen mit `20261003` statt `2026-10-03`:** AWM-Abfuhr bekam
+  dadurch keinen Feiertag und an jedem Tag des Jahres 2026 „Ferien“. Das
+  Ferien-Plugin nimmt jetzt beide Schreibweisen an.
+
+**`OK` und der Endpunkt**
+
+* `OK=1` gibt es nur mit Daten der Quelle für die eingestellte Region, die
+  heute und morgen abdecken. Ist der letzte gelungene Abruf älter als 21 Tage,
+  kommt zusätzlich `WARN=1`.
+* Ohne Daten antwortet der Endpunkt mit **503** (auch `?json=1`) statt mit
+  `SCHULTAG=1`.
+* Der Endpunkt fragt weder Quelle noch Kalender mehr: hing die Quelle, dauerte
+  eine Antwort bis zu 40 s, ein hängendes Kalender-Abo ließ die Oberfläche
+  46 s warten. Beides fragt jetzt nur der Minutentakt (Kalender mit 5 s
+  Zeitgrenze).
+* `?refresh=1` braucht das Token und wirkt höchstens einmal je 5 Minuten.
+
+**MQTT**
+
+* Nach dem Einschalten von MQTT oder einem Präfixwechsel gehen sofort alle
+  Werte hinaus (bisher bis zu 30 min nichts).
+* Neu: `datum` (JJJJMMTT) und `status/ts` bei jedem Lauf, dazu `alter_tage` und
+  `warnung` — alle flüchtig, wie alle Themen dieses Plugins (es sind Tageswerte).
+
+**Sicherung und Oberfläche**
+
+* Eine Sicherung mit dem Token als Liste öffnete den Endpunkt für
+  `token=Array`; ein Land als Liste legte die Oberfläche unter PHP 8 lahm. Jetzt
+  wird jeder Wert geprüft wie beim Speichern.
+* Ein leeres Token in einer Sicherung heißt „keins gesichert“: das geltende
+  bleibt, die Seite sagt es.
+* Nach jedem Absenden leitet die Seite um; F5 würfelt kein neues Token mehr.
+* Eingaben werden abgewiesen und benannt statt still zurechtgebogen.
+* Gleichzeitiges Speichern und Heilen verlor bis zu jeden fünften
+  Speichervorgang; jetzt wird über eine Nebendatei geschrieben.
+
+**Installation**
+
+* Eine Neuinstallation spielt keine Einstellungen einer früheren Installation
+  mehr ein (neu: `preinstall.sh`, Reste nach `.alt`).
+* Der Kalender-Zwischenspeicher übersteht ein Update; die Termine einer
+  anderen Region werden nie zurückgeholt.
+* Die Konfiguration hat die Rechte 0600; Fehler des Minutentakts stehen in
+  `cron.err`.
+
 ## Neu in 1.2.15
 
 **Nach einem Update fordert die Installation nicht mehr dazu auf, das Bundesland zu wählen.**
@@ -155,7 +216,7 @@ Nicht am Gerät gemessen.
 |---|---|
 | `/plugins/ferien/ferien.php` | Loxone-Zeile `FERIEN;OK=..;SCHULTAG=..;MSCHULTAG=..;BRUECKE=..;FERIENIN=..;URLAUB=..;URLAUBENDE=..;…` |
 | `/plugins/ferien/ferien.php?debug=1` | Ferien-, Feiertags- und Brückentagsliste im Klartext |
-| `/plugins/ferien/ferien.php?refresh=1` | Daten sofort neu abrufen |
+| `/plugins/ferien/ferien.php?refresh=1&token=…` | Daten sofort neu abrufen **(Token nötig, höchstens einmal je 5 min)** |
 | `/plugins/ferien/ferien.php?json=1` | kompletter Zustand als JSON |
 | `/plugins/ferien/ferien.php?say=1&token=…` | Test-Ansage **(Token nötig)** |
 | `/plugins/ferien/ferien.php?ptest=1&token=…` | Test-Pushnachricht auslösen **(Token nötig)** |
@@ -164,8 +225,12 @@ Nicht am Gerät gemessen.
 ## Datenschutz
 
 Es sind **keine persönlichen Daten** im Plugin enthalten. Alle Einstellungen
-liegen lokal (`config/plugins/ferien/ferien.json`). Externe Verbindungen gibt es
-ausschließlich zur öffentlichen OpenHolidays-API (ohne Kennung).
+liegen lokal (`config/plugins/ferien/ferien.json`, Rechte 0600). Externe
+Verbindungen gibt es zur öffentlichen OpenHolidays-API (ohne Kennung) und —
+**nur wenn eingetragen** — zur Adresse des eigenen Kalender-Abonnements
+(ICS). Diese Adresse ist bei Google oder iCloud oft ein geheimer Link; sie
+steht in der Konfiguration und in der Sicherungsdatei und ist wie ein Passwort
+zu behandeln.
 
 ## Fassung 1.2.9 — der Stat-Zwischenspeicher
 Die Protokollkappung (512 000 Byte) stand in

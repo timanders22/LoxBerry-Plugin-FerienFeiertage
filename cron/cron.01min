@@ -1,9 +1,27 @@
 #!/bin/sh
-# Ferien und Feiertage - minutlicher Cron (Datenabruf, Ansage, MQTT)
+# Ferien und Feiertage - minuetlicher Cron (Datenabruf, Ansage, MQTT)
 #
 # cron.php liegt seit 1.1.1 unter bin/ statt unter webfrontend/html/. Es wird
 # nur von hier aufgerufen, ueber die PHP-Kommandozeile; im HTML-Verzeichnis
 # war es zusaetzlich fuer jeden im Heimnetz per HTTP abrufbar.
 #
-# Den bin-Pfad des Plugins setzt der Installer in der Befehlszeile ein.
-php "REPLACELBPBINDIR/cron.php" >/dev/null 2>&1
+# Den bin- und den log-Pfad des Plugins setzt der Installer in den Zeilen ein.
+#
+# I8 (1.2.16), Hausstandard (Regeln/06, Bauform Docker NG 1.3.7 und
+# Abfahrts-Assistent 1.6.10): die FEHLERAUSGABE geht nach cron.err im
+# Protokollordner, nicht nach /dev/null. LoxBerry ruft jede Cron-Datei mit
+# "> /dev/null 2>&1" auf (/etc/cron.d/lbdefaults); bis 1.2.15 schickte auch
+# diese Zeile die eigene Fehlerausgabe dorthin - "ferien_lib.php nicht
+# gefunden" oder ein Fatal Error verschwanden spurlos. Das Verzeichnis wird
+# angelegt (sonst scheitert schon die Umlenkung), touch frischt die
+# Aenderungszeit auf (ein Anhaengen ohne Inhalt tut das nicht), ab 256 kB
+# bleiben die letzten 300 Zeilen. Der Reiter Logdateien zeigt die Datei,
+# sobald etwas darin steht.
+ERR="REPLACELBPLOGDIR/cron.err"
+mkdir -p "REPLACELBPLOGDIR" 2>/dev/null
+touch "$ERR" 2>/dev/null
+if [ -f "$ERR" ] && [ "$(wc -c < "$ERR" 2>/dev/null || echo 0)" -gt 262144 ]; then
+    tail -n 300 "$ERR" > "$ERR.neu" 2>/dev/null && mv -f "$ERR.neu" "$ERR"
+fi
+php "REPLACELBPBINDIR/cron.php" >/dev/null 2>>"$ERR"
+exit 0

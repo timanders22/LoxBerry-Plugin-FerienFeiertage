@@ -33,6 +33,10 @@ if (!is_file($fer_htmldir . '/ferien_lib.php')) {
 }
 require_once $fer_htmldir . '/ferien_lib.php';
 
+/* C16 (1.2.16): die Bibliothek stellt beim Einbinden keine Zeitzone mehr ein;
+ * dieser Lauf ist ein eigener Prozess und rechnet in Europe/Berlin. */
+date_default_timezone_set('Europe/Berlin');
+
 /*
  * Nur ein Lauf gleichzeitig.
  *
@@ -53,19 +57,15 @@ if ($fer_lock === false) {
     exit(0);
 }
 
+/* Abruf (C4, C7; 1.2.16): fer_fetch() entscheidet selbst, ob er faellig ist -
+ * woechentlich, frueher wenn die Daten bald auslaufen, ein Teil fehlte oder
+ * die Region nicht passt, und nach einem Fehlschlag gebremst (1 h, 6 h, 24 h).
+ * Das taegliche Erzwingen bei WARN (renew_<Datum>) ist entfallen: es umging
+ * die Bremse, und WARN kommt seit 1.2.16 auch vom Alter des Stands. */
+fer_fetch(false);
+/* Der Kalender wird NUR hier gefragt (C13), mit 5 s Zeitgrenze. */
+fer_ics_abrufen(false);
 $st = fer_state();
-// Nachladen, wenn die Daten bald auslaufen (hoechstens einmal taeglich versuchen)
-$force = false;
-if (!empty($st['warnung'])) {
-    $flag = fer_tmpdir() . '/renew_' . date('Ymd');
-    if (!is_file($flag)) {
-        @file_put_contents($flag, '1');
-        $force = true;
-        fer_log('Daten laufen bald aus - hole neue Ferien-/Feiertagsdaten');
-    }
-}
-fer_fetch($force);
-$st = fer_state($force);
 
 fer_announce_check();
 
@@ -75,16 +75,33 @@ fer_announce_check();
  * der Signatur bliebe ein ptest bis zum naechsten Zustandswechsel oder bis
  * zum halbstuendlichen Lebenszeichen liegen - sein Fenster ist aber nur
  * fuenf Minuten breit. */
-$sig = json_encode(array($st['heute'], $st['morgen'], $st['naechste'], $st['ok'], $st['warnung'],
-                         fer_meldeflags($st)));
-if ($sig === false) { $sig = 'unlesbar'; }
+$fer_cfg = fer_config();
 $sigf = fer_tmpdir() . '/mqtt_sig.txt';
 $beat = fer_tmpdir() . '/mqtt_beat';
-$old = is_file($sigf) ? (string) file_get_contents($sigf) : '';
-if ($sig !== $old || !is_file($beat) || time() - filemtime($beat) > 1800) {
-    fer_mqtt_publish($st);
-    @file_put_contents($sigf, $sig);
-    @touch($beat);
+if (empty($fer_cfg['mqtt_enabled'])) {
+    /* M1 (1.2.16): solange MQTT aus ist, werden Signatur und Merker nicht
+     * fortgeschrieben - und weggeraeumt. Bis 1.2.15 lief beides weiter, und
+     * nach dem Einschalten blieb es bis zu 30 min still (Regeln/07: sofortiger
+     * Vollversand nach dem Einschalten und nach einem Praefixwechsel). */
+    @unlink($sigf);
+    @unlink($beat);
+} else {
+    /* Praefix und Alter gehoeren in die Signatur (M1, M2): ein neues Praefix
+     * sendet sofort den Vollsatz unter dem neuen Namen. */
+    $sig = json_encode(array($st['heute'], $st['morgen'], $st['naechste'], $st['ok'], $st['warnung'],
+                             fer_meldeflags($st), (string) $fer_cfg['mqtt_topic'], $st['alter_tage']));
+    if ($sig === false) { $sig = 'unlesbar'; }
+    $old = is_file($sigf) ? (string) file_get_contents($sigf) : '';
+    if ($sig !== $old || !is_file($beat) || time() - filemtime($beat) > 1800) {
+        /* Signatur und Merker nur, wenn WIRKLICH gesendet wurde (M1). */
+        if (fer_mqtt_publish($st) > 0) {
+            fer_datei_schreiben($sigf, $sig, 0600);
+            @touch($beat);
+        }
+    } else {
+        /* M2: das Lebenszeichen (status/ts, datum) bei JEDEM Lauf. */
+        fer_mqtt_publish($st, true);
+    }
 }
 
 foreach (glob(fer_tmpdir() . '/renew_*') ?: array() as $f) {

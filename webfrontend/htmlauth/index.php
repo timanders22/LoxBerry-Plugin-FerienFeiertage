@@ -145,6 +145,14 @@ if (!function_exists('fer_config')) {
  * getrennten Baeumen, und ein Upgrade kann den einen vor dem anderen
  * erneuern. Fehlt die Funktion, wird NICHT geheilt - der Schutz faellt
  * geschlossen aus, statt auf die alte Bauart zurueckzufallen. */
+/* C16 (1.2.16): die Bibliothek stellt beim Einbinden keine Zeitzone mehr ein;
+ * diese Seite ist ein eigener Prozess und rechnet in Europe/Berlin. */
+date_default_timezone_set('Europe/Berlin');
+
+/* O4 (1.2.16): die Lage der Konfiguration VOR der Heilung festhalten. Die
+ * Pflichtzeile "Konfiguration heil" im Reiter Test sah bis dahin nur den
+ * Stand danach - eine geheilte Datei war immer heil. */
+$fe_vor_heilung = function_exists('fer_konfig_lage') ? fer_konfig_lage() : null;
 if (function_exists('fer_selbstheilung')) { fer_selbstheilung(); }
 
 /* Die Zweitschrift wird an fuenf Stellen dieser Datei nachgezogen (die
@@ -162,6 +170,53 @@ function fe_zweitschrift($quelle, $ziel, $stand)
 }
 
 $fe_saved = false; $fe_err = ''; $fe_note = ''; $fe_fehler = array();
+/* O3 (1.2.16): die Farbe einer Meldung folgt dem Ergebnis ('ok', 'warn',
+ * 'err'); Hinweise, die keine Beanstandung einer Eingabe sind, stehen
+ * getrennt. Bis 1.2.15 stand jede Meldung im gruenen Kasten - auch
+ * "Abruf FEHLGESCHLAGEN" und "cache-fallback". */
+$fe_note_art = 'ok'; $fe_hinweise = array();
+
+/** Die Meldung zu einem Abruf - nach dem Ergebnis, nicht nach der Hoffnung. */
+function fe_abruf_meldung($ok, $quelle)
+{
+    if ($quelle === 'frisch') { return array('ok', fer_t('MELD.ABRUF_FRISCH')); }
+    if ($quelle === 'teilweise') { return array('warn', fer_t('MELD.ABRUF_TEILWEISE')); }
+    if ($quelle === 'cache-fallback') { return array('warn', fer_t('MELD.ABRUF_ALT')); }
+    return array('err', fer_t('MELD.ABRUF_FEHL'));
+}
+
+/* O1 (1.2.16): die Einmalmeldung fuer POST - Umleitung - GET. Sie liegt im
+ * Datenordner (0600) und gilt 120 s; der GET liest sie genau einmal. */
+function fe_einmal_datei() { return fer_datadir() . '/einmalmeldung.json'; }
+function fe_einmal_schreiben($m)
+{
+    $m['zeit'] = time();
+    return fer_json_schreiben(fe_einmal_datei(), $m, 0600);
+}
+function fe_einmal_lesen()
+{
+    $f = fe_einmal_datei();
+    if (!is_file($f)) { return null; }
+    $d = json_decode((string) @file_get_contents($f), true);
+    @unlink($f);
+    if (!is_array($d) || !isset($d['zeit']) || abs(time() - (int) $d['zeit']) > 120) { return null; }
+    $liste = function ($l) {
+        $o = array();
+        foreach ((array) $l as $t) { if (is_string($t)) { $o[] = $t; } }
+        return $o;
+    };
+    return array(
+        'saved' => !empty($d['saved']),
+        'err' => isset($d['err']) && is_string($d['err']) ? $d['err'] : '',
+        'note' => isset($d['note']) && is_string($d['note']) ? $d['note'] : '',
+        'note_art' => (isset($d['note_art']) && in_array($d['note_art'], array('ok', 'warn', 'err'), true)) ? $d['note_art'] : 'ok',
+        'fehler' => $liste(isset($d['fehler']) ? $d['fehler'] : array()),
+        'hinweise' => $liste(isset($d['hinweise']) ? $d['hinweise'] : array()),
+    );
+}
+
+/** Der Wochentag in der Sprache der Oberflaeche (O5) - nicht date('D'). */
+function fe_wochentag($ts) { return fer_t('TAG.T' . date('N', $ts)); }
 
 /* ---------------------------------------------------------------- *
  * Der Wachposten - EIN Posten, vor allen Handlern.
@@ -177,7 +232,10 @@ if ($fer_wache !== '') {
     if ($fer_reiter_merk !== null) {
         $_POST['activetab'] = $fer_reiter_merk;
     }
-    $fe_fehler[] = $fer_wache;
+    /* O3 (1.2.16): die Abweisung ist ein Fehler, keine Beanstandung einer
+     * gespeicherten Eingabe. Bis 1.2.15 stand sie unter "Gespeichert, aber
+     * nicht alles wurde uebernommen" - gespeichert war nichts. */
+    $fe_err = $fer_wache;
 }
 
 
@@ -208,32 +266,35 @@ function fe_aktiv($id) { global $fe_tab; return $fe_tab === $id ? ' sm-active' :
 
 // ---------- Neues Aktionstoken erzeugen (ab 1.1.7) ----------
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['token_neu'])) {
-    $fe_cfg_tok = function_exists('fer_config') ? fer_config() : array();
-    if (!is_array($fe_cfg_tok)) { $fe_cfg_tok = array(); }
-    $fe_cfg_tok['aktionstoken'] = function_exists('fer_token_erzeugen')
-        ? fer_token_erzeugen() : bin2hex(random_bytes(12));
-    if (!is_dir($fe_cfgdir)) { @mkdir($fe_cfgdir, 0775, true); }
-    $fe_json_tok = json_encode($fe_cfg_tok, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
-    // json_encode liefert bei ungueltigem UTF-8 false, und file_put_contents
-    // schriebe dann eine Datei mit NULL Bytes - und meldete das als Erfolg.
-    if ($fe_json_tok !== false && @file_put_contents($fe_cfgfile, $fe_json_tok) !== false) {
+    $fe_cfg_tok = fer_config();
+    $fe_cfg_tok['aktionstoken'] = fer_token_erzeugen();
+    /* C8 (1.2.16): ueber fer_config_speichern() - Nebendatei, 0600,
+     * Laengenvergleich, rename. O3: scheitert das Schreiben, sagt die Seite
+     * es; bis 1.2.15 erschien bei schreibgeschuetzter Konfiguration gar
+     * nichts, und das alte Token blieb. */
+    if (fer_config_speichern($fe_cfg_tok)) {
         fe_zweitschrift($fe_cfgfile, $fe_bkfile, $fe_cfg_tok);
-        $fe_note = 'Neues Token erzeugt. Die Adressen in Loxone muessen angepasst werden '
-                 . '- die alten funktionieren nicht mehr.';
+        $fe_note = fer_t('MELD.TOKEN_NEU');
+    } else {
+        $fe_err = sprintf(fer_t('MELD.TOKEN_NEU_FEHL'), $fe_cfgfile);
     }
     $fe_tab = 'tab-loxone';
 }
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['clearlog'])) {
     @mkdir(dirname($fe_logfile), 0775, true);
-    @file_put_contents($fe_logfile, '[' . date('Y-m-d H:i:s') . "] Protokoll geleert (Admin-Oberflaeche)\n");
+    if (@file_put_contents($fe_logfile, '[' . date('Y-m-d H:i:s') . "] Protokoll geleert (Admin-Oberflaeche)\n") !== false) {
+        $fe_note = fer_t('MELD.LOG_GELEERT');
+    } else {
+        $fe_err = sprintf(fer_t('MELD.LOG_FEHL'), $fe_logfile);
+    }
     $fe_tab = 'tab-log';
 }
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['fetchnow']) && function_exists('fer_fetch')) {
     list($fe_ok, $fe_q) = fer_fetch(true);
     fer_state(true);
-    $fe_note = $fe_ok ? ('Daten abgerufen (' . $fe_q . ').') : 'Abruf FEHLGESCHLAGEN - Internetverbindung pruefen (Protokoll beachten).';
+    list($fe_note_art, $fe_note) = fe_abruf_meldung($fe_ok, $fe_q);
 }
 
 // ---------- MQTT speichern (eigener Reiter seit 1.1.5, Hausstandard) ----------
@@ -243,14 +304,29 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['mqtt_save'])) {
     $fe_new = function_exists('fer_config') ? fer_config() : array();
     if (!is_array($fe_new)) { $fe_new = array(); }
     $fe_new['mqtt_enabled'] = isset($_POST['mqtt_enabled']) ? 1 : 0;
-    $fe_new['mqtt_topic'] = preg_replace('#[^\w/\-]#', '', (string) (isset($_POST['mqtt_topic']) ? $_POST['mqtt_topic'] : 'ferien')) ?: 'ferien';
-    if (!is_dir($fe_cfgdir)) { @mkdir($fe_cfgdir, 0775, true); }
-    $fe_json = json_encode($fe_new, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
-    if ($fe_json !== false && @file_put_contents($fe_cfgfile, $fe_json) !== false) {
+    /* O2 (1.2.16): abweisen statt verbiegen. Bis 1.2.15 wurde "ferien/kueche"
+     * still zu "ferien/kche", "ferien test" zu "ferientest" und "haus/ferien/#"
+     * zu "haus/ferien/" - und alle Themen wanderten ohne ein Wort. Ein leeres
+     * Feld heisst weiter: die Vorgabe "ferien". */
+    $fe_te = isset($_POST['mqtt_topic']) ? $_POST['mqtt_topic'] : 'ferien';
+    if (is_string($fe_te) && trim($fe_te) === '') { $fe_te = 'ferien'; }
+    list($fe_tok, $fe_tw, $fe_tg) = fer_wert_pruefen('mqtt_topic', $fe_te);
+    if ($fe_tok) {
+        $fe_new['mqtt_topic'] = $fe_tw;
+    } else {
+        $fe_fehler[] = sprintf(fer_t('MELD.ABGEWIESEN'), fer_t('TEXT.TOPIC_PRFIX'), $fe_tg,
+            is_string($fe_new['mqtt_topic']) ? $fe_new['mqtt_topic'] : 'ferien');
+    }
+    if (fer_config_speichern($fe_new)) {
         $fe_saved = true;
         fe_zweitschrift($fe_cfgfile, $fe_bkfile, $fe_new);
+        /* M1 (1.2.16): nach dem Einschalten und nach einem Praefixwechsel
+         * sendet der naechste Lauf SOFORT den Vollsatz - nicht erst, wenn der
+         * 30-min-Merker abgelaufen ist. */
+        @unlink(fer_tmpdir() . '/mqtt_sig.txt');
+        @unlink(fer_tmpdir() . '/mqtt_beat');
     } else {
-        $fe_err = 'Konfiguration konnte nicht gespeichert werden: ' . $fe_cfgfile;
+        $fe_err = sprintf(fer_t('MELD.SPEICHERN_FEHL'), $fe_cfgfile);
     }
     $fe_tab = 'tab-mqtt';
 }
@@ -266,68 +342,69 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['save'])) {
      * anderen korrigieren muss, klickt fuenfmal Speichern; wer beim ersten
      * Mangel gar nichts speichern kann, verliert alle uebrigen Eingaben. */
     $fe_new = array();
-    $fe_new['country'] = preg_replace('/[^A-Za-z]/', '', (string) (isset($_POST['country']) ? $_POST['country'] : 'DE')) ?: 'DE';
-    $fe_new['country'] = strtoupper($fe_new['country']);
-    $fe_new['subdivision'] = preg_replace('/[^A-Za-z0-9\-]/', '', (string) (isset($_POST['subdivision']) ? $_POST['subdivision'] : ''));
-    /* Sprache der Ferien- und Feiertagsnamen.
-     *
-     * Bis 1.1.7 stand hier fest 'DE' - ohne Eingabefeld, und ohne Uebernahme
-     * aus dem Bestand. Wer die Sprache von Hand in der ferien.json umstellte,
-     * verlor sie beim naechsten Klick auf Speichern kommentarlos, und eine
-     * englische Oberflaeche zeigte deutsche Feiertagsnamen. Es ist derselbe
-     * Fall wie ein totes Feld, das beim Speichern auf 0 faellt - nur mit
-     * 'DE' statt 0. */
-    $fe_lg = strtoupper(preg_replace('/[^A-Za-z]/', '', (string) (isset($_POST['lang']) ? $_POST['lang'] : '')));
-    $fe_new['lang'] = in_array($fe_lg, array('DE', 'EN', 'FR', 'IT', 'NL', 'PL', 'CS'), true) ? $fe_lg : 'DE';
+    /* O2 (Durchgang 30.09.2026): Eingaben werden abgewiesen und benannt, nie
+     * still verbogen. Bis 1.2.15 wurden unter anderem 100.4 zu 100
+     * (Lautstaerke), 70000 zu 65535 (Port), "de-DE" zu "dede", "XX" zu "DE",
+     * "DE BY!" zu "DEBY" und 2.9 zu 2 (Brueckenluecke) - ohne eine Zeile auf
+     * der Seite (13 gemessene Faelle). Jetzt prueft fer_wert_pruefen() -
+     * dieselbe Pruefung wie beim Zurueckspielen einer Sicherung -, ein
+     * abgewiesener Wert behaelt den bisherigen, und die Seite nennt Feld,
+     * Grund und den geltenden Wert. Alle Beanstandungen werden gesammelt. */
+    $fe_post = function ($k, $vorgabe) { return isset($_POST[$k]) ? $_POST[$k] : $vorgabe; };
+    $fe_pruef = function ($schluessel, $wert, $alt, $name) use (&$fe_fehler) {
+        list($ok, $v, $grund) = fer_wert_pruefen($schluessel, $wert);
+        if ($ok) { return $v; }
+        $fe_fehler[] = sprintf(fer_t('MELD.ABGEWIESEN'), $name, $grund,
+            (is_scalar($alt) && (string) $alt !== '') ? (string) $alt : fer_t('MELD.LEER'));
+        return $alt;
+    };
+    $fe_alt = function ($k, $vorgabe) use ($fe_vorher) {
+        return array_key_exists($k, $fe_vorher) ? $fe_vorher[$k] : $vorgabe;
+    };
+    $fe_new['country'] = $fe_pruef('country', $fe_post('country', 'DE'), $fe_alt('country', 'DE'), fer_t('TEXT.LAND'));
+    $fe_new['subdivision'] = $fe_pruef('subdivision', $fe_post('subdivision', ''), $fe_alt('subdivision', 'DE-BY'),
+        fer_t('TEXT.BUNDESLAND_REGION'));
+    /* Sprache der Ferien- und Feiertagsnamen. Bis 1.1.7 fest 'DE'; bis
+     * 1.2.15 wurde ein unbekannter Wert still zu 'DE'. */
+    $fe_new['lang'] = $fe_pruef('lang', $fe_post('lang', ''), $fe_alt('lang', 'DE'), fer_t('T12.SPRACHE_NAMEN'));
     $fe_new['school'] = isset($_POST['school']) ? 1 : 0;
     $fe_new['public'] = isset($_POST['public']) ? 1 : 0;
-    $fe_loc = (string) (isset($_POST['locality']) ? $_POST['locality'] : '');
-    $fe_new['locality'] = in_array($fe_loc, array('', 'DE-BY-AU', 'BY-EV', 'SN-KATH', 'TH-KATH'), true) ? $fe_loc : '';
+    $fe_new['locality'] = $fe_pruef('locality', $fe_post('locality', ''), $fe_alt('locality', ''),
+        fer_t('TEXT.ARBEITSORT_GEMEINDE_RTLICHE_SONDER'));
     $fe_new['local_holidays'] = isset($_POST['local_holidays']) ? 1 : 0;
     $fe_new['bridge'] = isset($_POST['bridge']) ? 1 : 0;
 
     /* --- ab 1.2.0 ---------------------------------------------------- */
-    $fe_new['subdivision2'] = preg_replace('/[^A-Za-z0-9\-]/', '', (string) (isset($_POST['subdivision2']) ? $_POST['subdivision2'] : ''));
+    $fe_new['subdivision2'] = $fe_pruef('subdivision2', $fe_post('subdivision2', ''), $fe_alt('subdivision2', ''),
+        fer_t('T12.REGION2'));
     if ($fe_new['subdivision2'] !== '' && $fe_new['subdivision2'] === $fe_new['subdivision']) {
-        $fe_fehler[] = 'Die zweite Region ist dieselbe wie die erste - sie wurde nicht uebernommen.';
+        $fe_fehler[] = fer_t('MELD.REGION2_GLEICH');
         $fe_new['subdivision2'] = '';
     }
-    $fe_new['group'] = preg_replace('/[^A-Za-z0-9\-]/', '', (string) (isset($_POST['group']) ? $_POST['group'] : ''));
-    $fe_bm = (string) (isset($_POST['bridge_mode']) ? $_POST['bridge_mode'] : 'klassisch');
-    $fe_new['bridge_mode'] = in_array($fe_bm, array('klassisch', 'erweitert'), true) ? $fe_bm : 'klassisch';
+    $fe_new['group'] = $fe_pruef('group', $fe_post('group', ''), $fe_alt('group', ''), fer_t('T12.SCHULART'));
+    $fe_new['bridge_mode'] = $fe_pruef('bridge_mode', $fe_post('bridge_mode', 'klassisch'),
+        $fe_alt('bridge_mode', 'klassisch'), fer_t('T12.BRUECKENMODUS'));
     /* Die Obergrenze 4 ist gemessen, nicht gegriffen: eine gewoehnliche Woche
      * hat fuenf Werktage, mit 5 waere jeder Werktag des Jahres ein
      * Brueckentag (254 statt 32 in 366 Tagen, DE-BY, 18.08.2026). */
-    $fe_bl = (int) (isset($_POST['bridge_luecke']) ? $_POST['bridge_luecke'] : 4);
-    if ($fe_bl < 1 || $fe_bl > 4) {
-        $fe_fehler[] = 'Die Luecke fuer Brueckentage muss zwischen 1 und 4 Werktagen liegen'
-                     . ' - eingetragen war ' . $fe_bl . ', uebernommen wurde 4.';
-        $fe_bl = 4;
-    }
-    $fe_new['bridge_luecke'] = $fe_bl;
+    $fe_new['bridge_luecke'] = $fe_pruef('bridge_luecke', $fe_post('bridge_luecke', '4'), $fe_alt('bridge_luecke', 4),
+        fer_t('T12.LUECKE'));
     $fe_new['typ_streng'] = isset($_POST['typ_streng']) ? 1 : 0;
     $fe_new['halbtag_frei'] = isset($_POST['halbtag_frei']) ? 1 : 0;
-    $fe_iu = trim((string) (isset($_POST['ics_url']) ? $_POST['ics_url'] : ''));
-    if ($fe_iu !== '' && !preg_match('#^https?://#i', $fe_iu)) {
-        /* Abweisen statt zurechtbiegen. Ein "webcal://"-Verweis, wie ihn
-         * Apple ausgibt, ist keine Adresse, die file_get_contents oeffnen
-         * kann - stillschweigend ein http davorzusetzen waere geraten. */
-        $fe_fehler[] = 'Die Kalender-Adresse muss mit http:// oder https:// beginnen'
-                     . ' (bei einem webcal://-Verweis das webcal durch https ersetzen).'
-                     . ' Sie wurde nicht uebernommen.';
-        $fe_iu = isset($fe_vorher['ics_url']) ? (string) $fe_vorher['ics_url'] : '';
+    /* Kalenderadresse: abweisen statt zurechtbiegen. Ein "webcal://"-Verweis,
+     * wie ihn Apple ausgibt, ist keine Adresse, die file_get_contents oeffnen
+     * kann - stillschweigend ein http davorzusetzen waere geraten. */
+    list($fe_iok, $fe_iv) = fer_wert_pruefen('ics_url', $fe_post('ics_url', ''));
+    if ($fe_iok) {
+        $fe_new['ics_url'] = $fe_iv;
+    } else {
+        $fe_fehler[] = fer_t('MELD.ICS_URL');
+        $fe_new['ics_url'] = is_string($fe_alt('ics_url', '')) ? $fe_alt('ics_url', '') : '';
     }
-    $fe_new['ics_url'] = $fe_iu;
-    $fe_it = (string) (isset($_POST['ics_typ']) ? $_POST['ics_typ'] : 'urlaub');
-    $fe_new['ics_typ'] = in_array($fe_it, array('ferien', 'feiertag', 'urlaub'), true) ? $fe_it : 'urlaub';
-    $fe_new['ics_filter'] = trim((string) (isset($_POST['ics_filter']) ? $_POST['ics_filter'] : ''));
-    $fe_uv = (int) (isset($_POST['urlaub_vorlauf']) ? $_POST['urlaub_vorlauf'] : 1);
-    if ($fe_uv < 0 || $fe_uv > 14) {
-        $fe_fehler[] = 'Der Vorlauf zur Rueckkehr muss zwischen 0 und 14 Tagen liegen'
-                     . ' - eingetragen war ' . $fe_uv . ', uebernommen wurde 1.';
-        $fe_uv = 1;
-    }
-    $fe_new['urlaub_vorlauf'] = $fe_uv;
+    $fe_new['ics_typ'] = $fe_pruef('ics_typ', $fe_post('ics_typ', 'urlaub'), $fe_alt('ics_typ', 'urlaub'), fer_t('T12.ICS_TYP'));
+    $fe_new['ics_filter'] = $fe_pruef('ics_filter', $fe_post('ics_filter', ''), $fe_alt('ics_filter', ''), fer_t('T12.ICS_FILTER'));
+    $fe_new['urlaub_vorlauf'] = $fe_pruef('urlaub_vorlauf', $fe_post('urlaub_vorlauf', '1'), $fe_alt('urlaub_vorlauf', 1),
+        fer_t('T12.VORLAUF'));
     // MQTT wohnt seit 1.1.5 im eigenen Reiter mit eigenem Formular - hier
     // aus dem Bestand uebernehmen, sonst loescht 'Speichern' die Werte.
     $fe_new['mqtt_enabled'] = isset($fe_vorher['mqtt_enabled']) ? (int) $fe_vorher['mqtt_enabled'] : 0;
@@ -343,37 +420,34 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['save'])) {
     $fe_ob = isset($_POST['own_bis']) ? (array) $_POST['own_bis'] : array();
     $fe_ot = isset($_POST['own_typ']) ? (array) $_POST['own_typ'] : array();
     for ($fe_i = 0; $fe_i < 6; $fe_i++) {
-        $fe_zname = trim((string) (isset($fe_on[$fe_i]) ? $fe_on[$fe_i] : ''));
-        $v = trim((string) (isset($fe_ov[$fe_i]) ? $fe_ov[$fe_i] : ''));
-        $b = trim((string) (isset($fe_ob[$fe_i]) ? $fe_ob[$fe_i] : ''));
+        $fe_zname = trim(is_string(isset($fe_on[$fe_i]) ? $fe_on[$fe_i] : '') ? (string) (isset($fe_on[$fe_i]) ? $fe_on[$fe_i] : '') : '');
+        $v = trim(is_string(isset($fe_ov[$fe_i]) ? $fe_ov[$fe_i] : '') ? (string) (isset($fe_ov[$fe_i]) ? $fe_ov[$fe_i] : '') : '');
+        $b = trim(is_string(isset($fe_ob[$fe_i]) ? $fe_ob[$fe_i] : '') ? (string) (isset($fe_ob[$fe_i]) ? $fe_ob[$fe_i] : '') : '');
         if ($v === '' && $b === '' && $fe_zname === '') { continue; }   // leere Zeile, still uebergehen
-        if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $v)) {
+        if (fer_tag_norm($v) !== $v) {
             /* Bis 1.1.7 verschwand so eine Zeile lautlos, und die
              * nachfolgenden rutschten eine Position nach oben. Der Anwender
              * sah nur "Konfiguration gespeichert" und eine Tabelle ohne
-             * seine Eingabe. Melden ist richtig, blockieren nicht. */
-            $fe_fehler[] = 'Zeile ' . ($fe_i + 1) . ' der eigenen Termine'
-                . ($fe_zname !== '' ? ' ("' . $fe_zname . '")' : '')
-                . ': "Von" muss JJJJ-MM-TT sein'
-                . ($v === '' ? ' und war leer.' : ', war aber "' . $v . '".')
-                . ' Die Zeile wurde nicht uebernommen.';
+             * seine Eingabe. Melden ist richtig, blockieren nicht. Seit
+             * 1.2.16 gilt auch ein Datum, das es nicht gibt (2026-02-30),
+             * als falsch. */
+            $fe_fehler[] = sprintf(fer_t($v === '' ? 'MELD.OWN_VON_LEER' : 'MELD.OWN_VON'), $fe_i + 1,
+                $fe_zname !== '' ? $fe_zname : '-', $v);
             continue;
         }
-        if ($b !== '' && !preg_match('/^\d{4}-\d{2}-\d{2}$/', $b)) {
-            $fe_fehler[] = 'Zeile ' . ($fe_i + 1) . ' der eigenen Termine: "Bis" war "'
-                . $b . '" und damit nicht JJJJ-MM-TT - es gilt jetzt derselbe Tag wie "Von".';
+        if ($b !== '' && fer_tag_norm($b) !== $b) {
+            $fe_fehler[] = sprintf(fer_t('MELD.OWN_BIS'), $fe_i + 1, $b);
             $b = $v;
         }
         if ($b === '') { $b = $v; }
         if ($b < $v) {
-            $fe_fehler[] = 'Zeile ' . ($fe_i + 1) . ' der eigenen Termine: "Bis" liegt vor "Von"'
-                . ' - die beiden Daten wurden getauscht.';
+            $fe_fehler[] = sprintf(fer_t('MELD.OWN_TAUSCH'), $fe_i + 1);
             $fe_tausch = $v; $v = $b; $b = $fe_tausch;
         }
         $fe_new['own'][] = array(
             'name' => $fe_zname,
             'von' => $v, 'bis' => $b,
-            'typ' => in_array((string) (isset($fe_ot[$fe_i]) ? $fe_ot[$fe_i] : ''), array('feiertag', 'urlaub'), true) ? (string) $fe_ot[$fe_i] : 'ferien',
+            'typ' => in_array((string) (isset($fe_ot[$fe_i]) && is_string($fe_ot[$fe_i]) ? $fe_ot[$fe_i] : ''), array('feiertag', 'urlaub'), true) ? (string) $fe_ot[$fe_i] : 'ferien',
         );
     }
 
@@ -388,14 +462,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['save'])) {
      *   "7:5"   fiel durch das Muster und ergab wortlos wieder 19:00.
      * In allen drei Faellen sah der Anwender nach dem Speichern eine andere
      * Zeit als die eingegebene und erfuhr nicht, warum. */
-    $fe_zeit = trim((string) (isset($_POST['notify_time']) ? $_POST['notify_time'] : ''));
-    $fe_zeit_alt = isset($fe_vorher['notify']['time']) ? (string) $fe_vorher['notify']['time'] : '19:00';
-    if (!preg_match('/^([01]?\d|2[0-3]):([0-5]\d)$/', $fe_zeit)) {
-        $fe_fehler[] = 'Die Meldezeit muss SS:MM zwischen 00:00 und 23:59 sein'
-                     . ($fe_zeit === '' ? ' und war leer.' : ', war aber "' . $fe_zeit . '".')
-                     . ' Es gilt weiterhin ' . $fe_zeit_alt . '.';
-        $fe_zeit = $fe_zeit_alt;
-    }
+    $fe_zeit_alt = isset($fe_vorher['notify']['time']) && is_string($fe_vorher['notify']['time']) ? $fe_vorher['notify']['time'] : '19:00';
+    $fe_zeit = $fe_pruef('notify.time', $fe_post('notify_time', ''), $fe_zeit_alt, fer_t('TEXT.MELDEZEIT_AM_VORABEND'));
     $fe_new['notify'] = array(
         'audio' => isset($_POST['notify_audio']) ? 1 : 0,
         'push' => isset($_POST['notify_push']) ? 1 : 0,
@@ -404,21 +472,21 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['save'])) {
         'ferienstart' => isset($_POST['n_ferienstart']) ? 1 : 0,
         'bridge_month' => isset($_POST['n_bridge']) ? 1 : 0,
     );
-    $fe_mode = (string) (isset($_POST['tts_mode']) ? $_POST['tts_mode'] : 'musicserver');
+    $fe_tts_alt = (isset($fe_vorher['tts']) && is_array($fe_vorher['tts'])) ? $fe_vorher['tts'] : array();
+    $fe_tts_alt += array('mode' => 'musicserver', 'ip' => '', 'port' => 7091, 'zones' => '1', 'volume' => 8,
+                         'lang' => 'de', 'template' => '');
     $fe_new['tts'] = array(
-        'mode' => in_array($fe_mode, array('musicserver', 'ms4h', 'audioserver', 'custom'), true) ? $fe_mode : 'musicserver',
-        'ip' => trim((string) (isset($_POST['tts_ip']) ? $_POST['tts_ip'] : '')),
-        'port' => max(1, min(65535, (int) (isset($_POST['tts_port']) ? $_POST['tts_port'] : 7091))),
-        'zones' => trim((string) (isset($_POST['tts_zones']) ? $_POST['tts_zones'] : '1')),
-        'volume' => max(1, min(100, (int) (isset($_POST['tts_volume']) ? $_POST['tts_volume'] : 8))),
-        'lang' => preg_replace('/[^a-z]/', '', strtolower((string) (isset($_POST['tts_lang']) ? $_POST['tts_lang'] : 'de'))) ?: 'de',
-        'template' => trim((string) (isset($_POST['tts_template']) ? $_POST['tts_template'] : '')),
+        'mode' => $fe_pruef('tts.mode', $fe_post('tts_mode', 'musicserver'), $fe_tts_alt['mode'], fer_t('TEXT.AUDIO_AUSGABE')),
+        'ip' => $fe_pruef('tts.ip', $fe_post('tts_ip', ''), $fe_tts_alt['ip'], fer_t('TEXT.IP_DES_AUDIO_SERVERS')),
+        'port' => $fe_pruef('tts.port', $fe_post('tts_port', '7091'), $fe_tts_alt['port'], fer_t('TEXT.PORT')),
+        'zones' => $fe_pruef('tts.zones', $fe_post('tts_zones', '1'), $fe_tts_alt['zones'], fer_t('TEXT.ZONEN')),
+        'volume' => $fe_pruef('tts.volume', $fe_post('tts_volume', '8'), $fe_tts_alt['volume'], fer_t('TEXT.LAUTSTRKE')),
+        'lang' => $fe_pruef('tts.lang', $fe_post('tts_lang', 'de'), $fe_tts_alt['lang'], fer_t('TEXT.SPRACHE')),
+        'template' => $fe_pruef('tts.template', $fe_post('tts_template', ''), $fe_tts_alt['template'], fer_t('MELD.N_VORLAGE')),
     );
-    if (!is_dir($fe_cfgdir)) { @mkdir($fe_cfgdir, 0775, true); }
-    $fe_json = json_encode($fe_new, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
-    // json_encode liefert bei ungueltigem UTF-8 false, und file_put_contents
-    // schriebe dann eine Datei mit NULL Bytes - und meldete das als Erfolg.
-    if ($fe_json !== false && @file_put_contents($fe_cfgfile, $fe_json) !== false) {
+    /* C8 (1.2.16): ueber fer_config_speichern() - Nebendatei, 0600,
+     * Laengenvergleich, rename. */
+    if (fer_config_speichern($fe_new)) {
         $fe_saved = true;
         fe_zweitschrift($fe_cfgfile, $fe_bkfile, $fe_new);
         // Zwischenspeicher raeumen - und zwar den RICHTIGEN.
@@ -468,22 +536,21 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['save'])) {
             $fe_alt = isset($fe_vorher[$fe_rf]) ? $fe_vorher[$fe_rf] : null;
             if ((string) $fe_alt !== (string) $fe_new[$fe_rf]) { $fe_region_neu = true; break; }
         }
-        if ($fe_region_neu && function_exists('fer_datafile')) {
-            @unlink(fer_datafile());
-            if (function_exists('fer_log')) {
-                fer_log('Region geaendert - Termindatei verworfen, die Daten werden neu geholt.');
-            }
-            if (function_exists('fer_fetch')) {
-                list($fe_rok, $fe_rq) = fer_fetch(true);
-                fer_state(true);
-                $fe_note = $fe_rok
-                    ? 'Region geaendert - Ferien und Feiertage wurden neu geholt (' . $fe_rq . ').'
-                    : 'Region geaendert, aber der Abruf ist FEHLGESCHLAGEN. Im Reiter Protokoll steht mehr;'
-                    . ' mit "Jetzt abrufen" laesst es sich wiederholen.';
-            }
+        if ($fe_region_neu) {
+            /* Erst holen, dann ersetzen (C3, C5; 1.2.16). Bis 1.2.15 wurde die
+             * Termindatei VOR dem Abruf geloescht; fiel die Quelle aus, gab es
+             * danach gar keine Daten, und der Endpunkt meldete SCHULTAG=1. Jetzt
+             * bleibt die Datei liegen, gilt aber nicht mehr (andere Region,
+             * fer_region_passt()): scheitert der Abruf, antwortet der Endpunkt
+             * mit 503 statt mit den Ferien der alten Region. */
+            fer_log('Region geaendert - die Daten werden neu geholt.');
+            list($fe_rok, $fe_rq) = fer_fetch(true);
+            fer_state(true);
+            list($fe_note_art, $fe_note) = fe_abruf_meldung($fe_rok, $fe_rq);
+            $fe_note = fer_t('MELD.REGION_NEU') . ' ' . $fe_note;
         }
     } else {
-        $fe_err = 'Konfiguration konnte nicht gespeichert werden: ' . $fe_cfgfile;
+        $fe_err = sprintf(fer_t('MELD.SPEICHERN_FEHL'), $fe_cfgfile);
     }
 }
 
@@ -523,7 +590,7 @@ $fe_zweit_voll = function_exists('fer_config_hat_inhalt')
     && function_exists('fer_inhalt_oder_null')
     && fer_config_hat_inhalt(fer_inhalt_oder_null($fe_bkfile));
 if (empty($fe_cfg['aktionstoken']) && $fe_zweit_voll) {
-    $fe_fehler[] = fer_t('WACHE.KEIN_TOKEN');
+    $fe_hinweise[] = fer_t('WACHE.KEIN_TOKEN');
     if (function_exists('fer_log_if_changed')) {
         fer_log_if_changed('tokenschutz', 'Die Konfiguration traegt kein Aktionstoken, die '
             . 'Zweitschrift aber schon - es wird KEIN neues erzeugt: ' . $fe_bkfile);
@@ -531,9 +598,10 @@ if (empty($fe_cfg['aktionstoken']) && $fe_zweit_voll) {
 } elseif (empty($fe_cfg['aktionstoken'])) {
     $fe_cfg['aktionstoken'] = function_exists('fer_token_erzeugen')
         ? fer_token_erzeugen() : bin2hex(random_bytes(12));
-    if (!is_dir($fe_cfgdir)) { @mkdir($fe_cfgdir, 0775, true); }
-    $fe_json_init = json_encode($fe_cfg, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
-    if ($fe_json_init !== false && @file_put_contents($fe_cfgfile, $fe_json_init) !== false) {
+    /* C8/C9 (1.2.16): ueber fer_config_speichern() - 0600 vor dem Inhalt. Bis
+     * 1.2.15 entstand hier die erste Konfiguration mit 644 (gemessen am Geraet
+     * 28.09.2026): das Aktionstoken war fuer jeden lokalen Benutzer lesbar. */
+    if (fer_config_speichern($fe_cfg)) {
         fe_zweitschrift($fe_cfgfile, $fe_bkfile, $fe_cfg);
     }
 }
@@ -547,7 +615,12 @@ $fe_st = function_exists('fer_state') ? fer_state() : array();
  * Termindatei, damit die Zahl auch dann stimmt, wenn schon gesiebt wird. */
 $fe_stat = function_exists('fer_artstatistik') ? fer_artstatistik()
     : array('feiertage_fremd' => 0, 'ferien_fremd' => 0, 'halbtage' => 0, 'arten' => array(), 'gesamt' => 0);
-$fe_subs = function_exists('fer_subdivisions') ? fer_subdivisions($fe_cfg['country']) : array();
+/* C1 (1.2.16): bis 1.2.15 brachte ein Land als Liste (aus einer Sicherung)
+ * unter PHP 8.5 JEDEN Seitenaufbau hier zum Absturz (TypeError in
+ * strtoupper()), und die eigene Sicherung liess sich nicht mehr zurueckspielen,
+ * weil deren Handler hinter der Absturzstelle stand. */
+$fe_land = is_string($fe_cfg['country']) ? $fe_cfg['country'] : 'DE';
+$fe_subs = function_exists('fer_subdivisions') ? fer_subdivisions($fe_land) : array();
 $fe_loglines = array();
 if (is_file($fe_logfile)) {
     $fe_loglines = array_slice(array_reverse(file($fe_logfile, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES) ?: array()), 0, 300);
@@ -574,7 +647,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['fer_sichern'])) {
         echo $fer_js;
         exit;
     }
-    $fe_note = fer_t('TEXT.SICH_SCHREIBFEHLER');
+    $fe_err = fer_t('TEXT.SICH_SCHREIBFEHLER');
 }
 
 /* ---------------- Einstellungen zurueckspielen ----------------
@@ -587,16 +660,21 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['fer_zurueck'])) {
     if (!isset($_FILES['fer_sicherung']) || !is_array($_FILES['fer_sicherung'])
         || !isset($_FILES['fer_sicherung']['tmp_name'])
         || !@is_uploaded_file($_FILES['fer_sicherung']['tmp_name'])) {
-        $fe_note = fer_t('TEXT.SICH_KEINE_DATEI');
+        $fe_err = fer_t('TEXT.SICH_KEINE_DATEI');
     } elseif ((int) $_FILES['fer_sicherung']['size'] > 262144) {
-        $fe_note = fer_t('TEXT.SICH_ZU_GROSS');
+        $fe_err = fer_t('TEXT.SICH_ZU_GROSS');
     } else {
-        list($fer_neu, $fer_fehler, $fer_n) = fer_sicherung_lesen(
-            (string) @file_get_contents($_FILES['fer_sicherung']['tmp_name']));
+        $fer_erg = fer_sicherung_lesen(
+            (string) @file_get_contents($_FILES['fer_sicherung']['tmp_name']), fer_config());
+        $fer_neu = $fer_erg[0];
+        $fer_fehler = $fer_erg[1];
+        $fer_n = $fer_erg[2];
+        $fer_hin = isset($fer_erg[3]) ? (array) $fer_erg[3] : array();
         if ($fer_neu === null) {
             /* ALLE Beanstandungen, nicht nur die erste - und geaendert
-             * wird nichts. */
-            $fe_note = fer_t('TEXT.SICH_ABGELEHNT') . ' ' . implode(' ', $fer_fehler);
+             * wird nichts. O3 (1.2.16): als Fehler, nicht im gruenen Kasten,
+             * und genau einmal maskiert. */
+            $fe_err = fer_t('TEXT.SICH_ABGELEHNT') . ' ' . implode(' ', $fer_fehler);
         } elseif (fer_config_speichern($fer_neu)) {
             /* Die Zweitschrift mitziehen. Bis 1.2.13 blieb sie auf dem Stand
              * VOR dem Zurueckspielen stehen, und die naechste Selbstheilung
@@ -608,13 +686,56 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['fer_zurueck'])) {
              * fe_zweitschrift() gilt auch hier: eine Datei ohne Aktionstoken
              * ersetzt keine Zweitschrift mit (R3). */
             fe_zweitschrift($fe_cfgfile, $fe_bkfile, $fer_neu);
-            $fe_note = sprintf(fer_t('TEXT.SICH_UEBERNOMMEN'), $fer_n);
+            /* C1/C2 (1.2.16): "uebernommen" erst, wenn Konfiguration UND
+             * Zweitschrift geschrieben sind und das Ruecklesen den Stand
+             * zeigt. Bis 1.2.15 meldete die Seite "24 Werte uebernommen",
+             * waehrend die naechste fer_config() aus der alten Zweitschrift
+             * heilte. */
+            $fer_ist = fer_inhalt_oder_null($fe_cfgfile);
+            $fer_zw = fer_inhalt_oder_null($fe_bkfile);
+            if ($fer_ist == $fer_neu && $fer_zw == $fer_neu) {
+                $fe_note = sprintf(fer_t('TEXT.SICH_UEBERNOMMEN'), $fer_n);
+                $fe_hinweise = array_merge($fe_hinweise, $fer_hin);
+                @unlink(fer_tmpdir() . '/state.json');
+                @unlink(fer_tmpdir() . '/mqtt_sig.txt');
+            } else {
+                $fe_err = fer_t('TEXT.SICH_NICHT_ANGEKOMMEN');
+            }
         } else {
-            $fe_note = fer_t('TEXT.SICH_SCHREIBFEHLER');
+            $fe_err = fer_t('TEXT.SICH_SCHREIBFEHLER');
         }
     }
 }
 
+
+/* ---------- O1: POST - Umleitung - GET (Bauart D, Regeln/04) ----------
+ *
+ * "Jeder POST-Handler endet mit einer Umleitung." Bis 1.2.15 antworteten
+ * alle sechs Handler mit HTTP 200 ohne Location; F5 nach "Neues Token"
+ * wuerfelte erneut (gemessen: drei verschiedene Token aus einem POST), F5
+ * nach "Jetzt abrufen" fragte die fremde Quelle noch einmal. Jetzt: das
+ * Ergebnis als Einmalmeldung ablegen, 303 auf den Reiter, beim GET einmal
+ * zeigen. Das gilt auch fuer einen POST ohne gueltiges Formularmerkmal. Die
+ * Downloads (Vorlage, Sicherung) haben oben schon geendet. Laesst sich die
+ * Einmalmeldung nicht ablegen, wird wie bisher ohne Umleitung gezeigt. */
+if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+    if (fe_einmal_schreiben(array('saved' => $fe_saved ? 1 : 0, 'err' => $fe_err, 'note' => $fe_note,
+            'note_art' => $fe_note_art, 'fehler' => array_values($fe_fehler),
+            'hinweise' => array_values($fe_hinweise)))) {
+        header('Location: index.php?form=' . substr($fe_tab, 4), true, 303);
+        exit;
+    }
+    fer_log('Die Einmalmeldung liess sich nicht ablegen - die Seite wird ohne Umleitung gezeigt.');
+} else {
+    $fe_einmal = fe_einmal_lesen();
+    if ($fe_einmal !== null) {
+        $fe_saved = $fe_saved || $fe_einmal['saved'];
+        if ($fe_einmal['err'] !== '') { $fe_err = $fe_einmal['err']; }
+        if ($fe_einmal['note'] !== '') { $fe_note = $fe_einmal['note']; $fe_note_art = $fe_einmal['note_art']; }
+        $fe_fehler = array_merge($fe_einmal['fehler'], $fe_fehler);
+        $fe_hinweise = array_merge($fe_einmal['hinweise'], $fe_hinweise);
+    }
+}
 
 if ($fe_frame) { LBWeb::lbheader('Ferien und Feiertage', 'https://wiki.loxberry.de/', 'help.html'); }
 
@@ -668,9 +789,13 @@ if ($fe_frame) { LBWeb::lbheader('Ferien und Feiertage', 'https://wiki.loxberry.
 .sm-legende { display: flex; flex-wrap: wrap; gap: 14px; margin: 10px 0 2px; font-size: 0.86em; color: #555; }
 .sm-legende span { display: inline-flex; align-items: center; gap: 6px; }
 .sm-punkt { width: 13px; height: 13px; border-radius: 3px; display: inline-block; }
-.sm-btn.sm-b-lesen   { background: #6dac20; }
-.sm-btn.sm-b-technik { background: #546e7a; }
-.sm-btn.sm-b-aktion  { background: #e0620d; }
+.sm-wrap .sm-btn.sm-b-lesen   { background: #6dac20 !important; }
+.sm-wrap .sm-btn.sm-b-technik { background: #546e7a !important; }
+.sm-wrap .sm-btn.sm-b-aktion  { background: #e0620d !important; }
+/* Eigene Hover- und Fokusfarben je Gruppe - sonst uebernimmt der Rahmen. */
+.sm-wrap .sm-btn.sm-b-lesen:hover,   .sm-wrap .sm-btn.sm-b-lesen:focus   { background: #5c9219 !important; color: #fff !important; }
+.sm-wrap .sm-btn.sm-b-technik:hover, .sm-wrap .sm-btn.sm-b-technik:focus { background: #435962 !important; color: #fff !important; }
+.sm-wrap .sm-btn.sm-b-aktion:hover,  .sm-wrap .sm-btn.sm-b-aktion:focus  { background: #b84f0a !important; color: #fff !important; }
 .sm-punkt.sm-b-lesen   { background: #6dac20; }
 .sm-punkt.sm-b-technik { background: #546e7a; }
 .sm-punkt.sm-b-aktion  { background: #e0620d; }
@@ -703,18 +828,21 @@ if ($fe_frame) { LBWeb::lbheader('Ferien und Feiertage', 'https://wiki.loxberry.
 <div class="sm-wrap">
 
 <?php if ($fe_saved) { ?><div class="sm-alert sm-ok"><b><?php echo fer_t('TEXT.KONFIGURATION_GESPEICHERT'); ?></b> <?php echo fer_t('TEXT.INKL_SICHERUNGSKOPIE_FR_UPDATES_DI'); ?></div><?php } ?>
-<?php if ($fe_note !== '') { ?><div class="sm-alert sm-ok"><?= fe_e($fe_note) ?></div><?php } ?>
+<?php if ($fe_note !== '') { ?><div class="sm-alert <?= $fe_note_art === 'err' ? 'sm-err' : ($fe_note_art === 'warn' ? 'sm-warn' : 'sm-ok') ?>"><?= fe_e($fe_note) ?></div><?php } ?>
 <?php if ($fe_err !== '') { ?><div class="sm-alert sm-err"><b><?php echo fer_t('TEXT.FEHLER'); ?></b> <?= fe_e($fe_err) ?></div><?php } ?>
 <?php /* Beanstandungen: gesammelt, gelb, und NEBEN der gruenen Meldung.
    Das Speichern hat stattgefunden - nur einzelne Eingaben nicht so, wie sie
    dastanden. Wer das rot faerbt, laesst den Anwender glauben, es sei nichts
    gespeichert worden. */ ?>
-<?php if ($fe_fehler) { ?><div class="sm-alert sm-warn"><b><?php echo fer_t('TEXT.M_BEANSTANDUNG'); ?></b>
+<?php if ($fe_fehler) { ?><div class="sm-alert sm-warn"><b><?php echo fer_t($fe_saved ? 'TEXT.M_BEANSTANDUNG' : 'MELD.M_NICHT_GESPEICHERT'); ?></b>
 <ul style="margin:6px 0 0 18px;padding:0;"><?php foreach ($fe_fehler as $fe_m) { ?><li><?= fe_e($fe_m) ?></li><?php } ?></ul></div><?php } ?>
+<?php if ($fe_hinweise) { ?><div class="sm-alert sm-warn"><b><?php echo fer_t('MELD.M_HINWEIS'); ?></b>
+<ul style="margin:6px 0 0 18px;padding:0;"><?php foreach ($fe_hinweise as $fe_m) { ?><li><?= fe_e($fe_m) ?></li><?php } ?></ul></div><?php } ?>
 
 <?php if (!empty($fe_st)) { ?>
 <div class="sm-alert sm-info">
-<?php if ($fe_st['ok']) { ?>
+<?php if (!empty($fe_st['quelle_da'])) { ?>
+<?php if (empty($fe_st['ok'])) { ?><b><?php echo fer_t('MELD.OK0'); ?></b><br><?php } ?>
 <?php /* ACHTUNG: 'heute' und 'schulfrei' sind ARRAY-SCHLUESSEL aus fer_state(),
    keine Anzeigetexte. Bis 1.0.1 standen hier fer_t('TEXT.HEUTE_2') bzw.
    fer_t('TEXT.SCHULFREI') - offensichtlich durch einen Durchlauf entstanden,
@@ -754,7 +882,7 @@ if ($fe_frame) { LBWeb::lbheader('Ferien und Feiertage', 'https://wiki.loxberry.
     (int) $fe_st['urlaub']['rest']) ?>
 <?= !empty($fe_st['urlaub']['heim']) ? ' <b>' . fe_e(fer_t('T12.SB_HEIM')) . '</b>' : '' ?><br>
 <?php } ?>
-<span class="sm-small"><?php echo fer_t('TEXT.DATEN_REICHEN_BIS'); ?> <?= fe_e(fe_d($fe_st['reicht_bis'])) ?> <?php echo fer_t('TEXT.STAND'); ?> <?= fe_e(substr((string) $fe_st['stand'], 0, 10)) ?></span>
+<span class="sm-small"><?php echo fer_t('TEXT.DATEN_REICHEN_BIS'); ?> <?= fe_e(fe_d($fe_st['reicht_bis'])) ?> <?php echo fer_t('TEXT.STAND'); ?> <?= fe_e(substr((string) $fe_st['stand_ok'], 0, 10)) ?><?= !empty($fe_st['teilausfall']) ? ' &middot; ' . fe_e(sprintf(fer_t('MELD.TEILAUSFALL'), implode(', ', (array) $fe_st['teilausfall']))) : '' ?></span>
 <?php } else { ?>
 <b><?php echo fer_t('TEXT.NOCH_KEINE_DATEN_GELADEN'); ?></b> <?php echo fer_t('TEXT.BITTE_UNTEN_LAND_UND_BUNDESLAND_WH'); ?>
 <?php } ?>
@@ -787,6 +915,10 @@ if ($fe_frame) { LBWeb::lbheader('Ferien und Feiertage', 'https://wiki.loxberry.
 
 <!-- ================= <?php echo fer_t('TEXT.EINSTELLUNGEN'); ?> ================= -->
 <div class="sm-pane<?= fe_aktiv('tab-settings') ?>" id="tab-settings">
+<div class="sm-legende">
+<span><i class="sm-punkt sm-b-technik"></i> <?php echo fer_t('LEGENDE.TECHNIK'); ?></span>
+<span><i class="sm-punkt sm-b-aktion"></i> <?php echo fer_t('LEGENDE.AKTION'); ?></span>
+</div>
 <form action="index.php" method="post" autocomplete="off">
   <?php echo fer_fmt(); ?>
 <input data-role="none" type="hidden" name="save" value="1">
@@ -797,10 +929,9 @@ if ($fe_frame) { LBWeb::lbheader('Ferien und Feiertage', 'https://wiki.loxberry.
     <div>
         <label><?php echo fer_t('TEXT.LAND'); ?></label>
         <select data-role="none" name="country">
-<?php foreach (array('DE' => 'Deutschland', 'AT' => '&Ouml;sterreich', 'CH' => 'Schweiz', 'LU' => 'Luxemburg',
-                     'BE' => 'Belgien', 'NL' => 'Niederlande', 'FR' => 'Frankreich', 'IT' => 'Italien',
-                     'PL' => 'Polen', 'CZ' => 'Tschechien') as $fe_k => $fe_v) { ?>
-            <option value="<?= $fe_k ?>"<?= $fe_cfg['country'] === $fe_k ? ' selected' : '' ?>><?= $fe_v ?></option>
+<?php /* O5 (1.2.16): die Laendernamen aus der Sprachdatei. */
+foreach (fer_laender() as $fe_k) { ?>
+            <option value="<?= $fe_k ?>"<?= $fe_cfg['country'] === $fe_k ? ' selected' : '' ?>><?= fe_e(fer_t('LAND.' . $fe_k)) ?></option>
 <?php } ?>
         </select>
         <div class="sm-small"><?php echo fer_t('TEXT.NACH_DEM_WECHSEL_SPEICHERN_DANACH_'); ?></div>
@@ -810,6 +941,12 @@ if ($fe_frame) { LBWeb::lbheader('Ferien und Feiertage', 'https://wiki.loxberry.
 <?php if ($fe_subs) { ?>
         <select data-role="none" name="subdivision">
             <option value=""><?php echo fer_t('TEXT.GANZES_LAND_NUR_BUNDESWEITE_FEIERT'); ?></option>
+<?php /* O2 (1.2.16): eine gespeicherte Region, die nicht in der Liste steht,
+   bleibt waehlbar. Bis 1.2.15 wurde sie beim naechsten unveraenderten
+   Speichern still zu "Ganzes Land" - der Browser schickte die erste Zeile. */
+if (is_string($fe_cfg['subdivision']) && $fe_cfg['subdivision'] !== '' && !isset($fe_subs[$fe_cfg['subdivision']])) { ?>
+            <option value="<?= fe_e($fe_cfg['subdivision']) ?>" selected><?= fe_e($fe_cfg['subdivision']) ?> (<?php echo fer_t('MELD.NICHT_IN_LISTE'); ?>)</option>
+<?php } ?>
 <?php foreach ($fe_subs as $fe_code => $fe_name) { ?>
             <option value="<?= fe_e($fe_code) ?>"<?= $fe_cfg['subdivision'] === $fe_code ? ' selected' : '' ?>><?= fe_e($fe_name) ?> (<?= fe_e($fe_code) ?>)</option>
 <?php } ?>
@@ -837,6 +974,9 @@ if ($fe_frame) { LBWeb::lbheader('Ferien und Feiertage', 'https://wiki.loxberry.
 <?php if ($fe_subs) { ?>
         <select data-role="none" name="subdivision2">
             <option value=""><?php echo fer_t('T12.REGION2_AUS'); ?></option>
+<?php if (is_string($fe_cfg['subdivision2']) && $fe_cfg['subdivision2'] !== '' && !isset($fe_subs[$fe_cfg['subdivision2']])) { ?>
+            <option value="<?= fe_e($fe_cfg['subdivision2']) ?>" selected><?= fe_e($fe_cfg['subdivision2']) ?> (<?php echo fer_t('MELD.NICHT_IN_LISTE'); ?>)</option>
+<?php } ?>
 <?php foreach ($fe_subs as $fe_code => $fe_name) { ?>
             <option value="<?= fe_e($fe_code) ?>"<?= $fe_cfg['subdivision2'] === $fe_code ? ' selected' : '' ?>><?= fe_e($fe_name) ?> (<?= fe_e($fe_code) ?>)</option>
 <?php } ?>
@@ -846,7 +986,7 @@ if ($fe_frame) { LBWeb::lbheader('Ferien und Feiertage', 'https://wiki.loxberry.
 <?php } ?>
         <div class="sm-small"><?php echo fer_t('T12.REGION2_H'); ?></div>
     </div>
-<?php $fe_gruppen = function_exists('fer_gruppen') ? fer_gruppen($fe_cfg['country']) : array(); ?>
+<?php $fe_gruppen = function_exists('fer_gruppen') ? fer_gruppen($fe_land) : array(); ?>
 <?php if ($fe_gruppen) { ?>
     <div>
         <label><?php echo fer_t('T12.SCHULART'); ?></label>
@@ -895,7 +1035,7 @@ if ($fe_frame) { LBWeb::lbheader('Ferien und Feiertage', 'https://wiki.loxberry.
     <label style="display:inline-flex;align-items:center;gap:6px;">
         <input data-role="none" type="checkbox" name="bridge" <?= !empty($fe_cfg['bridge']) ? 'checked' : '' ?>> <?php echo fer_t('TEXT.BRCKENTAGE_ERKENNEN'); ?>
     </label>
-    <div class="sm-small"><?php echo fer_t('TEXT.AUCH_NUR_RTLICHE_FEIERTAGE_NIMMT'); ?> <b>alle</b> <?php echo fer_t('TEXT.ORTSGEBUNDENEN_FEIERTAGE_DER_REGIO'); ?> <b><?php echo fer_t('TEXT.BRCKENTAG'); ?></b> <?php echo fer_t('TEXT.IST_EIN_WERKTAG_ZWISCHEN_FEIERTAG_'); ?></div>
+    <div class="sm-small"><?php echo fer_t('TEXT.AUCH_NUR_RTLICHE_FEIERTAGE_NIMMT'); ?> <b><?php echo fer_t('MELD.ALLE'); ?></b> <?php echo fer_t('TEXT.ORTSGEBUNDENEN_FEIERTAGE_DER_REGIO'); ?> <b><?php echo fer_t('TEXT.BRCKENTAG'); ?></b> <?php echo fer_t('TEXT.IST_EIN_WERKTAG_ZWISCHEN_FEIERTAG_'); ?></div>
 </div>
 <div class="sm-alert sm-info" style="margin-top:10px;"><?php echo fer_t('TEXT.DATENQUELLE'); ?> <b><?php echo fer_t('TEXT.OPENHOLIDAYSAPI_ORG'); ?></b> <?php echo fer_t('TEXT.AMTLICHE_FERIEN_UND_FEIERTAGSDATEN'); ?></div>
 
@@ -971,7 +1111,7 @@ if ($fe_frame) { LBWeb::lbheader('Ferien und Feiertage', 'https://wiki.loxberry.
 <?php echo fer_t('TEXT.DAS_DATUM_BEZEICHNET_GANZE_TAGE_AB'); ?> <span class="sm-mono"><?php echo fer_t('TEXT.URLAUBENDE'); ?></span> <?php echo fer_t('TEXT.WIEDER_AUF_SCHRITT4D_EIN_VORZIEHEN'); ?></div>
 <div class="sm-breit">
 <table class="sm-tbl" style="width:100%;">
-<tr><th style="width:30%;"><?php echo fer_t('TEXT.BEZEICHNUNG'); ?></th><th style="width:20%;"><?php echo fer_t('TEXT.VON_JJJJ_MM_TT'); ?></th><th style="width:20%;">bis</th><th style="width:24%;">Art</th></tr>
+<tr><th style="width:30%;"><?php echo fer_t('TEXT.BEZEICHNUNG'); ?></th><th style="width:20%;"><?php echo fer_t('TEXT.VON_JJJJ_MM_TT'); ?></th><th style="width:20%;"><?php echo fer_t('MELD.SP_BIS'); ?></th><th style="width:24%;"><?php echo fer_t('MELD.SP_ART'); ?></th></tr>
 <?php for ($fe_i = 0; $fe_i < 6; $fe_i++) {
     $fe_o = isset($fe_cfg['own'][$fe_i]) ? (array) $fe_cfg['own'][$fe_i] : array();
     $fe_o += array('name' => '', 'von' => '', 'bis' => '', 'typ' => 'ferien'); ?>
@@ -1042,7 +1182,7 @@ if ($fe_frame) { LBWeb::lbheader('Ferien und Feiertage', 'https://wiki.loxberry.
     <div>
         <label><?php echo fer_t('TEXT.ZONEN'); ?></label>
         <input data-role="none" type="text" name="tts_zones" value="<?= fe_e($fe_tts['zones']) ?>" placeholder="z. B. 2,4,6">
-        <div class="sm-small"><?php echo fer_t('TEXT.ZONENNUMMERN_MIT_KOMMA_Z_B'); ?> <span class="sm-mono">2,4,6</span><?php echo fer_t('TEXT.DIE_LAUTSTRKE_KOMMT_AUS_DEM_FELD_D'); ?> <span class="sm-mono"><?php echo fer_t('TEXT.ZONE_LAUTSTRKE'); ?></span> <?php echo fer_t('TEXT.Z_B'); ?> <span class="sm-mono">2~25,4~40</span><?php echo fer_t('TEXT.LEERZEICHEN_NACH_DEM_KOMMA_SIND_ER'); ?> <span class="sm-mono">2,4,6</span> und <span class="sm-mono">2, 4, 6</span> <?php echo fer_t('TEXT.FUNKTIONIEREN_BEIDE'); ?></div>
+        <div class="sm-small"><?php echo fer_t('TEXT.ZONENNUMMERN_MIT_KOMMA_Z_B'); ?> <span class="sm-mono">2,4,6</span><?php echo fer_t('TEXT.DIE_LAUTSTRKE_KOMMT_AUS_DEM_FELD_D'); ?> <span class="sm-mono"><?php echo fer_t('TEXT.ZONE_LAUTSTRKE'); ?></span> <?php echo fer_t('TEXT.Z_B'); ?> <span class="sm-mono">2~25,4~40</span><?php echo fer_t('TEXT.LEERZEICHEN_NACH_DEM_KOMMA_SIND_ER'); ?> <span class="sm-mono">2,4,6</span> <?php echo fer_t('MELD.UND'); ?> <span class="sm-mono">2, 4, 6</span> <?php echo fer_t('TEXT.FUNKTIONIEREN_BEIDE'); ?></div>
     </div>
     <div>
         <label><?php echo fer_t('TEXT.LAUTSTRKE'); ?></label>
@@ -1062,19 +1202,22 @@ if ($fe_frame) { LBWeb::lbheader('Ferien und Feiertage', 'https://wiki.loxberry.
     <?php echo fer_t('TEXT.DER_ORIGINALE_LOXONE_AUDIOSERVER_B'); ?> <b><?php echo fer_t('TEXT.KEINE_HTTP_TTS_SCHNITTSTELLE'); ?></b><?php echo fer_t('TEXT.IN_DIESEM_MODUS_SPRICHT_DAS_PLUGIN'); ?> <span class="sm-mono">ANN=1</span>.
 </div>
 
-<button data-role="none" class="sm-btn" type="submit"><?php echo fer_t('TEXT.SPEICHERN'); ?></button>
+<button data-role="none" class="sm-btn sm-b-aktion" type="submit"><?php echo fer_t('TEXT.SPEICHERN'); ?></button>
 </form>
 <form action="index.php" method="post" style="margin-top:8px;">
   <?php echo fer_fmt(); ?>
     <input data-role="none" type="hidden" name="fetchnow" value="1">
     <input data-role="none" type="hidden" name="activetab" value="tab-settings">
-    <button data-role="none" class="sm-btn" type="submit" style="background:#607d8b;margin-top:0;"><?php echo fer_t('TEXT.JETZT_ABRUFEN'); ?></button>
+    <button data-role="none" class="sm-btn sm-b-technik" type="submit" style="margin-top:0;"><?php echo fer_t('TEXT.JETZT_ABRUFEN'); ?></button>
 </form>
 </div>
 
 <!-- ================= Einbindung in Loxone ================= -->
 <!-- ================= Reiter: MQTT (eigener Reiter seit 1.1.5, Hausstandard) ================= -->
 <div class="sm-pane<?= fe_aktiv('tab-mqtt') ?>" id="tab-mqtt">
+<div class="sm-legende">
+<span><i class="sm-punkt sm-b-aktion"></i> <?php echo fer_t('LEGENDE.AKTION'); ?></span>
+</div>
 <form action="index.php" method="post">
   <?php echo fer_fmt(); ?>
 <input data-role="none" type="hidden" name="mqtt_save" value="1">
@@ -1092,7 +1235,7 @@ if ($fe_frame) { LBWeb::lbheader('Ferien und Feiertage', 'https://wiki.loxberry.
     </div>
 </div>
 
-<button data-role="none" class="sm-btn" type="submit"><?php echo fer_t('TEXT.SPEICHERN'); ?></button>
+<button data-role="none" class="sm-btn sm-b-aktion" type="submit"><?php echo fer_t('TEXT.SPEICHERN'); ?></button>
 </form>
 
 <?php
@@ -1127,17 +1270,27 @@ $fe_praefix = trim((string) $fe_cfg['mqtt_topic']) !== '' ? trim((string) $fe_cf
 
 <h2><?php echo fer_t('T12.MQ_THEMEN'); ?></h2>
 <div class="sm-small" style="margin-bottom:6px;"><?= sprintf(fe_e(fer_t('T12.MQ_THEMEN_H')),
-    count(fer_felder()) + count(fer_mqtt_texte($fe_st))) ?></div>
+    count(fer_felder()) + count(fer_mqtt_texte($fe_st)) + count(fer_mqtt_lebenszeichen($fe_st))) ?>
+<?php echo fer_t('MELD.MQ_RETAIN_H'); ?></div>
+<?php /* M4 (1.2.16): Spalte "zurueckbehalten" (Entscheidung 3). Alle Themen
+   dieser Linie sind Tageswerte oder Dienstaussagen und gehen mit "publish"
+   hinaus (Entscheidung 3/8) - die Spalte steht trotzdem da, damit man es
+   nachlesen kann und ein spaeteres retained Thema hier auffaellt. */ ?>
 <table class="sm-tbl" style="width:100%;">
-<tr><th><?php echo fer_t('T12.MQ_THEMA'); ?></th><th><?php echo fer_t('T12.MQ_FELD'); ?></th><th><?php echo fer_t('TEXT.BEDEUTUNG'); ?></th></tr>
+<tr><th><?php echo fer_t('T12.MQ_THEMA'); ?></th><th><?php echo fer_t('T12.MQ_FELD'); ?></th><th><?php echo fer_t('TEXT.BEDEUTUNG'); ?></th><th><?php echo fer_t('MELD.MQ_RETAIN'); ?></th></tr>
 <?php foreach (fer_felder() as $fe_fn => $fe_fd) { ?>
 <tr><td><span class="sm-mono"><?= fe_e($fe_praefix . '/' . $fe_fd[5]) ?></span></td>
-<td><span class="sm-mono"><?= fe_e($fe_fn) ?></span></td><td><?= fe_e($fe_fd[4]) ?></td></tr>
+<td><span class="sm-mono"><?= fe_e($fe_fn) ?></span></td><td><?= fe_e($fe_fd[4]) ?></td><td><?php echo fer_t('MELD.NEIN'); ?></td></tr>
 <?php } ?>
 <?php foreach (fer_mqtt_texte($fe_st) as $fe_tt => $fe_tw) { ?>
 <tr><td><span class="sm-mono"><?= fe_e($fe_praefix . '/' . $fe_tt) ?></span></td>
 <td><span class="sm-small"><?php echo fer_t('T12.MQ_NUR_MQTT'); ?></span></td>
-<td><?php echo fer_t('T12.MQ_TEXTWERT'); ?> <span class="sm-mono"><?= fe_e($fe_tw) ?></span></td></tr>
+<td><?php echo fer_t('T12.MQ_TEXTWERT'); ?> <span class="sm-mono"><?= fe_e($fe_tw) ?></span></td><td><?php echo fer_t('MELD.NEIN'); ?></td></tr>
+<?php } ?>
+<?php foreach (fer_mqtt_lebenszeichen($fe_st) as $fe_tt => $fe_tw) { ?>
+<tr><td><span class="sm-mono"><?= fe_e($fe_praefix . '/' . $fe_tt) ?></span></td>
+<td><span class="sm-small"><?php echo fer_t('T12.MQ_NUR_MQTT'); ?></span></td>
+<td><?php echo fer_t($fe_tt === 'datum' ? 'MELD.MQ_DATUM' : 'MELD.MQ_TS'); ?></td><td><?php echo fer_t('MELD.NEIN'); ?></td></tr>
 <?php } ?>
 </table>
 </div>
@@ -1186,11 +1339,14 @@ $fe_praefix = trim((string) $fe_cfg['mqtt_topic']) !== '' ? trim((string) $fe_cf
 
 <h2><?php echo fer_t('TEXT.H_VORLAGE'); ?></h2>
 <div class="sm-hinweis"><?php echo fer_t('TEXT.H_VORLAGE_TEXT'); ?></div>
+<div class="sm-legende">
+<span><i class="sm-punkt sm-b-technik"></i> <?php echo fer_t('LEGENDE.TECHNIK'); ?></span>
+</div>
 <form action="index.php" method="post" style="margin-bottom:14px;">
   <?php echo fer_fmt(); ?>
   <input data-role="none" type="hidden" name="activetab" value="tab-loxone">
   <input data-role="none" type="hidden" name="vorlage" value="1">
-  <button data-role="none" class="sm-btn" type="submit" style="background:#546e7a;"><?php echo fer_t('TEXT.K_VORLAGE'); ?></button>
+  <button data-role="none" class="sm-btn sm-b-technik" type="submit"><?php echo fer_t('TEXT.K_VORLAGE'); ?></button>
 </form>
 
 <div class="sm-step"><b><?php echo fer_t('TEXT.SCHRITT_4_KOMPLETTE_BAUSTEIN_LISTE'); ?></b><br>
@@ -1307,7 +1463,7 @@ $fe_praefix = trim((string) $fe_cfg['mqtt_topic']) !== '' ? trim((string) $fe_cf
 if ($fe_tab === 'tab-test' && function_exists('fer_selbsttest')) {
     $fe_basis = 'http://' . (isset($_SERVER['HTTP_HOST']) ? $_SERVER['HTTP_HOST'] : 'localhost')
               . '/plugins/' . $fe_plugin;
-    $fe_pruef = fer_selbsttest($fe_basis);
+    $fe_pruef = fer_selbsttest($fe_basis, $fe_vor_heilung);
     $fe_bil = fer_selbsttest_bilanz($fe_pruef);
 ?>
 <div class="sm-alert <?= $fe_bil['schlecht'] ? 'sm-warn' : 'sm-ok' ?>">
@@ -1336,13 +1492,16 @@ if ($fe_tab === 'tab-test' && function_exists('fer_selbsttest')) {
 <h3 class="sm-h3"><?php echo fer_t('TEXT.TECHNISCHE_AUSKUNFT'); ?></h3>
 <div class="sm-knopfreihe">
 <a class="sm-btn sm-b-technik"  href="/plugins/<?= fe_e($fe_plugin) ?>/ferien.php?debug=1" target="_blank"><?php echo fer_t('TEXT.DEBUG_ALLE_TERMINE'); ?></a>
-<a class="sm-btn sm-b-technik"  href="/plugins/<?= fe_e($fe_plugin) ?>/ferien.php?refresh=1&amp;debug=1" target="_blank"><?php echo fer_t('TEXT.NEU_ABRUFEN_DEBUG'); ?></a>
 </div>
 
 <h3 class="sm-h3"><?php echo fer_t('TEXT.LST_ETWAS_AUS'); ?></h3>
 <div class="sm-knopfreihe">
 <a class="sm-btn sm-b-aktion"  href="/plugins/<?= fe_e($fe_plugin) ?>/ferien.php?say=1&amp;token=<?= fe_e($fe_cfg['aktionstoken']) ?>" target="_blank"><?php echo fer_t('TEXT.TEST_ANSAGE'); ?></a>
 <a class="sm-btn sm-b-aktion"  href="/plugins/<?= fe_e($fe_plugin) ?>/ferien.php?ptest=1&amp;token=<?= fe_e($fe_cfg['aktionstoken']) ?>" target="_blank"><?php echo fer_t('TEXT.TEST_PUSHNACHRICHT'); ?></a>
+<?php /* C6/O8 (1.2.16): ?refresh=1 fragt die Quelle und SCHREIBT termine.json
+   - also mit Token und in der Reihe "Loest etwas aus", nicht mehr grau unter
+   "Technische Auskunft". Hoechstens einmal je 5 Minuten. */ ?>
+<a class="sm-btn sm-b-aktion"  href="/plugins/<?= fe_e($fe_plugin) ?>/ferien.php?refresh=1&amp;debug=1&amp;token=<?= fe_e($fe_cfg['aktionstoken']) ?>" target="_blank"><?php echo fer_t('TEXT.NEU_ABRUFEN_DEBUG'); ?></a>
 </div>
 
 
@@ -1373,7 +1532,7 @@ if ($fe_tab === 'tab-test' && function_exists('fer_selbsttest')) {
     $fe_in = (int) floor(($fe_ts - strtotime(date('Y-m-d'))) / 86400);
     $fe_wt = (int) date('N', $fe_ts);
     $fe_erg = $fe_wt === 5 ? fer_t('TX.WE_DOSO') : ($fe_wt === 1 ? fer_t('TX.WE_SADI') : fer_t('TX.WE_VIER')); ?>
-<tr><td><?= fe_e(fe_d($fe_t)) ?></td><td><?= fe_e(date('D', $fe_ts)) ?></td>
+<tr><td><?= fe_e(fe_d($fe_t)) ?></td><td><?= fe_e(fe_wochentag($fe_ts)) ?></td>
 <td><?= $fe_in <= 0 ? fer_t('TX.HEUTE') : $fe_in ?></td><td><?= $fe_erg ?></td></tr>
 <?php } ?></table>
 <div class="sm-small" style="margin-top:8px;"><?php echo fer_t('TEXT.EIN_BRUECKENTAG_IST_EIN_WERKTAG_DE'); ?></div>
@@ -1447,7 +1606,7 @@ foreach ((array) $fe_d['feiertage'] as $fe_e2) {
     $fe_in = (int) floor((strtotime($fe_e2['von']) - strtotime($fe_heute)) / 86400);
     $fe_wt = (int) date('N', strtotime($fe_e2['von'])); ?>
 <tr><td><?= fe_e(fe_d($fe_e2['von'])) ?></td>
-<td><?= fe_e(date('D', strtotime($fe_e2['von']))) ?><?= ($fe_wt >= 6) ? ' <span class="sm-small">' . fer_t('TEXT.FLLT_AUFS_WOCHENENDE') . '</span>' : '' ?></td>
+<td><?= fe_e(fe_wochentag(strtotime($fe_e2['von']))) ?><?= ($fe_wt >= 6) ? ' <span class="sm-small">' . fer_t('TEXT.FLLT_AUFS_WOCHENENDE') . '</span>' : '' ?></td>
 <td><?= fe_e($fe_e2['name']) ?><?= !empty($fe_e2['eigen']) ? ' <span class="sm-small">' . fer_t('TEXT.EIGENER_TERMIN') . '</span>' : '' ?><?= !empty($fe_e2['ortlich']) ? ' <span class="sm-small">' . fer_t('TEXT.NUR_RTLICH') . '</span>' : '' ?><?php
     /* Art und Halbtag - die beiden Angaben, die die Datenquelle seit jeher
        mitliefert und die das Plugin bis 1.1.7 weggeworfen hat. Fuer DE/AT
@@ -1490,12 +1649,31 @@ foreach ((array) $fe_d['feiertage'] as $fe_e2) {
     <button data-role="none" class="sm-btn sm-b-aktion" type="submit"><?php echo fer_t('TEXT.PROTOKOLL_LEEREN'); ?></button>
 </form>
 </div>
+<?php /* I8 (1.2.16): die Fehlerausgabe des Cron (cron.err) - sobald etwas
+   darin steht. */
+$fe_cronerr = dirname($fe_logfile) . '/cron.err';
+if (is_file($fe_cronerr) && @filesize($fe_cronerr) > 0) { ?>
+<h3 class="sm-h3">cron.err</h3>
+<div class="sm-log"><?= fe_e(implode("\n", array_slice(file($fe_cronerr, FILE_IGNORE_NEW_LINES) ?: array(), -100))) ?></div>
+<?php } ?>
+<?php /* O9 (1.2.16): Hinweis auf die Ramdisk und die Liste der LoxBerry-
+   Logdateien (Regeln/04, Reiter Logdateien). */ ?>
+<div class="sm-hinweis"><?php echo fer_t('MELD.LOG_RAMDISK'); ?></div>
+<?php
+if (class_exists('LBWeb', false) && method_exists('LBWeb', 'loglist_html')) {
+    echo LBWeb::loglist_html();
+}
+?>
 </div>
 
 
 <h2><?= fer_t('TEXT.H_SICHERUNG') ?></h2>
 <div class="sm-hinweis"><?= fer_t('TEXT.SICH_ERKLAERUNG') ?></div>
 <div class="sm-warnung"><?= fer_t('TEXT.SICH_WARNUNG') ?></div>
+<div class="sm-legende">
+<span><i class="sm-punkt sm-b-lesen"></i> <?php echo fer_t('LEGENDE.LESEN'); ?></span>
+<span><i class="sm-punkt sm-b-aktion"></i> <?php echo fer_t('LEGENDE.AKTION'); ?></span>
+</div>
 <div class="sm-knopfreihe">
   <!-- ZWEI GETRENNTE Formulare. Das Sichern schickt einen Download und ruft
        exit auf; das Zurueckspielen braucht enctype="multipart/form-data".
