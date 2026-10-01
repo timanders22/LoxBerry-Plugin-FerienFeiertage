@@ -236,17 +236,18 @@ function fe_x2_felder($form)
         $f = array('country', 'subdivision', 'lang', 'subdivision2', 'group', 'locality', 'bridge_mode',
                    'bridge_luecke', 'urlaub_vorlauf', 'ics_url', 'ics_typ', 'ics_filter', 'notify_time',
                    'tts_mode', 'tts_ip', 'tts_port', 'tts_zones', 'tts_volume', 'tts_lang', 'tts_template',
-                   'tts_alexa_geraet', 'tts_alexa_laut');      // Ansage-2
+                   'tts_alexa_geraet', 'tts_alexa_laut',       // Ansage-2
+                   'tts_google_geraet', 'tts_google_laut');    // Ansage-3
         for ($i = 0; $i < 6; $i++) {
             foreach (array('own_name', 'own_von', 'own_bis', 'own_typ') as $o) { $f[] = $o . '.' . $i; }
         }
         $h = array('school', 'public', 'local_holidays', 'bridge', 'typ_streng', 'halbtag_frei',
                    'notify_audio', 'notify_push', 'n_freetag', 'n_ferienstart', 'n_bridge',
-                   'tts_alexa_token_loeschen');
+                   'tts_alexa_token_loeschen', 'tts_google_token_loeschen');
         /* Ansage-2: das Sprechtoken ist ein Geheimnisfeld - es kann als
          * beanstandet MARKIERT werden, sein Wert reist nie mit (weder
          * fe_x2_sammeln() noch fe_x2_pruefen() nehmen ihn an). */
-        return array($f, $h, array('tts_alexa_token'));
+        return array($f, $h, array('tts_alexa_token', 'tts_google_token'));
     }
     if ($form === 'mqtt_save') {
         return array(array('mqtt_topic'), array('mqtt_enabled'));
@@ -454,6 +455,22 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['quellprobe']) && func
     $fe_tab = 'tab-test';
 }
 
+/* Ansage-3: Testansage ueber Google-Lautsprecher (Chromecast 4 Lox NG) mit den
+ * GESPEICHERTEN Werten (Geraet, Lautstaerke, Sprechtoken) - derselbe Weg
+ * fer_google_sprechen() wie die Vorabend-Ansage. Die Antwortzeile (HTTP-Code und
+ * GRUND, nie Token oder Text) steht danach als Meldung im Reiter Test. POST -
+ * Umleitung - GET wie alle Handler: F5 loest nichts erneut aus. */
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['google_test']) && function_exists('fer_google_sprechen')) {
+    $fe_gok = fer_google_sprechen(fer_t('GOOGLE.TESTTEXT'));
+    $fe_gl = fer_alexa_letzte('google_letzte.json');
+    $fe_note_art = $fe_gok ? 'ok' : 'err';
+    $fe_note = $fe_gok
+        ? sprintf(fer_t('GOOGLE.M_TEST_OK'), $fe_gl !== null ? 'HTTP 200 ' . $fe_gl['zeile'] : '-')
+        : sprintf(fer_t('GOOGLE.M_TEST_FEHL'),
+            $fe_gl !== null ? fer_google_testtext($fe_gl['code'], $fe_gl['zeile'], $fe_gl['art'], 10) : '-');
+    $fe_tab = 'tab-test';
+}
+
 // ---------- MQTT speichern (eigener Reiter seit 1.1.5, Hausstandard) ----------
 // NICHT den save-Handler mitbenutzen: der setzt Haken per isset() und wuerde
 // beim Absenden des MQTT-Formulars die Einstellungs-Haken auf 0 stellen.
@@ -649,7 +666,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['save'])) {
     $fe_tts_alt = (isset($fe_vorher['tts']) && is_array($fe_vorher['tts'])) ? $fe_vorher['tts'] : array();
     $fe_tts_alt += array('mode' => 'musicserver', 'ip' => '', 'port' => 7091, 'zones' => '1', 'volume' => 8,
                          'lang' => 'de', 'template' => '',
-                         'alexa_geraet' => '', 'alexa_token' => '', 'alexa_laut' => -1);
+                         'alexa_geraet' => '', 'alexa_token' => '', 'alexa_laut' => -1,
+                         'google_geraet' => '', 'google_token' => '', 'google_laut' => -1);
     $fe_new['tts'] = array(
         'mode' => $fe_pruef('tts.mode', $fe_post('tts_mode', 'musicserver'), $fe_tts_alt['mode'], fer_t('TEXT.AUDIO_AUSGABE')),
         'ip' => $fe_pruef('tts.ip', $fe_post('tts_ip', ''), $fe_tts_alt['ip'], fer_t('TEXT.IP_DES_AUDIO_SERVERS')),
@@ -702,6 +720,51 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['save'])) {
         && !in_array('tts_alexa_token', $fe_x2bean, true)) {
         $fe_fehler[] = fer_t('ALEXA.M_TOKEN_FEHLT');
         $fe_x2bean[] = 'tts_alexa_token';
+    }
+    /* Ansage-3: Ausgabeart Google-Lautsprecher (Chromecast 4 Lox NG, ab Werk
+     * nicht gewaehlt). Dieselben Regeln wie beim Alexa-NG-Block darueber: benannt
+     * abweisen, nie zurechtbiegen (Nr. 16/19), Feld markiert, Eingabe zurueck
+     * (X-2); das Sprechtoken ist ein Kennwort (leer = behalten, Haken = loeschen,
+     * reist nie zurueck, steht in keiner Meldung). Ein eigenes Token, nicht das
+     * von Alexa-NG. */
+    $fe_new['tts']['google_geraet'] = $fe_pruef('tts.google_geraet', $fe_post('tts_google_geraet', ''),
+        $fe_tts_alt['google_geraet'], fer_t('GOOGLE.L_GERAET'));
+    $fe_glr = $fe_post('tts_google_laut', '');
+    if (is_string($fe_glr) && trim($fe_glr) === '') {
+        $fe_new['tts']['google_laut'] = -1;       // leer = Ansagelautstaerke des Chromecast-Plugins
+    } else {
+        list($fe_glok, $fe_glw, $fe_glg) = fer_wert_pruefen('tts.google_laut', $fe_glr);
+        if ($fe_glok) {
+            $fe_new['tts']['google_laut'] = $fe_glw;
+        } else {
+            $fe_fehler[] = sprintf(fer_t('MELD.ABGEWIESEN'), fer_t('GOOGLE.L_LAUT'), $fe_glg,
+                (is_int($fe_tts_alt['google_laut']) && $fe_tts_alt['google_laut'] >= 0)
+                    ? (string) $fe_tts_alt['google_laut'] : fer_t('GOOGLE.LAUT_LEER'));
+            $fe_x2bean[] = 'tts_google_laut';
+            $fe_new['tts']['google_laut'] = $fe_tts_alt['google_laut'];
+        }
+    }
+    $fe_new['tts']['google_token'] = is_string($fe_tts_alt['google_token']) ? $fe_tts_alt['google_token'] : '';
+    if (isset($_POST['tts_google_token_loeschen'])) {
+        $fe_new['tts']['google_token'] = '';
+    } else {
+        $fe_gtr = $fe_post('tts_google_token', '');
+        if (is_string($fe_gtr)) { $fe_gtr = trim($fe_gtr); }
+        if ($fe_gtr !== '') {
+            list($fe_gtok, $fe_gtw) = fer_wert_pruefen('tts.google_token', $fe_gtr);
+            if ($fe_gtok) {
+                $fe_new['tts']['google_token'] = $fe_gtw;
+            } else {
+                // Die Meldung nennt nur die Art des Fehlers, nie den Wert.
+                $fe_fehler[] = fer_t(is_string($fe_gtr) ? 'GOOGLE.M_TOKEN_FORM' : 'GOOGLE.M_TOKEN_TYP');
+                $fe_x2bean[] = 'tts_google_token';
+            }
+        }
+    }
+    if ($fe_new['tts']['mode'] === 'cc4lox' && !fer_alexa_token_ok($fe_new['tts']['google_token'])
+        && !in_array('tts_google_token', $fe_x2bean, true)) {
+        $fe_fehler[] = fer_t('GOOGLE.M_TOKEN_FEHLT');
+        $fe_x2bean[] = 'tts_google_token';
     }
     /* C8 (1.2.16): ueber fer_config_speichern() - Nebendatei, 0600,
      * Laengenvergleich, rename. */
@@ -834,7 +897,8 @@ $fe_notify = is_array($fe_cfg['notify']) ? $fe_cfg['notify'] : array();
 $fe_notify += array('audio' => 0, 'push' => 0, 'time' => '19:00', 'freetag' => 1, 'ferienstart' => 1, 'bridge_month' => 1);
 $fe_tts = is_array($fe_cfg['tts']) ? $fe_cfg['tts'] : array();
 $fe_tts += array('mode' => 'musicserver', 'ip' => '', 'port' => 7091, 'zones' => '1', 'volume' => 8, 'lang' => 'de', 'template' => '',
-                 'alexa_geraet' => '', 'alexa_token' => '', 'alexa_laut' => -1);
+                 'alexa_geraet' => '', 'alexa_token' => '', 'alexa_laut' => -1,
+                 'google_geraet' => '', 'google_token' => '', 'google_laut' => -1);
 $fe_st = function_exists('fer_state') ? fer_state() : array();
 /* Was die Aussieb-Einstellungen auf DIESER Anlage betreffen wuerden - nicht
  * "koennte etwas aendern", sondern eine Zahl. Gelesen wird die rohe
@@ -873,6 +937,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['fer_sichern'])) {
     /* Ansage-2: das Alexa-NG-Sprechtoken wird wie ein Kennwort behandelt und
      * geht NICHT mit; das Zurueckspielen behaelt das geltende. */
     if (isset($fer_voll['tts']) && is_array($fer_voll['tts'])) { unset($fer_voll['tts']['alexa_token']); }
+    // Ansage-3: ebenso das Sprechtoken fuer Google-Lautsprecher.
+    if (isset($fer_voll['tts']) && is_array($fer_voll['tts'])) { unset($fer_voll['tts']['google_token']); }
     $fer_altw = fer_rueckspiel_altwerte($fer_voll);
     if ($fer_altw) {
         $fer_voll = array('_warnung' => sprintf(fer_t('SICHWARN.KOPF'), implode(', ', $fer_altw))) + $fer_voll;
@@ -1001,7 +1067,8 @@ if (is_array($fe_x2)) {
                        'n_ferienstart' => 'ferienstart', 'n_bridge' => 'bridge_month') as $fe_xk => $fe_xz) {
             if (isset($fe_xw[$fe_xk])) { $fe_nanz[$fe_xz] = (int) $fe_xw[$fe_xk]; }
         }
-        foreach (array('mode', 'ip', 'port', 'zones', 'volume', 'lang', 'template', 'alexa_geraet', 'alexa_laut') as $fe_xz) {
+        foreach (array('mode', 'ip', 'port', 'zones', 'volume', 'lang', 'template', 'alexa_geraet', 'alexa_laut',
+                       'google_geraet', 'google_laut') as $fe_xz) {
             if (isset($fe_xw['tts_' . $fe_xz])) { $fe_tanz[$fe_xz] = $fe_xw['tts_' . $fe_xz]; }
         }
         $fe_anz['own'] = array();
@@ -1453,6 +1520,7 @@ if (is_string($fe_anz['subdivision']) && $fe_anz['subdivision'] !== '' && !isset
             <option value="audioserver"<?= $fe_tanz['mode'] === 'audioserver' ? ' selected' : '' ?>><?php echo fer_t('TEXT.ORIGINAL_LOXONE_AUDIOSERVER_VIA_LO'); ?></option>
             <option value="custom"<?= $fe_tanz['mode'] === 'custom' ? ' selected' : '' ?>><?php echo fer_t('TEXT.EIGENE_URL_VORLAGE'); ?></option>
             <option value="alexang"<?= $fe_tanz['mode'] === 'alexang' ? ' selected' : '' ?>><?php echo fer_t('ALEXA.MODUS'); ?></option>
+            <option value="cc4lox"<?= $fe_tanz['mode'] === 'cc4lox' ? ' selected' : '' ?>><?php echo fer_t('GOOGLE.MODUS'); ?></option>
         </select>
     </div>
     <div>
@@ -1515,6 +1583,38 @@ $fe_aweg = is_array($fe_x2) && isset($fe_x2['werte']['tts_alexa_token_loeschen']
             <input data-role="none" type="checkbox" name="tts_alexa_token_loeschen" value="1"<?= $fe_aweg ? ' checked' : '' ?>> <?php echo fer_t('ALEXA.L_TOKEN_LOESCHEN'); ?>
         </label>
         <div class="sm-small"><?php echo fer_t('ALEXA.H_TOKEN'); ?></div>
+    </div>
+</div>
+</div>
+<?php /* Ansage-3: Ausgabeart Google-Lautsprecher (Chromecast 4 Lox NG, ab Werk
+   nicht gewaehlt). Das Sprechtoken reist NIE in die Seite: das Feld ist immer
+   leer (Kennwortfeld), der Platzhalter sagt nur, ob eines gespeichert ist und
+   wie lang es ist. */
+$fe_gtok_n = strlen(is_string($fe_tts['google_token']) ? $fe_tts['google_token'] : '');
+$fe_glaut_anz = (is_array($fe_x2) && array_key_exists('tts_google_laut', $fe_x2['werte']))
+    ? (string) $fe_x2['werte']['tts_google_laut']
+    : ((is_int($fe_tanz['google_laut']) && $fe_tanz['google_laut'] >= 0) ? (string) $fe_tanz['google_laut'] : '');
+$fe_gweg = is_array($fe_x2) && isset($fe_x2['werte']['tts_google_token_loeschen']) && $fe_x2['werte']['tts_google_token_loeschen'] === '1'; ?>
+<div id="tts_google_rows">
+<div class="sm-small"><?php echo fer_t('GOOGLE.ERKL'); ?></div>
+<div class="sm-row">
+    <div>
+        <label for="tts_google_geraet"><?php echo fer_t('GOOGLE.L_GERAET'); ?></label>
+        <input data-role="none" type="text" id="tts_google_geraet" name="tts_google_geraet"<?= fe_x2m('tts_google_geraet') ?> value="<?= fe_e($fe_tanz['google_geraet']) ?>" placeholder="Wohnzimmer">
+        <div class="sm-small"><?php echo fer_t('GOOGLE.H_GERAET'); ?></div>
+    </div>
+    <div>
+        <label for="tts_google_laut"><?php echo fer_t('GOOGLE.L_LAUT'); ?></label>
+        <input data-role="none" type="<?= fe_x2typ('tts_google_laut') ?>" id="tts_google_laut" name="tts_google_laut"<?= fe_x2m('tts_google_laut') ?> value="<?= fe_e($fe_glaut_anz) ?>" min="0" max="100" placeholder="<?= fe_e(fer_t('GOOGLE.P_LAUT')) ?>">
+        <div class="sm-small"><?php echo fer_t('GOOGLE.H_LAUT'); ?></div>
+    </div>
+    <div>
+        <label for="tts_google_token"><?php echo fer_t('GOOGLE.L_TOKEN'); ?></label>
+        <input data-role="none" type="password" id="tts_google_token" name="tts_google_token"<?= fe_x2m('tts_google_token') ?> value="" autocomplete="new-password" placeholder="<?= fe_e($fe_gtok_n > 0 ? sprintf(fer_t('GOOGLE.P_TOKEN_DA'), $fe_gtok_n) : fer_t('GOOGLE.P_TOKEN_LEER')) ?>">
+        <label style="display:inline-flex;align-items:center;gap:6px;font-weight:600;margin-top:4px;">
+            <input data-role="none" type="checkbox" name="tts_google_token_loeschen" value="1"<?= $fe_gweg ? ' checked' : '' ?>> <?php echo fer_t('GOOGLE.L_TOKEN_LOESCHEN'); ?>
+        </label>
+        <div class="sm-small"><?php echo fer_t('GOOGLE.H_TOKEN'); ?></div>
     </div>
 </div>
 </div>
@@ -1893,6 +1993,17 @@ if ($fe_qp === null) { ?>
 <h3 class="sm-h3"><?php echo fer_t('TEXT.LST_ETWAS_AUS'); ?></h3>
 <div class="sm-knopfreihe">
 <a class="sm-btn sm-b-aktion"  href="/plugins/<?= fe_e($fe_plugin) ?>/ferien.php?say=1&amp;token=<?= fe_e($fe_cfg['aktionstoken']) ?>" target="_blank"><?php echo fer_t('TEXT.TEST_ANSAGE'); ?></a>
+<?php /* Ansage-3: Testansage ueber Google-Lautsprecher - POST mit Formularmerkmal,
+   die Antwortzeile steht danach oben als Meldung. Zu sehen, sobald die Ausgabeart
+   gewaehlt oder ein Sprechtoken dafuer gespeichert ist. */
+if ($fe_tts['mode'] === 'cc4lox' || (is_string($fe_tts['google_token']) && $fe_tts['google_token'] !== '')) { ?>
+<form action="index.php" method="post" style="display:inline;">
+  <?php echo fer_fmt(); ?>
+    <input data-role="none" type="hidden" name="google_test" value="1">
+    <input data-role="none" type="hidden" name="activetab" value="tab-test">
+    <button data-role="none" class="sm-btn sm-b-aktion" type="submit" style="margin-top:0;"><?php echo fer_t('GOOGLE.KNOPF_TEST'); ?></button>
+</form>
+<?php } ?>
 <a class="sm-btn sm-b-aktion"  href="/plugins/<?= fe_e($fe_plugin) ?>/ferien.php?ptest=1&amp;token=<?= fe_e($fe_cfg['aktionstoken']) ?>" target="_blank"><?php echo fer_t('TEXT.TEST_PUSHNACHRICHT'); ?></a>
 <?php /* C6/O8 (1.2.16): ?refresh=1 fragt die Quelle und SCHREIBT termine.json
    - also mit Token und in der Reihe "Loest etwas aus", nicht mehr grau unter
@@ -2103,6 +2214,8 @@ function feTtsMode() {
     document.getElementById('tts_template_row').style.display = (m === 'ms4h' || m === 'custom') ? 'block' : 'none';
     var al = document.getElementById('tts_alexa_rows');    // Ansage-2
     if (al) { al.style.display = (m === 'alexang') ? 'block' : 'none'; }
+    var gl = document.getElementById('tts_google_rows');   // Ansage-3
+    if (gl) { gl.style.display = (m === 'cc4lox') ? 'block' : 'none'; }
     var port = document.getElementsByName('tts_port')[0];
     if (m === 'musicserver' && (!port.value || port.value === '80')) { port.value = 7091; }
 }

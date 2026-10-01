@@ -188,6 +188,15 @@ if (isset($_GET['say'])) {
         $l = fer_alexa_letzte();
         $zus = ';CODE=' . ($l !== null ? (int) $l['code'] : 0) . ';GRUND=' . fer_alexa_grund_kurz($l);
     }
+    /* Ansage-3: bei Google-Lautsprecher nennt die Zeile immer HTTP-Code und GRUND
+     * (UNVERAENDERT, TEXT_NULL, Fehler); statt des Ansagetexts nur seine Laenge
+     * (wie im Protokoll). Die anderen Ausgabearten antworten wie bisher. */
+    if ($cfg_s['tts']['mode'] === 'cc4lox') {
+        $l = fer_alexa_letzte('google_letzte.json');
+        echo 'SAY;OK=' . ($ok ? 1 : 0) . ';CODE=' . ($l !== null ? (int) $l['code'] : 0)
+            . ';GRUND=' . fer_google_grund_kurz($l) . ';TEXTLAENGE=' . fer_google_textlaenge($text) . "\n";
+        exit;
+    }
     echo 'SAY;OK=' . ($ok ? 1 : 0) . $zus . ";TEXT=$text\n";
     exit;
 }

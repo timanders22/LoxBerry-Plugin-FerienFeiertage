@@ -10,6 +10,33 @@ Bundesländern/Kantonen.
 
 Kompatibel mit LoxBerry 3.x und **LoxBerry 4** (reines PHP, PHP 7.4 und 8.x).
 
+## Neu in 1.2.19
+
+Ansage-3: Ausgabe über Google-Lautsprecher. Gemessen an Attrappen unter PHP 7.4 und 8.5 sowie gegen den echten Sprech-Endpunkt von Chromecast 4 Lox NG 1.3.15 (Dienst-Attrappe); die Ausgabe über Alexa NG und Music Server misst vorher = nachher gleich. Nicht am Gerät, nicht an echten Lautsprechern.
+
+* **Neue Ausgabeart „Google-Lautsprecher (Chromecast 4 Lox NG)“** für die Vorabend-Ansage, ab Werk
+  nicht gewählt. Chromecast-, Nest- und Google-Home-Lautsprecher sprechen über das Plugin
+  [Chromecast 4 Lox NG](https://github.com/timanders22/LoxBerry-Plugin-Chromecast4lox) **ab Fassung 1.3.15**.
+* Einrichtung dort: Reiter Einstellungen, Abschnitt „Sprachausgabe für andere Plugins“, Haken setzen und
+  ein Sprechtoken festlegen. Hier: Lautsprecher (leer = Standardgerät des Chromecast-Plugins), Lautstärke
+  (leer = dessen Ansagelautstärke) und dieses Sprechtoken.
+* Eigenes Sprechtoken, getrennt vom Alexa-NG-Token, wie ein Kennwort behandelt: nie angezeigt, nie in Adresse
+  oder Protokoll, nicht in „Einstellungen sichern“. Leer lassen behält es, ein Haken löscht es. Eine Sicherung
+  mit Token wird beim Zurückspielen abgewiesen.
+* Bei dieser Ausgabeart steht auch der Ansagetext weder im Protokoll noch in der Antwort von `?say=1`, nur
+  seine Länge (`SAY;OK=…;CODE=…;GRUND=…;TEXTLAENGE=…`).
+* „Gesendet“ heißt: der Dienst des Chromecast-Plugins hat die Ansage bei den verbundenen Lautsprechern
+  eingereiht. Fällt der Endpunkt aus (Token falsch, Sprachausgabe dort aus, Dienst läuft nicht, Lautsprecher
+  nicht verbunden, unbekannter Name, keine Antwort in 10 s), entfällt die Ansage, ohne Wechsel auf einen
+  anderen Lautsprecher. Protokoll, Reiter Test (eigene Zeile) und `?say=1` nennen HTTP-Code und Grund;
+  „404 ohne GRUND“ heißt: Chromecast 4 Lox NG fehlt oder ist älter als 1.3.15.
+* Neuer Knopf „Testansage über Google-Lautsprecher“ im Reiter Test; die Antwortzeile steht danach oben,
+  Neuladen der Seite löst nichts erneut aus.
+* Ungültige Eingaben (Token zu kurz, Lautstärke außerhalb 0–100, Name mit Steuerzeichen oder über 200
+  Zeichen, Ausgabeart ohne Token) werden beanstandet; es wird dann nichts gespeichert.
+* Hinweis: Eine mit dieser Fassung erstellte Sicherung lässt sich in 1.2.18 und älter nicht zurückspielen
+  (unbekannte Felder `tts.google_geraet`, `tts.google_laut`).
+
 ## Neu in 1.2.18
 
 Ansage-2 aus der Verbesserungsliste (`Pruefung-Durchgang-2026-09-29/VERBESSERUNGEN_OFFEN.md`).
@@ -249,6 +276,21 @@ Nicht am Gerät gemessen.
   aus (Token falsch, nicht bei Amazon angemeldet, keine Antwort in 10 s),
   entfällt die Ansage; Protokoll, Reiter Test und `?say=1` nennen HTTP-Code
   und `GRUND`
+- **Ansage über Google-Lautsprecher** (Ausgabeart „Google-Lautsprecher
+  (Chromecast 4 Lox NG)“, ab Werk nicht gewählt): Chromecast-, Nest- und
+  Google-Home-Lautsprecher sprechen die Vorabend-Ansage über das Plugin
+  [Chromecast 4 Lox NG](https://github.com/timanders22/LoxBerry-Plugin-Chromecast4lox)
+  ab Fassung 1.3.15. Dort im Reiter Einstellungen, Abschnitt „Sprachausgabe
+  für andere Plugins“, den Haken setzen und ein Sprechtoken festlegen. Hier
+  werden Lautsprecher (leer = Standardgerät des Chromecast-Plugins),
+  Lautstärke (leer = dessen Ansagelautstärke) und dieses eigene Sprechtoken
+  eingetragen. Die Ansage geht per POST an
+  `http://127.0.0.1:<Webport>/plugins/chromecast-4lox-ng/index.php`; „gesendet“
+  heißt: dort bei den verbundenen Lautsprechern eingereiht. Fällt der Endpunkt
+  aus, entfällt die Ansage, ohne Wechsel auf einen anderen Lautsprecher;
+  Protokoll, Reiter Test, der Knopf „Testansage über Google-Lautsprecher“ und
+  `?say=1` nennen HTTP-Code und `GRUND` (404 ohne GRUND: Chromecast 4 Lox NG
+  fehlt oder ist zu alt)
 - **MQTT** über das LoxBerry MQTT Gateway, **JSON** für Drittsoftware. Beide
   Wege tragen dieselben Werte, weil sie aus einer einzigen Feldliste entstehen
 - **Selbstprüfung** im Reiter Test: beantwortet ohne Loxone, ob die Einrichtung
@@ -268,7 +310,7 @@ Nicht am Gerät gemessen.
 | `/plugins/ferien/ferien.php?debug=1` | Ferien-, Feiertags- und Brückentagsliste im Klartext |
 | `/plugins/ferien/ferien.php?refresh=1&token=…` | Daten sofort neu abrufen **(Token nötig, höchstens einmal je 5 min)** |
 | `/plugins/ferien/ferien.php?json=1` | kompletter Zustand als JSON |
-| `/plugins/ferien/ferien.php?say=1&token=…` | Test-Ansage **(Token nötig)**; mit Alexa-NG im Fehlerfall `SAY;OK=0;CODE=…;GRUND=…` |
+| `/plugins/ferien/ferien.php?say=1&token=…` | Test-Ansage **(Token nötig)**; mit Alexa-NG im Fehlerfall `SAY;OK=0;CODE=…;GRUND=…`; mit Google-Lautsprecher immer `SAY;OK=…;CODE=…;GRUND=…;TEXTLAENGE=…` (ohne den Text) |
 | `/plugins/ferien/ferien.php?ptest=1&token=…` | Test-Pushnachricht auslösen **(Token nötig)** |
 | `/plugins/ferien/ferien.php?selftest=1&token=…` | nur prüfen, ob das Token stimmt — löst nichts aus |
 
@@ -289,6 +331,12 @@ demselben LoxBerry (127.0.0.1), nie in einer Adresse. Es wird nie angezeigt
 protokolliert und steht nicht in der Sicherungsdatei. Leer lassen behält es,
 ein Haken löscht es. Beim Zurückspielen einer Sicherung bleibt das
 gespeicherte; eine Datei mit Sprechtoken wird abgewiesen.
+
+Dasselbe gilt für das **Sprechtoken für Chromecast 4 Lox NG** (nur mit der
+Ausgabeart Google-Lautsprecher). Es ist ein eigenes, nicht das von Alexa-NG,
+und geht nur im Körper einer POST-Anfrage an Chromecast 4 Lox NG auf demselben
+LoxBerry (127.0.0.1). Mit dieser Ausgabeart steht auch der Ansagetext weder
+im Protokoll noch in der Antwort von `?say=1`, nur seine Länge.
 
 ## Fassung 1.2.9 — der Stat-Zwischenspeicher
 Die Protokollkappung (512 000 Byte) stand in

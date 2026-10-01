@@ -366,7 +366,10 @@ function fer_config() {
                          'zones' => '1', 'volume' => 8, 'lang' => 'de', 'template' => '',
                          // Ansage-2: Alexa-NG (ab Werk nicht gewaehlt). Das Sprechtoken
                          // ist ein Geheimnis: nie im Formular, nicht in der Sicherung.
-                         'alexa_geraet' => '', 'alexa_token' => '', 'alexa_laut' => -1);
+                         'alexa_geraet' => '', 'alexa_token' => '', 'alexa_laut' => -1,
+                         // Ansage-3: Google-Lautsprecher ueber Chromecast 4 Lox NG (ab Werk
+                         // nicht gewaehlt). Eigenes Sprechtoken, Regeln wie beim Alexa-NG-Token.
+                         'google_geraet' => '', 'google_token' => '', 'google_laut' => -1);
     return $cfg;
 }
 
@@ -1907,6 +1910,10 @@ function fer_say($text) {
     if (isset($cfg_a['tts']['mode']) && $cfg_a['tts']['mode'] === 'alexang') {
         return fer_alexa_sprechen($text);
     }
+    /* Ansage-3: Google-Lautsprecher - dieselbe Schnittstelle, eigene Adresse und eigenes Token. */
+    if (isset($cfg_a['tts']['mode']) && $cfg_a['tts']['mode'] === 'cc4lox') {
+        return fer_google_sprechen($text);
+    }
     $url = fer_tts_url($text);
     if ($url === null) {
         fer_log('Ansage: Modus "Original Loxone Audioserver" - Ausgabe erfolgt ueber Loxone Config');
@@ -1969,8 +1976,10 @@ function fer_alexa_token_ok($t) {
  * stream_get_meta_data(), nicht aus $http_response_header (PHP 8.5). Die
  * Antwortzeile wird um ein etwa darin stehendes Token bereinigt und auf
  * harmlose Zeichen gekuerzt, bevor sie irgendwo hingeht.
+ * Ansage-3: $adresse = ein anderer Endpunkt derselben Schnittstelle
+ * (fer_google_adresse()); ohne Angabe Alexa-NG wie bisher.
  */
-function fer_alexa_rufen(array $felder, $tmo) {
+function fer_alexa_rufen(array $felder, $tmo, $adresse = null) {
     $ctx = stream_context_create(array('http' => array(
         'method' => 'POST',
         'header' => "Content-Type: application/x-www-form-urlencoded\r\nConnection: close\r\n",
@@ -1979,7 +1988,7 @@ function fer_alexa_rufen(array $felder, $tmo) {
         'ignore_errors' => true, 'follow_location' => 0,
     )));
     $t0 = microtime(true);
-    $fh = @fopen(fer_alexa_adresse(), 'r', false, $ctx);
+    $fh = @fopen($adresse === null ? fer_alexa_adresse() : (string) $adresse, 'r', false, $ctx);
     if ($fh === false) {
         return array(0, '', (microtime(true) - $t0) >= $tmo - 0.5 ? 'zeit' : 'verbindung');
     }
@@ -2027,16 +2036,16 @@ function fer_alexa_testtext($code, $zeile, $art, $tmo) {
 }
 
 /** Das Ergebnis der letzten Ansage ablegen (Zwischenordner, 0600) - nie Token oder Text. */
-function fer_alexa_merken($ok, $code, $zeile, $art) {
-    fer_json_schreiben(fer_tmpdir() . '/alexa_letzte.json', array(
+function fer_alexa_merken($ok, $code, $zeile, $art, $datei = 'alexa_letzte.json') {
+    fer_json_schreiben(fer_tmpdir() . '/' . basename((string) $datei), array(
         'zeit' => time(), 'ok' => $ok ? 1 : 0, 'code' => (int) $code,
         'grund' => fer_alexa_grund($zeile), 'art' => (string) $art, 'zeile' => (string) $zeile,
     ));
 }
 
 /** Das Ergebnis der letzten Ansage oder null. */
-function fer_alexa_letzte() {
-    $f = fer_tmpdir() . '/alexa_letzte.json';
+function fer_alexa_letzte($datei = 'alexa_letzte.json') {
+    $f = fer_tmpdir() . '/' . basename((string) $datei);
     if (!is_file($f)) { return null; }
     $d = json_decode((string) @file_get_contents($f), true);
     if (!is_array($d) || !isset($d['zeit'], $d['ok'], $d['code'], $d['art'])) { return null; }
@@ -2106,6 +2115,130 @@ function fer_alexa_pruefzeile($cfg) {
     if ($l !== null) {
         $txt .= ' ' . sprintf(fer_t($l['ok'] ? 'ALEXA.T_LETZTE_OK' : 'ALEXA.T_LETZTE_FEHL'), date('d.m.Y H:i', $l['zeit']),
             $l['ok'] ? 'SPRECHEN;OK=1' : fer_alexa_testtext($l['code'], $l['zeile'], $l['art'], 10));
+        if (!$l['ok']) { $ok = false; }
+    }
+    return array($frage, $ok, $txt . $aus);
+}
+
+/* ---------------- Ausgabeart Google-Lautsprecher (Ansage-3, ab Werk nicht gewaehlt) ----------------
+ *
+ * Das Plugin Chromecast 4 Lox NG (Ordner chromecast-4lox-ng, ab 1.3.15,
+ * https://github.com/timanders22/LoxBerry-Plugin-Chromecast4lox) laesst
+ * Google-Lautsprecher (Chromecast, Nest, Google Home) sprechen. Die
+ * Schnittstelle ist die von Alexa-NG: POST an seinen Endpunkt auf DIESEM
+ * LoxBerry (127.0.0.1, Webport aus general.json - andere Absender weist er mit
+ * 403 NUR_LOKAL ab) mit aktion=sprechen, token, geraet (leer = Standardgeraet
+ * des Chromecast-Plugins, dann nicht mitgeschickt), text, optional laut. Erfolg
+ * ist nur HTTP 200 mit SPRECHEN;OK=1 (auch UNVERAENDERT und TEXT_NULL). Gerufen
+ * wird ueber DIESELBE Funktion fer_alexa_rufen(), nur mit dieser Adresse.
+ *
+ * Eigenes Sprechtoken (tts.google_token), getrennt vom Alexa-NG-Token, mit
+ * denselben Regeln. Anders als bei Alexa-NG steht auch der Ansagetext nicht
+ * im Protokoll und nicht in der ?say-Antwort, nur seine Laenge. Faellt der
+ * Endpunkt aus (403, 404, 409, 429, 503, keine Verbindung, Zeitueberschreitung),
+ * entfaellt die Ansage: kein stiller Wechsel auf einen anderen Lautsprecher und
+ * keine eigene Wiederholung (bei UNKLAR=1 kann sie dort schon laufen).
+ */
+
+/** Die Adresse des Chromecast-Endpunkts - ohne Token. */
+function fer_google_adresse() {
+    return 'http://127.0.0.1:' . fer_webport() . '/plugins/chromecast-4lox-ng/index.php';
+}
+
+/** Die Laenge des Ansagetexts in Zeichen (der Text selbst geht nirgends hin ausser zum Endpunkt). */
+function fer_google_textlaenge($text) {
+    $n = @preg_match_all('/./su', (string) $text);
+    return is_int($n) ? $n : strlen((string) $text);
+}
+
+/** 404 ohne GRUND: das Chromecast-Plugin fehlt oder ist aelter als 1.3.15 (Webserver-Seite). */
+function fer_google_fehlt($code, $zeile, $art) {
+    return $art === 'antwort' && (int) $code === 404 && fer_alexa_grund($zeile) === '';
+}
+
+/** Ein Ergebnis fuer das Protokoll (ASCII) - nie Token oder Text. */
+function fer_google_befund($code, $zeile, $art, $tmo) {
+    if ($art === 'verbindung') {
+        return 'keine Verbindung zu ' . fer_google_adresse() . ' (Webserver erreichbar?)';
+    }
+    if (fer_google_fehlt($code, $zeile, $art)) {
+        return 'HTTP 404 ohne GRUND - Chromecast 4 Lox NG fehlt oder ist zu alt (ab 1.3.15)';
+    }
+    return fer_alexa_befund($code, $zeile, $art, $tmo);
+}
+
+/** Dasselbe in der Sprache der Oberflaeche (Reiter Test, Meldung der Testansage). */
+function fer_google_testtext($code, $zeile, $art, $tmo) {
+    if ($art === 'zeit') { return sprintf(fer_t('ALEXA.T_ZEIT'), (int) $tmo); }
+    if ($art === 'verbindung') { return sprintf(fer_t('GOOGLE.T_KEINE_VERBINDUNG'), fer_google_adresse()); }
+    if ($art === 'kein_token') { return fer_t('GOOGLE.T_KEIN_TOKEN'); }
+    if (fer_google_fehlt($code, $zeile, $art)) { return fer_t('GOOGLE.T_FEHLT'); }
+    return fer_alexa_befund($code, $zeile, $art, $tmo);
+}
+
+/** GRUND fuer die Antwortzeile von ?say=: der des Endpunkts oder ein eigener. */
+function fer_google_grund_kurz($l) {
+    if (is_array($l) && fer_google_fehlt($l['code'], $l['zeile'], $l['art'])) { return 'CHROMECAST_FEHLT'; }
+    return fer_alexa_grund_kurz($l);
+}
+
+/** Eine Ansage ueber Chromecast 4 Lox NG (10 s). Rueckgabe true nur bei HTTP 200 und SPRECHEN;OK=1. */
+function fer_google_sprechen($text) {
+    $cfg = fer_config();
+    $t = $cfg['tts'];
+    $n = fer_google_textlaenge($text);
+    $tok = (isset($t['google_token']) && is_string($t['google_token'])) ? $t['google_token'] : '';
+    if (!fer_alexa_token_ok($tok)) {
+        fer_alexa_merken(false, 0, '', 'kein_token', 'google_letzte.json');
+        fer_log('Ansage uebersprungen: Ausgabeart Google-Lautsprecher, aber kein Sprechtoken fuer Chromecast 4 Lox NG gespeichert');
+        return false;
+    }
+    $f = array('aktion' => 'sprechen', 'token' => $tok);
+    $g = (isset($t['google_geraet']) && is_string($t['google_geraet'])) ? $t['google_geraet'] : '';
+    if ($g !== '') { $f['geraet'] = $g; }
+    $f['text'] = (string) $text;
+    if (isset($t['google_laut']) && is_int($t['google_laut']) && $t['google_laut'] >= 0 && $t['google_laut'] <= 100) {
+        $f['laut'] = $t['google_laut'];
+    }
+    list($code, $zeile, $art) = fer_alexa_rufen($f, 10, fer_google_adresse());
+    $ok = $code === 200 && strpos($zeile, 'SPRECHEN;OK=1') === 0;
+    fer_alexa_merken($ok, $code, $zeile, $art, 'google_letzte.json');
+    $gr = fer_alexa_grund($zeile);
+    fer_log('Ansage gesendet (Google-Lautsprecher, ' . ($g !== '' ? 'Geraet ' . $g : 'Standardgeraet')
+        . ', Text ' . $n . ' Zeichen) -> '
+        . ($ok ? 'OK' . ($gr !== '' ? ', GRUND=' . $gr : '') : 'FEHLER ' . fer_google_befund($code, $zeile, $art, 10)));
+    return $ok;
+}
+
+/**
+ * Die Zeile "Ansage ueber Google-Lautsprecher" im Reiter Test - null, wenn das
+ * nicht die Ausgabeart ist. Gefragt wird nur selftest=1 per POST (prueft das
+ * Token, spricht nichts), hoechstens 5 s; fer_selbsttest() laeuft nur bei
+ * offenem Reiter Test. SPRECHEN=0 (Sprachausgabe dort aus) und DIENST=0 (Dienst
+ * laeuft nicht) machen die Zeile rot: jede Ansage scheiterte dann (409/503).
+ * Dazu das Ergebnis der letzten echten Ansage. Rueckgabe: array(Frage, ok, Hinweis).
+ */
+function fer_google_pruefzeile($cfg) {
+    if (!isset($cfg['tts']['mode']) || $cfg['tts']['mode'] !== 'cc4lox') { return null; }
+    $frage = fer_t('GOOGLE.F_TEST');
+    $aus = empty($cfg['notify']['audio']) ? ' ' . fer_t('ALEXA.T_AUDIO_AUS') : '';
+    $tok = (isset($cfg['tts']['google_token']) && is_string($cfg['tts']['google_token'])) ? $cfg['tts']['google_token'] : '';
+    if (!fer_alexa_token_ok($tok)) {
+        return array($frage, false, fer_t('GOOGLE.T_KEIN_TOKEN') . $aus);
+    }
+    list($c1, $z1, $a1) = fer_alexa_rufen(array('selftest' => '1', 'token' => $tok), 5, fer_google_adresse());
+    if ($c1 !== 200 || strpos($z1, 'SELFTEST;OK=1') !== 0) {
+        return array($frage, false, sprintf(fer_t('GOOGLE.T_SELFTEST_FEHL'), fer_google_testtext($c1, $z1, $a1, 5)) . $aus);
+    }
+    $ok = true;
+    $zus = array();
+    if (preg_match('/(?:^|;)SPRECHEN=0(?:;|$)/', $z1)) { $zus[] = fer_t('GOOGLE.T_SPRECHEN_AUS'); $ok = false; }
+    if (preg_match('/(?:^|;)DIENST=0(?:;|$)/', $z1)) { $zus[] = fer_t('GOOGLE.T_DIENST_AUS'); $ok = false; }
+    $txt = $ok ? fer_t('GOOGLE.T_OK') : sprintf(fer_t('GOOGLE.T_OK_ABER'), implode(' ', $zus));
+    $l = fer_alexa_letzte('google_letzte.json');
+    if ($l !== null) {
+        $txt .= ' ' . sprintf(fer_t($l['ok'] ? 'GOOGLE.T_LETZTE_OK' : 'GOOGLE.T_LETZTE_FEHL'), date('d.m.Y H:i', $l['zeit']),
+            $l['ok'] ? $l['zeile'] : fer_google_testtext($l['code'], $l['zeile'], $l['art'], 10));
         if (!$l['ok']) { $ok = false; }
     }
     return array($frage, $ok, $txt . $aus);
@@ -2916,6 +3049,8 @@ function fer_selbsttest($basis = '', $vorher = null) {
     /* Ansage-2: ist Alexa-NG die Ausgabeart, gibt es keine Ansage-Adresse zu
      * bilden; die eigene Zeile fragt Alexa-NG selbst (fer_alexa_pruefzeile()). */
     $alexa_z = fer_alexa_pruefzeile($cfg);
+    /* Ansage-3: dasselbe fuer Google-Lautsprecher (gewaehlt ist hoechstens eine der beiden). */
+    if ($alexa_z === null) { $alexa_z = fer_google_pruefzeile($cfg); }
     if ($alexa_z !== null) {
         $add($alexa_z[0], $alexa_z[1], $alexa_z[2]);
     } elseif (!empty($cfg['notify']['audio'])) {
@@ -3285,6 +3420,19 @@ function fer_sicherung_lesen($roh, $geltend = null, &$namen = null)
             $anzahl++;
             continue;
         }
+        /* Ansage-3: ebenso das Sprechtoken fuer Google-Lautsprecher - benannt,
+         * nie mit dem Wert; "" ist keines. Weiter unten (nach dem Alexa-NG-Block,
+         * damit beide genannt werden) wird der Schluessel dann uebergangen. */
+        $fer_gtm = false;
+        if ($k === 'tts' && is_array($w) && array_key_exists('google_token', $w)) {
+            if ($w['google_token'] !== '') {
+                $mangel[] = fer_t('GOOGLE.SICH_TOKEN');
+                $namen[] = 'tts.google_token';
+                $fer_gtm = true;
+            } else {
+                unset($w['google_token']);
+            }
+        }
         /* Ansage-2: das Alexa-NG-Sprechtoken steht in keiner Sicherung dieses
          * Plugins. Bringt eine Datei eines mit, wird sie abgewiesen - benannt,
          * nie mit dem Wert; ein leeres Feld ist keines. Das geltende bleibt
@@ -3297,6 +3445,7 @@ function fer_sicherung_lesen($roh, $geltend = null, &$namen = null)
             }
             unset($w['alexa_token']);
         }
+        if ($fer_gtm) { continue; }
         /* C1: jeder Wert wie im Formular - Typ, Muster, Bereich, Auswahl.
          * Bis 1.2.15 wurde nur der SCHLUESSEL geprueft: ein Token als Liste
          * wurde am Endpunkt zu "Array" und oeffnete ihn, ein Land als Liste
@@ -3359,6 +3508,12 @@ function fer_sicherung_lesen($roh, $geltend = null, &$namen = null)
             ? $geltend['tts']['alexa_token'] : '';
         $neu['tts']['alexa_token'] = $alt_tok;
         if ($alt_tok !== '') { $hinweise[] = fer_t('ALEXA.SICH_BLEIBT'); }
+        /* Ansage-3: ebenso das geltende Sprechtoken fuer Google-Lautsprecher. */
+        $alt_gtok = (is_array($geltend) && isset($geltend['tts']) && is_array($geltend['tts'])
+            && isset($geltend['tts']['google_token']) && fer_alexa_token_ok($geltend['tts']['google_token']))
+            ? $geltend['tts']['google_token'] : '';
+        $neu['tts']['google_token'] = $alt_gtok;
+        if ($alt_gtok !== '') { $hinweise[] = fer_t('GOOGLE.SICH_BLEIBT'); }
     }
     return array($mangel ? null : $neu, $mangel, $anzahl, $hinweise);
 }
@@ -3379,6 +3534,8 @@ function fer_rueckspiel_altwerte($voll = null)
     if ($voll === null) { $voll = fer_config(); }
     // Ansage-2: wie "Einstellungen sichern" ohne das Alexa-NG-Sprechtoken.
     if (isset($voll['tts']) && is_array($voll['tts'])) { unset($voll['tts']['alexa_token']); }
+    // Ansage-3: ebenso ohne das Sprechtoken fuer Google-Lautsprecher.
+    if (isset($voll['tts']) && is_array($voll['tts'])) { unset($voll['tts']['google_token']); }
     $js = json_encode($voll, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
     if ($js === false) { return array('(JSON)'); }
     $namen = array();
@@ -3493,17 +3650,20 @@ function fer_wert_pruefen($k, $w)
             $r = $text($w, '/^([01]?\d|2[0-3]):[0-5]\d\z/', 'SS:MM (00:00-23:59)', false);
             return $r;
         case 'tts.mode':
-            return $auswahl($w, array('musicserver', 'ms4h', 'audioserver', 'custom', 'alexang'));
+            return $auswahl($w, array('musicserver', 'ms4h', 'audioserver', 'custom', 'alexang', 'cc4lox'));
+        case 'tts.google_geraet':      // Ansage-3: dieselbe Form (1-200, ohne Steuerzeichen)
         case 'tts.alexa_geraet':
             /* Ansage-2: leer = Standardgeraet von Alexa-NG; sonst bis 200 Byte
              * ohne Steuerzeichen (Normalname, Komma-Liste, gruppe:<name>, alle). */
             $r = $text($w, $ohne_steuer, fer_t('MELD.FORM_TEXT'), true);
             if ($r[0] && strlen($r[1]) > 200) { return array(false, null, sprintf(fer_t('MELD.W_LAENGE'), 200)); }
             return $r;
+        case 'tts.google_laut':        // Ansage-3: -1 = Ansagelautstaerke des Chromecast-Plugins
         case 'tts.alexa_laut':
             /* -1 = die Lautstaerke des Geraets bleibt (im Formular: leer); sonst 0..100. */
             if ($w === -1) { return array(true, -1, ''); }
             return $zahl($w, 0, 100);
+        case 'tts.google_token':       // Ansage-3: dieselbe Form (8-128 aus A-Z a-z 0-9 _ -)
         case 'tts.alexa_token':
             /* Nur das Formular fragt hiernach; der Grund zeigt den Wert nie. */
             if (!is_string($w)) {
@@ -3535,7 +3695,8 @@ function fer_wert_pruefen($k, $w)
             $soll = $k === 'notify'
                 ? array('audio', 'push', 'time', 'freetag', 'ferienstart', 'bridge_month')
                 : array('mode', 'ip', 'port', 'zones', 'volume', 'lang', 'template',
-                        'alexa_geraet', 'alexa_laut');     // Ansage-2 (ohne Sprechtoken)
+                        'alexa_geraet', 'alexa_laut',      // Ansage-2 (ohne Sprechtoken)
+                        'google_geraet', 'google_laut');   // Ansage-3 (ohne Sprechtoken)
             $aus = array();
             $gruende = array();
             foreach ($w as $uk => $uw) {
