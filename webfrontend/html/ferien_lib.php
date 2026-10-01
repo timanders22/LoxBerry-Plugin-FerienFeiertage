@@ -1133,7 +1133,14 @@ function fer_locality_fix($d) {
 function fer_data() {
     $fer_z = fer_zone_an();
     try {
-        return fer_data_innen();
+        $fer_d = fer_data_innen();
+        /* Ferien-b1/Ferien-1 (Verbesserungsbau 01.10.2026): ein FREMDES
+         * Plugin, das die Bibliothek einbindet (AWM-Abfuhr, Abfahrts-
+         * Assistent), wird fuer den Reiter Test vermerkt - einmal je Prozess,
+         * ohne Ausgabe und ohne Wirkung auf den Rueckgabewert
+         * (fer_leser_bibliothek()). */
+        fer_leser_bibliothek($fer_d);
+        return $fer_d;
     } finally {
         fer_zone_aus($fer_z);
     }
@@ -1484,7 +1491,12 @@ function fer_day_innen($d, $tag, $cfg = null) {
 function fer_state($force = false) {
     $fer_z = fer_zone_an();
     try {
-        return fer_state_innen($force);
+        $fer_st = fer_state_innen($force);
+        /* Ferien-b1/Ferien-1: wie in fer_data() - der Abfahrts-Assistent ruft
+         * nur fer_state(), und das liest meist state.json, ohne fer_data()
+         * zu fragen. Einmal je Prozess (fer_leser_bibliothek()). */
+        fer_leser_bibliothek($fer_st);
+        return $fer_st;
     } finally {
         fer_zone_aus($fer_z);
     }
@@ -3020,9 +3032,16 @@ function fer_config_speichern($cfg)
  * stammen aus einer anderen Fassung oder einem anderen Plugin.
  *
  * Rueckgabe: array(Konfiguration|null, Beanstandungen[], uebernommene Werte).
+ *
+ * X-3 (Verbesserungsbau 01.10.2026): $namen (optional, per Verweis) bekommt
+ * die NAMEN der beanstandeten Einstellungen (bei notify/tts die Unterfelder,
+ * z. B. "tts.port") - fuer die Warnung am Knopf "Einstellungen sichern". Die
+ * Namen tragen nie einen Wert. Schluessel, die mit "_" beginnen, sind
+ * Kopfzeilen und werden uebergangen (bis dahin: "fremd").
  */
-function fer_sicherung_lesen($roh, $geltend = null)
+function fer_sicherung_lesen($roh, $geltend = null, &$namen = null)
 {
+    if (!is_array($namen)) { $namen = array(); }
     $mangel = array();
     $hinweise = array();
     $daten = json_decode((string) $roh, true);
@@ -3034,8 +3053,12 @@ function fer_sicherung_lesen($roh, $geltend = null)
     $anzahl = 0;
     foreach ($daten as $k => $w) {
         $k = (string) $k;
+        if ($k !== '' && $k[0] === '_') {
+            continue;       // Kopfzeile (_warnung), keine Einstellung
+        }
         if (!in_array($k, $bekannt, true)) {
             $mangel[] = sprintf(fer_t('TEXT.SICH_FREMD'), $k);
+            $namen[] = $k;
             continue;
         }
         /* C2 (Durchgang 30.09.2026): ein LEERES Token aus einer Sicherung.
@@ -3050,6 +3073,7 @@ function fer_sicherung_lesen($roh, $geltend = null)
                 ? trim($geltend['aktionstoken']) : '';
             if ($g === '') {
                 $mangel[] = fer_t('TEXT.SICH_TOKEN_LEER_KEINS');
+                $namen[] = $k;
                 continue;
             }
             $neu[$k] = $g;
@@ -3064,6 +3088,16 @@ function fer_sicherung_lesen($roh, $geltend = null)
         list($ok, $wert, $grund) = fer_wert_pruefen($k, $w);
         if (!$ok) {
             $mangel[] = sprintf(fer_t('TEXT.SICH_WERT'), $k, $grund);
+            /* X-3: bei notify/tts die Unterfelder benennen - mit derselben
+             * Pruefung, nur ohne den Grund (der zeigt den Wert). */
+            $unter = array();
+            if (($k === 'notify' || $k === 'tts') && is_array($w)) {
+                foreach ($w as $uk => $uw) {
+                    list($uok) = fer_wert_pruefen($k . '.' . $uk, $uw);
+                    if (!$uok) { $unter[] = $k . '.' . $uk; }
+                }
+            }
+            $namen = array_merge($namen, $unter ? $unter : array($k));
             continue;
         }
         $neu[$k] = $wert;
@@ -3071,6 +3105,7 @@ function fer_sicherung_lesen($roh, $geltend = null)
     }
     if ($anzahl > 0 && $neu['subdivision2'] !== '' && $neu['subdivision2'] === $neu['subdivision']) {
         $mangel[] = sprintf(fer_t('TEXT.SICH_WERT'), 'subdivision2', fer_t('MELD.W_REGION2_GLEICH'));
+        $namen[] = 'subdivision2';
     }
     if ($anzahl === 0) {
         $mangel[] = fer_t('TEXT.SICH_LEER');
@@ -3097,10 +3132,33 @@ function fer_sicherung_lesen($roh, $geltend = null)
     }
     if ($fehlend) {
         $mangel[] = sprintf(fer_t('TEXT.SICH_FEHLEND'), count($fehlend), implode(', ', $fehlend));
+        $namen = array_merge($namen, $fehlend);
     }
     /* Die Meldungen sind reiner Text: die Oberflaeche maskiert sie genau
      * einmal (O3 - bis 1.2.15 wurde ein fremder Schluessel zweimal maskiert). */
     return array($mangel ? null : $neu, $mangel, $anzahl, $hinweise);
+}
+
+/**
+ * X-3 (Verbesserungsbau 01.10.2026): Welche gespeicherten Einstellungen wuerde
+ * das eigene Zurueckspielen abweisen?
+ *
+ * Gefragt wird DIESELBE Funktion wie beim Zurueckspielen (fer_sicherung_lesen())
+ * mit genau dem Inhalt, den "Einstellungen sichern" liefert - der vollen
+ * Konfiguration. Rueckgabe: die Namen (leer: die Sicherung liesse sich
+ * zurueckspielen). Nie Werte. Anlass: ein Wert aus einer frueheren Fassung
+ * (etwa ein Port 70000 oder eine webcal://-Adresse) stand bis dahin
+ * unbemerkt in jeder Sicherung, und aufgefallen waere es erst beim Umzug.
+ */
+function fer_rueckspiel_altwerte($voll = null)
+{
+    if ($voll === null) { $voll = fer_config(); }
+    $js = json_encode($voll, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+    if ($js === false) { return array('(JSON)'); }
+    $namen = array();
+    $erg = fer_sicherung_lesen($js, $voll, $namen);
+    if ($erg[0] === null && !$namen) { $namen[] = '?'; }
+    return array_values(array_unique($namen));
 }
 
 /** Die angebotenen Laender (Formular und Sicherung). */
@@ -3372,3 +3430,386 @@ function fer_wachposten()
  * index.php: sonst steht er dem Endpunkt und jedem weiteren
  * Aufrufer nicht zur Verfuegung (Hausform, REGELN_2). */
 function fe_e($s) { return htmlspecialchars((string) $s, ENT_QUOTES, 'UTF-8'); }
+
+
+/* ==================================================================
+ * LESER DIESES PLUGINS (Ferien-b1 + Ferien-1, Verbesserungsbau 01.10.2026)
+ * ==================================================================
+ *
+ * Der Reiter Test zeigt, welche anderen Plugins Ferien lesen, auf welchem
+ * Weg, wann zuletzt und mit welchem Ergebnis. Dazu vermerkt das Plugin jeden
+ * lesenden Aufruf:
+ *   - am Endpunkt (Zeile, ?json=1, ?debug=1) NACH der Antwort, erkannt am
+ *     Parameter quelle=, am Referer oder an der Kennung (User-Agent);
+ *   - beim Einbinden der Bibliothek durch ein fremdes Plugin (fer_data(),
+ *     fer_state()), erkannt am Ordner des aufrufenden Skripts.
+ * Vermerkt werden Name, Weg, Zeitpunkt, Ergebnis und Zahl der Aufrufe - nie
+ * ein Token, eine Adresse oder eine Anfragezeile. Ein quelle=, das dem
+ * Aktionstoken gleicht, gilt als nicht erkannt; eine Kennung, die das Token
+ * enthaelt, wird nicht vermerkt.
+ *
+ * Belegt im Quelltext der Leser (nur gelesen, 01.10.2026):
+ *   AWM-Abfuhr 1.4.17, awm_daytype(): bindet zuerst die Bibliothek ein
+ *     (fer_data(), fer_day()), sonst ?json=1 mit dem User-Agent
+ *     "LoxBerry Abfuhrkalender" (awm_http_kopf()).
+ *   Abfahrts-Assistent 1.6.19, abfahrt_daytype(): zuerst ?json=1 mit dem
+ *     User-Agent "LoxBerry Abfahrts-Assistent", sonst die Bibliothek
+ *     (fer_state()).
+ * Keiner der beiden schickt einen Referer oder quelle=. Die Bewaesserung
+ * (0.9.37) liest Ferien nicht - ihr Quelltext verweist nirgends auf dieses
+ * Plugin.
+ *
+ * Das Vermerken darf das Antwortverhalten fuer keinen Leser aendern: keine
+ * Ausgabe, keine Kopfzeile, kein anderer Rueckgabewert, kein neuer Ordner,
+ * keine Protokollzeile. Geschrieben wird nur in den vorhandenen
+ * Zwischenordner, und nur, wenn er dem eigenen Benutzer gehoert und
+ * beschreibbar ist (fer_tmp_taugt()); sonst wird nichts vermerkt. Jeder
+ * Fehler endet still.
+ * ================================================================== */
+
+/** Die im Quelltext belegten Leser: Ordner => Titel und Kennung (User-Agent). */
+function fer_leser_bekannt()
+{
+    return array(
+        'awmabfuhr' => array('titel' => 'AWM-Abfuhr', 'ua' => 'LoxBerry Abfuhrkalender'),
+        'abfahrtsassistent' => array('titel' => 'Abfahrts-Assistent', 'ua' => 'LoxBerry Abfahrts-Assistent'),
+    );
+}
+
+/** Der eigene Ordnername (installiert: ferien). */
+function fer_leser_eigen()
+{
+    $n = basename(__DIR__);
+    return ($n === 'html' || $n === '') ? 'ferien' : $n;
+}
+
+/** Der Ordner, in dem vermerkt wird, oder '' (dann wird nichts vermerkt).
+ *  Bewusst NICHT fer_tmpdir(): das legt Ordner an und weicht aus - ein
+ *  fremder Prozess soll hier nichts anlegen und nichts protokollieren. */
+function fer_leser_ordner()
+{
+    $pf = fer_paths();
+    $t = isset($pf['tmp']) ? (string) $pf['tmp'] : '';
+    if ($t === '' || !fer_tmp_taugt($t)) { return ''; }
+    return $t;
+}
+
+/** Der Plugin-Ordner aus einem Skriptpfad (.../plugins/<ordner>/...), sonst ''. */
+function fer_leser_aus_pfad($pfad)
+{
+    $pfad = str_replace('\\', '/', (string) $pfad);
+    if (preg_match('#/(?:webfrontend/html|webfrontend/htmlauth|bin)/plugins/([A-Za-z0-9_.\-]{1,40})/#', $pfad, $m)) {
+        return strtolower($m[1]);
+    }
+    return '';
+}
+
+/** Ein kurzer Anzeigetext ohne Steuer- und Sonderzeichen; enthaelt der
+ *  Ausgangstext das Token, bleibt er leer. */
+function fer_leser_text($s, $max, $tok)
+{
+    $s = (string) $s;
+    if ($tok !== '' && strpos($s, $tok) !== false) { return ''; }
+    $s = preg_replace('/[^A-Za-z0-9 .\/_()+;:,\-]/', '', substr($s, 0, 200));
+    return substr((string) $s, 0, $max);
+}
+
+/**
+ * Einen Abruf vermerken. $weg: zeile | json | bibliothek. $ergebnis: der
+ * HTTP-Status oder 'daten' / 'keine_daten'. Rueckgabe: true, wenn vermerkt.
+ * Unter einer Sperre (nicht blockierend, fuenf Versuche), Nebendatei mit
+ * Prozessnummer, Rechte vor dem Inhalt, Laengenvergleich, rename - still.
+ */
+function fer_leser_merken($name, $weg, $ergebnis, $erkannt, $hinweis = '')
+{
+    $ord = fer_leser_ordner();
+    if ($ord === '') { return false; }
+    $f = $ord . '/leser.json';
+    $fh = @fopen($ord . '/leser.lock', 'c');
+    if ($fh === false) { return false; }
+    $gesperrt = false;
+    for ($i = 0; $i < 5; $i++) {
+        if (@flock($fh, LOCK_EX | LOCK_NB)) { $gesperrt = true; break; }
+        usleep(20000);
+    }
+    if (!$gesperrt) { @fclose($fh); return false; }
+    $d = is_file($f) ? json_decode((string) @file_get_contents($f), true) : null;
+    if (!is_array($d) || !isset($d['leser']) || !is_array($d['leser'])) { $d = array('leser' => array()); }
+    $k = $name . '|' . $weg;
+    $alt = (isset($d['leser'][$k]) && is_array($d['leser'][$k])) ? $d['leser'][$k] : array();
+    $jetzt = time();
+    $d['leser'][$k] = array(
+        'name' => (string) $name, 'weg' => (string) $weg, 'zeit' => $jetzt,
+        'ergebnis' => (string) $ergebnis, 'erkannt' => (string) $erkannt, 'hinweis' => (string) $hinweis,
+        'anzahl' => (isset($alt['anzahl']) ? (int) $alt['anzahl'] : 0) + 1,
+        'seit' => isset($alt['seit']) ? (int) $alt['seit'] : $jetzt,
+    );
+    if (count($d['leser']) > 16) {
+        uasort($d['leser'], function ($a, $b) {
+            return (int) (isset($b['zeit']) ? $b['zeit'] : 0) - (int) (isset($a['zeit']) ? $a['zeit'] : 0);
+        });
+        $d['leser'] = array_slice($d['leser'], 0, 16, true);
+    }
+    $js = json_encode($d, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+    $ok = false;
+    if ($js !== false) {
+        $tmp = $f . '.' . getmypid() . '.' . mt_rand(1000, 9999) . '.tmp';
+        if (@file_put_contents($tmp, '') !== false) {
+            @chmod($tmp, 0600);
+            $ok = (@file_put_contents($tmp, $js) === strlen($js)) && @rename($tmp, $f);
+            if (!$ok) { @unlink($tmp); }
+        }
+    }
+    @flock($fh, LOCK_UN);
+    @fclose($fh);
+    return $ok;
+}
+
+/** fer_data()/fer_state() in einem FREMDEN Prozess: einmal je Prozess vermerken. Der
+ *  eigene Endpunkt, der Cron und die Oberflaeche liegen unter
+ *  .../plugins/<eigener Ordner>/ und werden uebergangen. */
+function fer_leser_bibliothek($d)
+{
+    static $fertig = false;
+    if ($fertig) { return; }
+    $fertig = true;
+    try {
+        $skript = (isset($_SERVER['SCRIPT_FILENAME']) && is_string($_SERVER['SCRIPT_FILENAME']))
+            ? $_SERVER['SCRIPT_FILENAME'] : '';
+        if ($skript !== '') {
+            $echt = @realpath($skript);
+            if ($echt !== false) { $skript = $echt; }
+        } else {
+            $inc = get_included_files();
+            $skript = isset($inc[0]) ? (string) $inc[0] : '';
+        }
+        $name = fer_leser_aus_pfad($skript);
+        if ($name === fer_leser_eigen() || $name === 'ferien') { return; }
+        $erkannt = 'skript';
+        $hinweis = '';
+        if ($name === '') {
+            $name = 'unbekannt';
+            $erkannt = '';
+            $hinweis = fer_leser_text(basename(str_replace('\\', '/', $skript)), 40, '');
+        }
+        fer_leser_merken($name, 'bibliothek', (is_array($d) && !empty($d['quelle_da'])) ? 'daten' : 'keine_daten',
+            $erkannt, $hinweis);
+    } catch (\Throwable $e) {
+        return;
+    }
+}
+
+/** Ein lesender Aufruf des Endpunkts - aus der Abschaltfunktion von
+ *  ferien.php, also nach der Antwort. $weg: zeile | json. */
+function fer_leser_http($weg)
+{
+    try {
+        $ua = (isset($_SERVER['HTTP_USER_AGENT']) && is_string($_SERVER['HTTP_USER_AGENT']))
+            ? $_SERVER['HTTP_USER_AGENT'] : '';
+        if ($ua === 'LoxBerry Ferien-Plugin') { return; }      // die eigene Selbstpruefung
+        $cfg = fer_config();
+        $tok = (isset($cfg['aktionstoken']) && is_string($cfg['aktionstoken'])) ? $cfg['aktionstoken'] : '';
+        $name = '';
+        $erkannt = '';
+        $hinweis = '';
+        $q = (isset($_GET['quelle']) && is_string($_GET['quelle'])) ? trim($_GET['quelle']) : '';
+        if ($q !== '' && preg_match('/^[A-Za-z0-9_.\-]{1,40}\z/', $q) && ($tok === '' || !hash_equals($tok, $q))) {
+            $name = strtolower($q);
+            $erkannt = 'quelle';
+        }
+        if ($name === '' && isset($_SERVER['HTTP_REFERER']) && is_string($_SERVER['HTTP_REFERER'])) {
+            $rpfad = parse_url($_SERVER['HTTP_REFERER'], PHP_URL_PATH);
+            if (is_string($rpfad) && preg_match('#/plugins/([A-Za-z0-9_.\-]{1,40})/#', $rpfad, $m)) {
+                $name = strtolower($m[1]);
+                $erkannt = 'referer';
+            }
+        }
+        if ($name === '' && $ua !== '') {
+            foreach (fer_leser_bekannt() as $ordner => $b) {
+                if (strpos($ua, $b['ua']) === 0) { $name = $ordner; $erkannt = 'ua'; break; }
+            }
+        }
+        if ($name === fer_leser_eigen() || $name === 'ferien') { return; }
+        if ($name === '') {
+            $name = 'unbekannt';
+            $hinweis = fer_leser_text($ua, 40, $tok);
+        }
+        $code = http_response_code();
+        fer_leser_merken($name, $weg, is_int($code) ? $code : 0, $erkannt, $hinweis);
+    } catch (\Throwable $e) {
+        return;
+    }
+}
+
+/** Fuer den Reiter Test: die belegten Leser (mit "installiert?") und alle
+ *  vermerkten, der juengste Abruf zuerst. */
+function fer_leser_liste()
+{
+    $pf = fer_paths();
+    $ord = fer_leser_ordner();
+    $eintraege = array();
+    if ($ord !== '' && is_file($ord . '/leser.json')) {
+        $d = json_decode((string) @file_get_contents($ord . '/leser.json'), true);
+        if (is_array($d) && isset($d['leser']) && is_array($d['leser'])) {
+            foreach ($d['leser'] as $e) {
+                if (!is_array($e) || !isset($e['name'], $e['weg'], $e['zeit']) || !is_string($e['name'])
+                    || !is_string($e['weg']) || !preg_match('/^[a-z0-9_.\-]{1,40}\z/', $e['name'])) {
+                    continue;
+                }
+                $e += array('ergebnis' => '', 'erkannt' => '', 'hinweis' => '', 'anzahl' => 0);
+                foreach (array('ergebnis', 'erkannt', 'hinweis') as $sk) {
+                    $e[$sk] = is_scalar($e[$sk]) ? (string) $e[$sk] : '';
+                }
+                $e['zeit'] = (int) $e['zeit'];
+                $e['anzahl'] = (int) $e['anzahl'];
+                $eintraege[] = $e;
+            }
+        }
+    }
+    usort($eintraege, function ($a, $b) { return $b['zeit'] - $a['zeit']; });
+    $lb = isset($pf['lbhome']) ? (string) $pf['lbhome'] : '';
+    $zeilen = array();
+    $bekannt = fer_leser_bekannt();
+    foreach ($bekannt as $ordner => $b) {
+        $inst = ($lb !== '') ? is_dir($lb . '/webfrontend/html/plugins/' . $ordner) : null;
+        $n = 0;
+        foreach ($eintraege as $e) {
+            if ($e['name'] !== $ordner) { continue; }
+            $zeilen[] = array('titel' => $b['titel'], 'installiert' => $inst, 'eintrag' => $e);
+            $n++;
+        }
+        if ($n === 0) { $zeilen[] = array('titel' => $b['titel'], 'installiert' => $inst, 'eintrag' => null); }
+    }
+    foreach ($eintraege as $e) {
+        if (isset($bekannt[$e['name']])) { continue; }
+        /* '' = trifft nicht zu (ein nicht erkannter Leser hat keinen Ordner). */
+        $inst = $e['name'] === 'unbekannt' ? ''
+            : (($lb !== '') ? is_dir($lb . '/webfrontend/html/plugins/' . $e['name']) : null);
+        $zeilen[] = array('titel' => $e['name'], 'installiert' => $inst, 'eintrag' => $e);
+    }
+    return array('ordner' => $ord !== '' ? $ord : (string) (isset($pf['tmp']) ? $pf['tmp'] : ''),
+                 'ordner_ok' => $ord !== '', 'zeilen' => $zeilen);
+}
+
+
+/* ==================================================================
+ * PROBE GEGEN DIE QUELLE (Ferien-a1, Verbesserungsbau 01.10.2026)
+ * ==================================================================
+ *
+ * Ein Knopf im Reiter Test fragt die Quelle EINMAL fuer Bayern (DE-BY) und
+ * zeigt die Rohantwort gekuerzt. Anlass: Ferienende an Freitagen (C11) und
+ * die Gemeindecodes der oertlichen Feiertage waren im Durchgang nur an einer
+ * Attrappe gemessen. Die Probe schreibt NICHT in die Termindatei und nicht in
+ * state.json; sie legt nur ihr Ergebnis im Zwischenordner ab
+ * (quellprobe.json, 0600) und schreibt eine Protokollzeile. Hoechstens eine
+ * Probe je Minute; eine juengere wird gezeigt statt neu gefragt.
+ * ================================================================== */
+
+/** Die Datei mit dem Ergebnis der letzten Probe. */
+function fer_quellprobe_datei() { return fer_tmpdir() . '/quellprobe.json'; }
+
+/** Eine Zeichenkette auf hoechstens $n Byte kuerzen, ohne ein UTF-8-Zeichen zu
+ *  zerschneiden. */
+function fer_kurz_utf8($s, $n)
+{
+    $s = (string) $s;
+    if (strlen($s) <= $n) { return $s; }
+    $k = substr($s, 0, $n);
+    for ($i = 0; $i < 4 && !preg_match('//u', $k); $i++) { $k = substr($k, 0, -1); }
+    return $k;
+}
+
+/** Die letzte Probe lesen und jeden Wert auf seinen Typ bringen - oder null. */
+function fer_quellprobe_lesen()
+{
+    $f = fer_quellprobe_datei();
+    if (!is_file($f)) { return null; }
+    $d = json_decode((string) @file_get_contents($f), true);
+    if (!is_array($d) || !isset($d['zeit'], $d['teile']) || !is_array($d['teile'])) { return null; }
+    $teile = array();
+    foreach ($d['teile'] as $t) {
+        if (!is_array($t) || !isset($t['endpunkt']) || !is_string($t['endpunkt'])) { continue; }
+        $e = array();
+        foreach ((isset($t['eintraege']) && is_array($t['eintraege'])) ? $t['eintraege'] : array() as $x) {
+            if (!is_array($x)) { continue; }
+            $z = array();
+            foreach (array('von', 'bis', 'name', 'bereich', 'codes', 'art') as $sk) {
+                $z[$sk] = (isset($x[$sk]) && is_scalar($x[$sk])) ? (string) $x[$sk] : '';
+            }
+            $z['wt_bis'] = isset($x['wt_bis']) ? (int) $x['wt_bis'] : 0;
+            $e[] = $z;
+        }
+        $teile[] = array(
+            'endpunkt' => $t['endpunkt'],
+            'url' => (isset($t['url']) && is_string($t['url'])) ? $t['url'] : '',
+            'status' => isset($t['status']) ? (int) $t['status'] : 0,
+            'ms' => isset($t['ms']) ? (int) $t['ms'] : 0,
+            'bytes' => isset($t['bytes']) ? (int) $t['bytes'] : 0,
+            'ok' => !empty($t['ok']) ? 1 : 0,
+            'anzahl' => isset($t['anzahl']) ? (int) $t['anzahl'] : -1,
+            'roh' => (isset($t['roh']) && is_string($t['roh'])) ? $t['roh'] : '',
+            'eintraege' => $e,
+        );
+    }
+    return array('zeit' => (int) $d['zeit'],
+                 'region' => (isset($d['region']) && is_string($d['region'])) ? $d['region'] : '', 'teile' => $teile);
+}
+
+/**
+ * Die Probe. Rueckgabe: array(Art, Ergebnis). Art: 'ok' (beide Teile
+ * beantwortet), 'teilweise', 'fehl', 'gebremst' (die letzte Probe ist keine
+ * Minute alt; Ergebnis ist dann sie).
+ */
+function fer_quellprobe()
+{
+    $alt = fer_quellprobe_lesen();
+    if ($alt !== null) {
+        $seit = time() - $alt['zeit'];
+        if ($seit >= 0 && $seit < 60) { return array('gebremst', $alt); }
+    }
+    $jahr = (int) date('Y');
+    $q = 'countryIsoCode=DE&languageIsoCode=DE&subdivisionCode=DE-BY&validFrom=' . $jahr
+       . '-01-01&validTo=' . ($jahr + 1) . '-12-31';
+    $teile = array();
+    $gut = 0;
+    $zeile = array();
+    foreach (array('SchoolHolidays', 'PublicHolidays') as $ep) {
+        $url = 'https://openholidaysapi.org/' . $ep . '?' . $q;
+        $t0 = microtime(true);
+        list($code, $roh) = fer_http_status($url, 15);
+        $ms = (int) round((microtime(true) - $t0) * 1000);
+        $roh = (string) $roh;
+        $js = json_decode($roh, true);
+        $liste = (is_array($js) && ($js === array() || array_keys($js) === range(0, count($js) - 1))) ? $js : null;
+        $ok = ((int) $code === 200 && $liste !== null);
+        if ($ok) { $gut++; }
+        $ausw = array();
+        foreach ($liste !== null ? $liste : array() as $e) {
+            if (!is_array($e) || !isset($e['startDate']) || !is_string($e['startDate'])) { continue; }
+            $von = substr($e['startDate'], 0, 10);
+            $bis = substr((isset($e['endDate']) && is_string($e['endDate'])) ? $e['endDate'] : $e['startDate'], 0, 10);
+            $ts = strtotime($bis);
+            $codes = array();
+            foreach ((isset($e['subdivisions']) && is_array($e['subdivisions'])) ? $e['subdivisions'] : array() as $sd) {
+                if (is_array($sd) && isset($sd['code']) && is_string($sd['code'])) { $codes[] = $sd['code']; }
+            }
+            $ausw[] = array(
+                'von' => $von, 'bis' => $bis, 'wt_bis' => $ts !== false ? (int) date('N', $ts) : 0,
+                'name' => fer_kurz_utf8(fer_name($e, 'DE'), 80),
+                'bereich' => (isset($e['regionalScope']) && is_string($e['regionalScope'])) ? $e['regionalScope'] : '',
+                'codes' => fer_kurz_utf8(implode(', ', array_slice($codes, 0, 12)), 200),
+                'art' => (isset($e['type']) && is_string($e['type'])) ? $e['type'] : '',
+            );
+        }
+        $teile[] = array('endpunkt' => $ep, 'url' => $url, 'status' => (int) $code, 'ms' => $ms,
+                         'bytes' => strlen($roh), 'ok' => $ok ? 1 : 0,
+                         'anzahl' => $liste === null ? -1 : count($liste),
+                         'roh' => fer_kurz_utf8($roh, 1200), 'eintraege' => array_slice($ausw, 0, 60));
+        $zeile[] = $ep . ' HTTP ' . (int) $code . ($liste !== null ? ' (' . count($liste) . ' Eintraege)' : ' (kein JSON)');
+    }
+    $erg = array('zeit' => time(), 'region' => 'DE-BY', 'teile' => $teile);
+    fer_json_schreiben(fer_quellprobe_datei(), $erg, 0600);
+    fer_log('Probe gegen die Quelle (DE-BY, Reiter Test): ' . implode(', ', $zeile)
+        . ' - die Termindatei bleibt unveraendert.');
+    return array($gut === 2 ? 'ok' : ($gut === 1 ? 'teilweise' : 'fehl'), fer_quellprobe_lesen());
+}

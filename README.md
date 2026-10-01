@@ -10,6 +10,26 @@ Bundesländern/Kantonen.
 
 Kompatibel mit LoxBerry 3.x und **LoxBerry 4** (reines PHP, PHP 7.4 und 8.x).
 
+## Neu in 1.2.17
+
+Verbesserungen aus dem Durchgang vom 30.09.2026 (Verbesserungsliste
+`Pruefung-Durchgang-2026-09-29/VERBESSERUNGEN_OFFEN.md`). Gemessen an einer
+Quellen-Attrappe und mit den echten Lesestellen von AWM und Abfahrts-Assistent
+unter PHP 7.4, 8.3 und 8.5; nicht am Gerät. Die Antworten an alle Leser sind
+unverändert.
+
+* **Reiter Test „Wer liest dieses Plugin?“:** Leser mit Weg, letztem Abruf,
+  Ergebnis und Zahl der Aufrufe, nie ein Token; nach einem Neustart leer. Ein
+  freiwilliger Zusatz `&quelle=name` an lesenden Aufrufen benennt den Leser.
+* **Knopf „Probe gegen die Quelle (DE-BY)“:** gekürzte Rohantwort, Wochentag
+  jedes Ferienendes, Gebietscodes; ändert keine Termine, höchstens einmal je Minute.
+* **Bei einer Beanstandung wird nichts gespeichert** (bis 1.2.16 wurde der Rest
+  gespeichert, beim MQTT-Formular sogar „MQTT an“); die eingetippten Werte stehen
+  wieder im Formular, beanstandete Felder sind markiert.
+* „Einstellungen sichern“ warnt gelb, wenn sich die Sicherung so nicht
+  zurückspielen ließe (`_warnung`, nur Namen). Eine solche Sicherung lehnen
+  1.2.16 und ältere Fassungen ab.
+
 ## Neu in 1.2.16
 
 Durchgang vom 30.09.2026 mit vier Prüfern (Code, Oberfläche, Installer, MQTT).

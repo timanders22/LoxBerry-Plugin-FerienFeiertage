@@ -20,6 +20,9 @@
  *                       WARN=1           Daten reichen weniger als 60 Tage voraus
  *   ?debug=1         -> Ferien- und Feiertagsliste im Klartext
  *   ?json=1          -> kompletter Zustand als JSON
+ *   &quelle=NAME     -> zu jedem lesenden Aufruf: aendert die Antwort nicht,
+ *                       vermerkt nur den Namen des Lesers fuer den Reiter Test
+ *                       (seit dem Verbesserungsbau 01.10.2026)
  *
  * Ohne Daten der Quelle fuer die eingestellte Region antworten die Zeile und
  * ?json=1 mit HTTP 503 und GRUND=KEINE_DATEN (Regeln/07, seit 1.2.16) - nicht
@@ -106,6 +109,18 @@ $fer_refresh = fer_refresh_pruefen();
 $fer_quelle = '-';
 if ($fer_refresh) {
     list($fer_rok, $fer_quelle) = fer_fetch(true);
+}
+
+/* Ferien-b1/Ferien-1 (Verbesserungsbau 01.10.2026): lesende Aufrufe (Zeile,
+ * ?debug=1, ?json=1) werden fuer den Reiter Test vermerkt - wer, auf welchem
+ * Weg, wann, mit welchem Status. ERST NACH der Antwort (Abschaltfunktion) und
+ * ohne jede Ausgabe: die Antwort bleibt fuer jeden Leser dieselbe. Ausloesende
+ * Aufrufe (?selftest, ?say, ?ptest) werden nicht vermerkt. Das Token wird nie
+ * vermerkt (fer_leser_http()). */
+$fer_leser_weg = isset($_GET['json']) ? 'json'
+    : ((isset($_GET['selftest']) || isset($_GET['say']) || isset($_GET['ptest'])) ? '' : 'zeile');
+if ($fer_leser_weg !== '' && function_exists('fer_leser_http')) {
+    register_shutdown_function(function () use ($fer_leser_weg) { fer_leser_http($fer_leser_weg); });
 }
 
 if (isset($_GET['json'])) {
