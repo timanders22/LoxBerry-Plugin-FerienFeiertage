@@ -235,13 +235,18 @@ function fe_x2_felder($form)
     if ($form === 'save') {
         $f = array('country', 'subdivision', 'lang', 'subdivision2', 'group', 'locality', 'bridge_mode',
                    'bridge_luecke', 'urlaub_vorlauf', 'ics_url', 'ics_typ', 'ics_filter', 'notify_time',
-                   'tts_mode', 'tts_ip', 'tts_port', 'tts_zones', 'tts_volume', 'tts_lang', 'tts_template');
+                   'tts_mode', 'tts_ip', 'tts_port', 'tts_zones', 'tts_volume', 'tts_lang', 'tts_template',
+                   'tts_alexa_geraet', 'tts_alexa_laut');      // Ansage-2
         for ($i = 0; $i < 6; $i++) {
             foreach (array('own_name', 'own_von', 'own_bis', 'own_typ') as $o) { $f[] = $o . '.' . $i; }
         }
         $h = array('school', 'public', 'local_holidays', 'bridge', 'typ_streng', 'halbtag_frei',
-                   'notify_audio', 'notify_push', 'n_freetag', 'n_ferienstart', 'n_bridge');
-        return array($f, $h);
+                   'notify_audio', 'notify_push', 'n_freetag', 'n_ferienstart', 'n_bridge',
+                   'tts_alexa_token_loeschen');
+        /* Ansage-2: das Sprechtoken ist ein Geheimnisfeld - es kann als
+         * beanstandet MARKIERT werden, sein Wert reist nie mit (weder
+         * fe_x2_sammeln() noch fe_x2_pruefen() nehmen ihn an). */
+        return array($f, $h, array('tts_alexa_token'));
     }
     if ($form === 'mqtt_save') {
         return array(array('mqtt_topic'), array('mqtt_enabled'));
@@ -273,7 +278,9 @@ function fe_x2_pruefen($e)
         || !is_array($e['werte']) || !is_array($e['bean'])) {
         return null;
     }
-    list($felder, $haken) = fe_x2_felder($e['form']);
+    $fe_fx = fe_x2_felder($e['form']);
+    list($felder, $haken) = $fe_fx;
+    $geheim = isset($fe_fx[2]) ? $fe_fx[2] : array();    // Ansage-2: nur markierbar
     $erlaubt = array_merge($felder, $haken);
     if (!$erlaubt) { return null; }
     $w = array();
@@ -282,7 +289,7 @@ function fe_x2_pruefen($e)
     }
     $b = array();
     foreach ($e['bean'] as $k) {
-        if (is_string($k) && in_array($k, $erlaubt, true)) { $b[] = $k; }
+        if (is_string($k) && (in_array($k, $erlaubt, true) || in_array($k, $geheim, true))) { $b[] = $k; }
     }
     return array('form' => $e['form'], 'werte' => $w, 'bean' => $b);
 }
@@ -290,7 +297,8 @@ function fe_x2_pruefen($e)
 function fe_x2m($feld)
 {
     global $fe_x2;
-    return (is_array($fe_x2) && in_array($feld, $fe_x2['bean'], true)) ? ' class="sm-beanstandet"' : '';
+    return (is_array($fe_x2) && in_array($feld, $fe_x2['bean'], true))
+        ? ' class="sm-beanstandet" aria-invalid="true"' : '';
 }
 
 function fe_x2typ($feld)
@@ -640,7 +648,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['save'])) {
     );
     $fe_tts_alt = (isset($fe_vorher['tts']) && is_array($fe_vorher['tts'])) ? $fe_vorher['tts'] : array();
     $fe_tts_alt += array('mode' => 'musicserver', 'ip' => '', 'port' => 7091, 'zones' => '1', 'volume' => 8,
-                         'lang' => 'de', 'template' => '');
+                         'lang' => 'de', 'template' => '',
+                         'alexa_geraet' => '', 'alexa_token' => '', 'alexa_laut' => -1);
     $fe_new['tts'] = array(
         'mode' => $fe_pruef('tts.mode', $fe_post('tts_mode', 'musicserver'), $fe_tts_alt['mode'], fer_t('TEXT.AUDIO_AUSGABE')),
         'ip' => $fe_pruef('tts.ip', $fe_post('tts_ip', ''), $fe_tts_alt['ip'], fer_t('TEXT.IP_DES_AUDIO_SERVERS')),
@@ -650,6 +659,50 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['save'])) {
         'lang' => $fe_pruef('tts.lang', $fe_post('tts_lang', 'de'), $fe_tts_alt['lang'], fer_t('TEXT.SPRACHE')),
         'template' => $fe_pruef('tts.template', $fe_post('tts_template', ''), $fe_tts_alt['template'], fer_t('MELD.N_VORLAGE')),
     );
+    /* Ansage-2: Ausgabeart Alexa-NG (ab Werk nicht gewaehlt). Abgewiesen wird
+     * benannt, nie zurechtgebogen (Nr. 16/19): nichts gespeichert, Feld
+     * markiert, Eingabe zurueck (X-2). Das Sprechtoken ist ein Kennwort: leer
+     * lassen behaelt es, der Haken loescht es, es reist nie ins Formular
+     * zurueck und steht in keiner Meldung. */
+    $fe_new['tts']['alexa_geraet'] = $fe_pruef('tts.alexa_geraet', $fe_post('tts_alexa_geraet', ''),
+        $fe_tts_alt['alexa_geraet'], fer_t('ALEXA.L_GERAET'));
+    $fe_alr = $fe_post('tts_alexa_laut', '');
+    if (is_string($fe_alr) && trim($fe_alr) === '') {
+        $fe_new['tts']['alexa_laut'] = -1;        // leer = die Lautstaerke des Geraets bleibt
+    } else {
+        list($fe_alok, $fe_alw, $fe_alg) = fer_wert_pruefen('tts.alexa_laut', $fe_alr);
+        if ($fe_alok) {
+            $fe_new['tts']['alexa_laut'] = $fe_alw;
+        } else {
+            $fe_fehler[] = sprintf(fer_t('MELD.ABGEWIESEN'), fer_t('ALEXA.L_LAUT'), $fe_alg,
+                (is_int($fe_tts_alt['alexa_laut']) && $fe_tts_alt['alexa_laut'] >= 0)
+                    ? (string) $fe_tts_alt['alexa_laut'] : fer_t('ALEXA.LAUT_LEER'));
+            $fe_x2bean[] = 'tts_alexa_laut';
+            $fe_new['tts']['alexa_laut'] = $fe_tts_alt['alexa_laut'];
+        }
+    }
+    $fe_new['tts']['alexa_token'] = is_string($fe_tts_alt['alexa_token']) ? $fe_tts_alt['alexa_token'] : '';
+    if (isset($_POST['tts_alexa_token_loeschen'])) {
+        $fe_new['tts']['alexa_token'] = '';
+    } else {
+        $fe_atr = $fe_post('tts_alexa_token', '');
+        if (is_string($fe_atr)) { $fe_atr = trim($fe_atr); }
+        if ($fe_atr !== '') {
+            list($fe_atok, $fe_atw) = fer_wert_pruefen('tts.alexa_token', $fe_atr);
+            if ($fe_atok) {
+                $fe_new['tts']['alexa_token'] = $fe_atw;
+            } else {
+                // Die Meldung nennt nur die Art des Fehlers, nie den Wert.
+                $fe_fehler[] = fer_t(is_string($fe_atr) ? 'ALEXA.M_TOKEN_FORM' : 'ALEXA.M_TOKEN_TYP');
+                $fe_x2bean[] = 'tts_alexa_token';
+            }
+        }
+    }
+    if ($fe_new['tts']['mode'] === 'alexang' && !fer_alexa_token_ok($fe_new['tts']['alexa_token'])
+        && !in_array('tts_alexa_token', $fe_x2bean, true)) {
+        $fe_fehler[] = fer_t('ALEXA.M_TOKEN_FEHLT');
+        $fe_x2bean[] = 'tts_alexa_token';
+    }
     /* C8 (1.2.16): ueber fer_config_speichern() - Nebendatei, 0600,
      * Laengenvergleich, rename. */
     if ($fe_fehler) {
@@ -780,7 +833,8 @@ if (empty($fe_cfg['aktionstoken']) && $fe_zweit_voll) {
 $fe_notify = is_array($fe_cfg['notify']) ? $fe_cfg['notify'] : array();
 $fe_notify += array('audio' => 0, 'push' => 0, 'time' => '19:00', 'freetag' => 1, 'ferienstart' => 1, 'bridge_month' => 1);
 $fe_tts = is_array($fe_cfg['tts']) ? $fe_cfg['tts'] : array();
-$fe_tts += array('mode' => 'musicserver', 'ip' => '', 'port' => 7091, 'zones' => '1', 'volume' => 8, 'lang' => 'de', 'template' => '');
+$fe_tts += array('mode' => 'musicserver', 'ip' => '', 'port' => 7091, 'zones' => '1', 'volume' => 8, 'lang' => 'de', 'template' => '',
+                 'alexa_geraet' => '', 'alexa_token' => '', 'alexa_laut' => -1);
 $fe_st = function_exists('fer_state') ? fer_state() : array();
 /* Was die Aussieb-Einstellungen auf DIESER Anlage betreffen wuerden - nicht
  * "koennte etwas aendern", sondern eine Zahl. Gelesen wird die rohe
@@ -816,6 +870,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['fer_sichern'])) {
      * wer umzieht, braucht die Datei, und die Werte lassen sich darin
      * berichtigen. fer_sicherung_lesen() uebergeht Schluessel mit "_". */
     $fer_voll = fer_config();
+    /* Ansage-2: das Alexa-NG-Sprechtoken wird wie ein Kennwort behandelt und
+     * geht NICHT mit; das Zurueckspielen behaelt das geltende. */
+    if (isset($fer_voll['tts']) && is_array($fer_voll['tts'])) { unset($fer_voll['tts']['alexa_token']); }
     $fer_altw = fer_rueckspiel_altwerte($fer_voll);
     if ($fer_altw) {
         $fer_voll = array('_warnung' => sprintf(fer_t('SICHWARN.KOPF'), implode(', ', $fer_altw))) + $fer_voll;
@@ -944,7 +1001,7 @@ if (is_array($fe_x2)) {
                        'n_ferienstart' => 'ferienstart', 'n_bridge' => 'bridge_month') as $fe_xk => $fe_xz) {
             if (isset($fe_xw[$fe_xk])) { $fe_nanz[$fe_xz] = (int) $fe_xw[$fe_xk]; }
         }
-        foreach (array('mode', 'ip', 'port', 'zones', 'volume', 'lang', 'template') as $fe_xz) {
+        foreach (array('mode', 'ip', 'port', 'zones', 'volume', 'lang', 'template', 'alexa_geraet', 'alexa_laut') as $fe_xz) {
             if (isset($fe_xw['tts_' . $fe_xz])) { $fe_tanz[$fe_xz] = $fe_xw['tts_' . $fe_xz]; }
         }
         $fe_anz['own'] = array();
@@ -1395,6 +1452,7 @@ if (is_string($fe_anz['subdivision']) && $fe_anz['subdivision'] !== '' && !isset
             <option value="ms4h"<?= $fe_tanz['mode'] === 'ms4h' ? ' selected' : '' ?>><?php echo fer_t('TEXT.AUDIOSERVER4HOME_MUSICSERVER4HOME'); ?></option>
             <option value="audioserver"<?= $fe_tanz['mode'] === 'audioserver' ? ' selected' : '' ?>><?php echo fer_t('TEXT.ORIGINAL_LOXONE_AUDIOSERVER_VIA_LO'); ?></option>
             <option value="custom"<?= $fe_tanz['mode'] === 'custom' ? ' selected' : '' ?>><?php echo fer_t('TEXT.EIGENE_URL_VORLAGE'); ?></option>
+            <option value="alexang"<?= $fe_tanz['mode'] === 'alexang' ? ' selected' : '' ?>><?php echo fer_t('ALEXA.MODUS'); ?></option>
         </select>
     </div>
     <div>
@@ -1428,6 +1486,37 @@ if (is_string($fe_anz['subdivision']) && $fe_anz['subdivision'] !== '' && !isset
 </div>
 <div id="tts_audioserver_hint" class="sm-alert sm-info" style="display:none;">
     <?php echo fer_t('TEXT.DER_ORIGINALE_LOXONE_AUDIOSERVER_B'); ?> <b><?php echo fer_t('TEXT.KEINE_HTTP_TTS_SCHNITTSTELLE'); ?></b><?php echo fer_t('TEXT.IN_DIESEM_MODUS_SPRICHT_DAS_PLUGIN'); ?> <span class="sm-mono">ANN=1</span>.
+</div>
+<?php /* Ansage-2: Ausgabeart Alexa-NG (ab Werk nicht gewaehlt). Das Sprechtoken
+   reist NIE in die Seite: das Feld ist immer leer (Kennwortfeld), der
+   Platzhalter sagt nur, ob eines gespeichert ist und wie lang es ist. */
+$fe_atok_n = strlen(is_string($fe_tts['alexa_token']) ? $fe_tts['alexa_token'] : '');
+$fe_alaut_anz = (is_array($fe_x2) && array_key_exists('tts_alexa_laut', $fe_x2['werte']))
+    ? (string) $fe_x2['werte']['tts_alexa_laut']
+    : ((is_int($fe_tanz['alexa_laut']) && $fe_tanz['alexa_laut'] >= 0) ? (string) $fe_tanz['alexa_laut'] : '');
+$fe_aweg = is_array($fe_x2) && isset($fe_x2['werte']['tts_alexa_token_loeschen']) && $fe_x2['werte']['tts_alexa_token_loeschen'] === '1'; ?>
+<div id="tts_alexa_rows">
+<div class="sm-small"><?php echo fer_t('ALEXA.ERKL'); ?></div>
+<div class="sm-row">
+    <div>
+        <label for="tts_alexa_geraet"><?php echo fer_t('ALEXA.L_GERAET'); ?></label>
+        <input data-role="none" type="text" id="tts_alexa_geraet" name="tts_alexa_geraet"<?= fe_x2m('tts_alexa_geraet') ?> value="<?= fe_e($fe_tanz['alexa_geraet']) ?>" placeholder="kueche">
+        <div class="sm-small"><?php echo fer_t('ALEXA.H_GERAET'); ?></div>
+    </div>
+    <div>
+        <label for="tts_alexa_laut"><?php echo fer_t('ALEXA.L_LAUT'); ?></label>
+        <input data-role="none" type="<?= fe_x2typ('tts_alexa_laut') ?>" id="tts_alexa_laut" name="tts_alexa_laut"<?= fe_x2m('tts_alexa_laut') ?> value="<?= fe_e($fe_alaut_anz) ?>" min="0" max="100" placeholder="<?= fe_e(fer_t('ALEXA.P_LAUT')) ?>">
+        <div class="sm-small"><?php echo fer_t('ALEXA.H_LAUT'); ?></div>
+    </div>
+    <div>
+        <label for="tts_alexa_token"><?php echo fer_t('ALEXA.L_TOKEN'); ?></label>
+        <input data-role="none" type="password" id="tts_alexa_token" name="tts_alexa_token"<?= fe_x2m('tts_alexa_token') ?> value="" autocomplete="new-password" placeholder="<?= fe_e($fe_atok_n > 0 ? sprintf(fer_t('ALEXA.P_TOKEN_DA'), $fe_atok_n) : fer_t('ALEXA.P_TOKEN_LEER')) ?>">
+        <label style="display:inline-flex;align-items:center;gap:6px;font-weight:600;margin-top:4px;">
+            <input data-role="none" type="checkbox" name="tts_alexa_token_loeschen" value="1"<?= $fe_aweg ? ' checked' : '' ?>> <?php echo fer_t('ALEXA.L_TOKEN_LOESCHEN'); ?>
+        </label>
+        <div class="sm-small"><?php echo fer_t('ALEXA.H_TOKEN'); ?></div>
+    </div>
+</div>
 </div>
 
 <button data-role="none" class="sm-btn sm-b-aktion" type="submit"><?php echo fer_t('TEXT.SPEICHERN'); ?></button>
@@ -2012,6 +2101,8 @@ function feTtsMode() {
     var m = document.getElementById('tts_mode').value;
     document.getElementById('tts_audioserver_hint').style.display = (m === 'audioserver') ? 'block' : 'none';
     document.getElementById('tts_template_row').style.display = (m === 'ms4h' || m === 'custom') ? 'block' : 'none';
+    var al = document.getElementById('tts_alexa_rows');    // Ansage-2
+    if (al) { al.style.display = (m === 'alexang') ? 'block' : 'none'; }
     var port = document.getElementsByName('tts_port')[0];
     if (m === 'musicserver' && (!port.value || port.value === '80')) { port.value = 7091; }
 }

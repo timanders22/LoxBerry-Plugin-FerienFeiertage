@@ -363,7 +363,10 @@ function fer_config() {
         'bridge_month' => 1,         // im Januar die Brueckentage des Jahres melden
     );
     $cfg['tts'] += array('mode' => 'musicserver', 'ip' => '', 'port' => 7091,
-                         'zones' => '1', 'volume' => 8, 'lang' => 'de', 'template' => '');
+                         'zones' => '1', 'volume' => 8, 'lang' => 'de', 'template' => '',
+                         // Ansage-2: Alexa-NG (ab Werk nicht gewaehlt). Das Sprechtoken
+                         // ist ein Geheimnis: nie im Formular, nicht in der Sicherung.
+                         'alexa_geraet' => '', 'alexa_token' => '', 'alexa_laut' => -1);
     return $cfg;
 }
 
@@ -1898,6 +1901,12 @@ function fer_tts_url($text) {
 }
 
 function fer_say($text) {
+    /* Ansage-2: Alexa-NG hat keine Ansage-Adresse, sondern einen POST mit
+     * Sprechtoken (fer_alexa_sprechen() protokolliert selbst, ohne Token). */
+    $cfg_a = fer_config();
+    if (isset($cfg_a['tts']['mode']) && $cfg_a['tts']['mode'] === 'alexang') {
+        return fer_alexa_sprechen($text);
+    }
     $url = fer_tts_url($text);
     if ($url === null) {
         fer_log('Ansage: Modus "Original Loxone Audioserver" - Ausgabe erfolgt ueber Loxone Config');
@@ -1910,6 +1919,196 @@ function fer_say($text) {
     $r = fer_http($url, 10);
     fer_log('Ansage gesendet: "' . $text . '" -> ' . ($r !== false ? 'OK' : 'FEHLER'));
     return $r !== false;
+}
+
+/* ---------------- Ausgabeart Alexa-NG (Ansage-2, ab Werk nicht gewaehlt) ----------------
+ *
+ * Das Plugin LoxBerry-Plugin-Alexa-NG (Ordner alexang,
+ * https://github.com/timanders22/LoxBerry-Plugin-Alexa-NG) laesst Amazon-
+ * Echo-Geraete sprechen. Die Ansage geht per POST an seinen Endpunkt auf
+ * DIESEM LoxBerry (Webport aus general.json): aktion=sprechen, token, geraet
+ * (leer = Standardgeraet von Alexa-NG, dann nicht mitgeschickt), text,
+ * optional laut. Erfolg ist nur eine Antwort, die mit SPRECHEN;OK=1 beginnt.
+ *
+ * Das Sprechtoken ist ein Kennwort des anderen Plugins: es steht nie in einer
+ * Adresse (Adressen landen in Zugriffsprotokollen), nie im Formular, nie im
+ * Protokoll, nie in der Sicherung. Faellt Alexa-NG aus (403, 503, 200 mit
+ * OK=0, keine Verbindung, Zeitueberschreitung), entfaellt die Ansage - es gibt
+ * keinen stillen Wechsel auf einen anderen Lautsprecher -, und Protokoll,
+ * Reiter Test und ?say= nennen HTTP-Code und GRUND.
+ */
+
+/** Der Webport des LoxBerry (general.json, Webserver.Port); ohne Angabe 80. */
+function fer_webport() {
+    $p = fer_paths();
+    if ($p['lbhome'] !== '') {
+        $d = @json_decode((string) @file_get_contents($p['lbhome'] . '/config/system/general.json'), true);
+        if (is_array($d) && isset($d['Webserver']) && is_array($d['Webserver'])
+            && isset($d['Webserver']['Port']) && is_scalar($d['Webserver']['Port'])
+            && (int) $d['Webserver']['Port'] >= 1 && (int) $d['Webserver']['Port'] <= 65535) {
+            return (int) $d['Webserver']['Port'];
+        }
+    }
+    return 80;
+}
+
+/** Die Adresse des Alexa-NG-Endpunkts - ohne Token. */
+function fer_alexa_adresse() {
+    return 'http://127.0.0.1:' . fer_webport() . '/plugins/alexang/index.php';
+}
+
+/** Form des Sprechtokens: 8 bis 128 Zeichen aus A-Z a-z 0-9 _ - (Alexa-NG erzeugt 24 Hexzeichen). */
+function fer_alexa_token_ok($t) {
+    return is_string($t) && preg_match('/^[A-Za-z0-9_\-]{8,128}\z/', $t) === 1;
+}
+
+/**
+ * Ein POST an Alexa-NG. Rueckgabe: array(HTTP-Status, erste Antwortzeile, Art)
+ * mit Art 'antwort' (Status > 0), 'verbindung' (keine Verbindung) oder 'zeit'
+ * (keine Antwort in $tmo Sekunden). Ohne Weiterleitung. Der Status kommt aus
+ * stream_get_meta_data(), nicht aus $http_response_header (PHP 8.5). Die
+ * Antwortzeile wird um ein etwa darin stehendes Token bereinigt und auf
+ * harmlose Zeichen gekuerzt, bevor sie irgendwo hingeht.
+ */
+function fer_alexa_rufen(array $felder, $tmo) {
+    $ctx = stream_context_create(array('http' => array(
+        'method' => 'POST',
+        'header' => "Content-Type: application/x-www-form-urlencoded\r\nConnection: close\r\n",
+        'content' => http_build_query($felder, '', '&'),
+        'timeout' => $tmo, 'user_agent' => 'LoxBerry Ferien-Plugin',
+        'ignore_errors' => true, 'follow_location' => 0,
+    )));
+    $t0 = microtime(true);
+    $fh = @fopen(fer_alexa_adresse(), 'r', false, $ctx);
+    if ($fh === false) {
+        return array(0, '', (microtime(true) - $t0) >= $tmo - 0.5 ? 'zeit' : 'verbindung');
+    }
+    $meta = stream_get_meta_data($fh);
+    $inhalt = (string) @stream_get_contents($fh, 8192);
+    $nach = stream_get_meta_data($fh);
+    fclose($fh);
+    $code = 0;
+    foreach ((array) (isset($meta['wrapper_data']) ? $meta['wrapper_data'] : array()) as $z) {
+        if (is_string($z) && preg_match('#^HTTP/\S+\s+(\d{3})#', $z, $m)) { $code = (int) $m[1]; }
+    }
+    if ($inhalt === '' && !empty($nach['timed_out'])) {
+        return array(0, '', 'zeit');
+    }
+    $zeilen = preg_split('/\r?\n/', trim($inhalt));
+    $erste = trim((string) $zeilen[0]);
+    if (isset($felder['token']) && is_string($felder['token']) && $felder['token'] !== '') {
+        $erste = str_replace($felder['token'], '***', $erste);
+    }
+    $erste = substr(preg_replace('/[^A-Za-z0-9;=_.:,*\- ]/', '', $erste), 0, 160);
+    return array($code, $erste, $code > 0 ? 'antwort' : 'verbindung');
+}
+
+/** GRUND=... aus einer Antwortzeile von Alexa-NG ('' ohne). */
+function fer_alexa_grund($zeile) {
+    return preg_match('/(?:^|;)GRUND=([A-Za-z0-9_]{1,40})/', (string) $zeile, $m) ? $m[1] : '';
+}
+
+/** Ein Ergebnis fuer das Protokoll (ASCII, wie alle Protokollzeilen) - nie mit Token. */
+function fer_alexa_befund($code, $zeile, $art, $tmo) {
+    if ($art === 'zeit') { return 'Zeitueberschreitung, keine Antwort nach ' . (int) $tmo . ' s'; }
+    if ($art === 'verbindung') { return 'keine Verbindung zu ' . fer_alexa_adresse() . ' (Alexa-NG installiert?)'; }
+    if ($art === 'kein_token') { return 'kein Sprechtoken gespeichert'; }
+    $g = fer_alexa_grund($zeile);
+    return 'HTTP ' . (int) $code . (strpos((string) $zeile, ';OK=0') !== false ? ', OK=0' : '')
+        . ($g !== '' ? ', GRUND=' . $g : ($zeile !== '' ? ', Antwort "' . substr((string) $zeile, 0, 60) . '"' : ''));
+}
+
+/** Dasselbe in der Sprache der Oberflaeche (Reiter Test). */
+function fer_alexa_testtext($code, $zeile, $art, $tmo) {
+    if ($art === 'zeit') { return sprintf(fer_t('ALEXA.T_ZEIT'), (int) $tmo); }
+    if ($art === 'verbindung') { return sprintf(fer_t('ALEXA.T_KEINE_VERBINDUNG'), fer_alexa_adresse()); }
+    if ($art === 'kein_token') { return fer_t('ALEXA.T_KEIN_TOKEN'); }
+    return fer_alexa_befund($code, $zeile, $art, $tmo);
+}
+
+/** Das Ergebnis der letzten Ansage ablegen (Zwischenordner, 0600) - nie Token oder Text. */
+function fer_alexa_merken($ok, $code, $zeile, $art) {
+    fer_json_schreiben(fer_tmpdir() . '/alexa_letzte.json', array(
+        'zeit' => time(), 'ok' => $ok ? 1 : 0, 'code' => (int) $code,
+        'grund' => fer_alexa_grund($zeile), 'art' => (string) $art, 'zeile' => (string) $zeile,
+    ));
+}
+
+/** Das Ergebnis der letzten Ansage oder null. */
+function fer_alexa_letzte() {
+    $f = fer_tmpdir() . '/alexa_letzte.json';
+    if (!is_file($f)) { return null; }
+    $d = json_decode((string) @file_get_contents($f), true);
+    if (!is_array($d) || !isset($d['zeit'], $d['ok'], $d['code'], $d['art'])) { return null; }
+    return array('zeit' => (int) $d['zeit'], 'ok' => !empty($d['ok']), 'code' => (int) $d['code'],
+                 'grund' => (isset($d['grund']) && is_string($d['grund'])) ? $d['grund'] : '',
+                 'art' => (string) $d['art'],
+                 'zeile' => (isset($d['zeile']) && is_string($d['zeile'])) ? $d['zeile'] : '');
+}
+
+/** GRUND fuer die Antwortzeile von ?say=: der von Alexa-NG oder ein eigener. */
+function fer_alexa_grund_kurz($l) {
+    if (!is_array($l)) { return '-'; }
+    if ($l['grund'] !== '') { return $l['grund']; }
+    $eigen = array('zeit' => 'ZEIT', 'verbindung' => 'KEINE_VERBINDUNG', 'kein_token' => 'KEIN_TOKEN');
+    return isset($eigen[$l['art']]) ? $eigen[$l['art']] : '-';
+}
+
+/** Eine Ansage ueber Alexa-NG (10 s). Rueckgabe true nur bei SPRECHEN;OK=1. */
+function fer_alexa_sprechen($text) {
+    $cfg = fer_config();
+    $t = $cfg['tts'];
+    $tok = (isset($t['alexa_token']) && is_string($t['alexa_token'])) ? $t['alexa_token'] : '';
+    if (!fer_alexa_token_ok($tok)) {
+        fer_alexa_merken(false, 0, '', 'kein_token');
+        fer_log('Ansage uebersprungen: Ausgabeart Alexa-NG, aber kein Sprechtoken gespeichert');
+        return false;
+    }
+    $f = array('aktion' => 'sprechen', 'token' => $tok);
+    $g = (isset($t['alexa_geraet']) && is_string($t['alexa_geraet'])) ? $t['alexa_geraet'] : '';
+    if ($g !== '') { $f['geraet'] = $g; }
+    $f['text'] = (string) $text;
+    if (isset($t['alexa_laut']) && is_int($t['alexa_laut']) && $t['alexa_laut'] >= 0 && $t['alexa_laut'] <= 100) {
+        $f['laut'] = $t['alexa_laut'];
+    }
+    list($code, $zeile, $art) = fer_alexa_rufen($f, 10);
+    $ok = $code === 200 && strpos($zeile, 'SPRECHEN;OK=1') === 0;
+    fer_alexa_merken($ok, $code, $zeile, $art);
+    fer_log('Ansage gesendet (Alexa-NG' . ($g !== '' ? ', Geraet ' . $g : '') . '): "' . $text . '" -> '
+        . ($ok ? 'OK' : 'FEHLER ' . fer_alexa_befund($code, $zeile, $art, 10)));
+    return $ok;
+}
+
+/**
+ * Die Zeile "Ansage ueber Alexa-NG" im Reiter Test - null, wenn Alexa-NG nicht
+ * die Ausgabeart ist. Gefragt werden selftest=1 (prueft nur das Token, kein
+ * Amazon) und aktion=status (Anmeldung bei Amazon), beide per POST, je
+ * hoechstens 5 s. Dazu das Ergebnis der letzten echten Ansage: ein 503, ein
+ * 200 mit OK=0 oder eine Zeitueberschreitung beim Senden steht damit auch
+ * hier, nicht nur im Protokoll. Rueckgabe: array(Frage, ok, Hinweis).
+ */
+function fer_alexa_pruefzeile($cfg) {
+    if (!isset($cfg['tts']['mode']) || $cfg['tts']['mode'] !== 'alexang') { return null; }
+    $frage = fer_t('ALEXA.F_TEST');
+    $aus = empty($cfg['notify']['audio']) ? ' ' . fer_t('ALEXA.T_AUDIO_AUS') : '';
+    $tok = (isset($cfg['tts']['alexa_token']) && is_string($cfg['tts']['alexa_token'])) ? $cfg['tts']['alexa_token'] : '';
+    if (!fer_alexa_token_ok($tok)) {
+        return array($frage, false, fer_t('ALEXA.T_KEIN_TOKEN') . $aus);
+    }
+    list($c1, $z1, $a1) = fer_alexa_rufen(array('selftest' => '1', 'token' => $tok), 5);
+    if ($c1 !== 200 || strpos($z1, 'SELFTEST;OK=1') !== 0) {
+        return array($frage, false, sprintf(fer_t('ALEXA.T_SELFTEST_FEHL'), fer_alexa_testtext($c1, $z1, $a1, 5)) . $aus);
+    }
+    list($c2, $z2, $a2) = fer_alexa_rufen(array('aktion' => 'status'), 5);
+    $ok = $c2 === 200 && strpos($z2, 'ALEXANG;OK=1') === 0;
+    $txt = $ok ? fer_t('ALEXA.T_OK') : sprintf(fer_t('ALEXA.T_STATUS_FEHL'), fer_alexa_testtext($c2, $z2, $a2, 5));
+    $l = fer_alexa_letzte();
+    if ($l !== null) {
+        $txt .= ' ' . sprintf(fer_t($l['ok'] ? 'ALEXA.T_LETZTE_OK' : 'ALEXA.T_LETZTE_FEHL'), date('d.m.Y H:i', $l['zeit']),
+            $l['ok'] ? 'SPRECHEN;OK=1' : fer_alexa_testtext($l['code'], $l['zeile'], $l['art'], 10));
+        if (!$l['ok']) { $ok = false; }
+    }
+    return array($frage, $ok, $txt . $aus);
 }
 
 /** Ansagetext fuer den Vorabend. */
@@ -2714,7 +2913,12 @@ function fer_selbsttest($basis = '', $vorher = null) {
     }
 
     /* --- 6. Ansage ------------------------------------------------------ */
-    if (!empty($cfg['notify']['audio'])) {
+    /* Ansage-2: ist Alexa-NG die Ausgabeart, gibt es keine Ansage-Adresse zu
+     * bilden; die eigene Zeile fragt Alexa-NG selbst (fer_alexa_pruefzeile()). */
+    $alexa_z = fer_alexa_pruefzeile($cfg);
+    if ($alexa_z !== null) {
+        $add($alexa_z[0], $alexa_z[1], $alexa_z[2]);
+    } elseif (!empty($cfg['notify']['audio'])) {
         $url = fer_tts_url('Probe');
         $add(fer_t('PRUEF.F_ANSAGE'), $url === null ? null : ($url !== ''),
             fer_t($url === null ? 'PRUEF.H_ANSAGE_AUDIOSERVER' : ($url !== '' ? 'PRUEF.JA' : 'PRUEF.H_ANSAGE_OHNE_IP')));
@@ -3081,6 +3285,18 @@ function fer_sicherung_lesen($roh, $geltend = null, &$namen = null)
             $anzahl++;
             continue;
         }
+        /* Ansage-2: das Alexa-NG-Sprechtoken steht in keiner Sicherung dieses
+         * Plugins. Bringt eine Datei eines mit, wird sie abgewiesen - benannt,
+         * nie mit dem Wert; ein leeres Feld ist keines. Das geltende bleibt
+         * (unten, nach der Schleife). */
+        if ($k === 'tts' && is_array($w) && array_key_exists('alexa_token', $w)) {
+            if ($w['alexa_token'] !== '') {
+                $mangel[] = fer_t('ALEXA.SICH_TOKEN');
+                $namen[] = 'tts.alexa_token';
+                continue;
+            }
+            unset($w['alexa_token']);
+        }
         /* C1: jeder Wert wie im Formular - Typ, Muster, Bereich, Auswahl.
          * Bis 1.2.15 wurde nur der SCHLUESSEL geprueft: ein Token als Liste
          * wurde am Endpunkt zu "Array" und oeffnete ihn, ein Land als Liste
@@ -3136,6 +3352,14 @@ function fer_sicherung_lesen($roh, $geltend = null, &$namen = null)
     }
     /* Die Meldungen sind reiner Text: die Oberflaeche maskiert sie genau
      * einmal (O3 - bis 1.2.15 wurde ein fremder Schluessel zweimal maskiert). */
+    /* Ansage-2: das geltende Sprechtoken bleibt (es steht in keiner Sicherung). */
+    if (!$mangel && is_array($neu['tts'])) {
+        $alt_tok = (is_array($geltend) && isset($geltend['tts']) && is_array($geltend['tts'])
+            && isset($geltend['tts']['alexa_token']) && fer_alexa_token_ok($geltend['tts']['alexa_token']))
+            ? $geltend['tts']['alexa_token'] : '';
+        $neu['tts']['alexa_token'] = $alt_tok;
+        if ($alt_tok !== '') { $hinweise[] = fer_t('ALEXA.SICH_BLEIBT'); }
+    }
     return array($mangel ? null : $neu, $mangel, $anzahl, $hinweise);
 }
 
@@ -3153,6 +3377,8 @@ function fer_sicherung_lesen($roh, $geltend = null, &$namen = null)
 function fer_rueckspiel_altwerte($voll = null)
 {
     if ($voll === null) { $voll = fer_config(); }
+    // Ansage-2: wie "Einstellungen sichern" ohne das Alexa-NG-Sprechtoken.
+    if (isset($voll['tts']) && is_array($voll['tts'])) { unset($voll['tts']['alexa_token']); }
     $js = json_encode($voll, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
     if ($js === false) { return array('(JSON)'); }
     $namen = array();
@@ -3267,7 +3493,26 @@ function fer_wert_pruefen($k, $w)
             $r = $text($w, '/^([01]?\d|2[0-3]):[0-5]\d\z/', 'SS:MM (00:00-23:59)', false);
             return $r;
         case 'tts.mode':
-            return $auswahl($w, array('musicserver', 'ms4h', 'audioserver', 'custom'));
+            return $auswahl($w, array('musicserver', 'ms4h', 'audioserver', 'custom', 'alexang'));
+        case 'tts.alexa_geraet':
+            /* Ansage-2: leer = Standardgeraet von Alexa-NG; sonst bis 200 Byte
+             * ohne Steuerzeichen (Normalname, Komma-Liste, gruppe:<name>, alle). */
+            $r = $text($w, $ohne_steuer, fer_t('MELD.FORM_TEXT'), true);
+            if ($r[0] && strlen($r[1]) > 200) { return array(false, null, sprintf(fer_t('MELD.W_LAENGE'), 200)); }
+            return $r;
+        case 'tts.alexa_laut':
+            /* -1 = die Lautstaerke des Geraets bleibt (im Formular: leer); sonst 0..100. */
+            if ($w === -1) { return array(true, -1, ''); }
+            return $zahl($w, 0, 100);
+        case 'tts.alexa_token':
+            /* Nur das Formular fragt hiernach; der Grund zeigt den Wert nie. */
+            if (!is_string($w)) {
+                return array(false, null, sprintf(fer_t('MELD.W_TYP'), $typ($w)));
+            }
+            if (!fer_alexa_token_ok($w)) {
+                return array(false, null, sprintf(fer_t('MELD.W_FORM'), '', fer_t('ALEXA.FORM_TOKEN')));
+            }
+            return array(true, $w, '');
         case 'tts.ip':
             return $text($w, '/^[A-Za-z0-9.\-]{1,253}\z/', fer_t('MELD.FORM_IP'), true);
         case 'tts.port':
@@ -3289,7 +3534,8 @@ function fer_wert_pruefen($k, $w)
             }
             $soll = $k === 'notify'
                 ? array('audio', 'push', 'time', 'freetag', 'ferienstart', 'bridge_month')
-                : array('mode', 'ip', 'port', 'zones', 'volume', 'lang', 'template');
+                : array('mode', 'ip', 'port', 'zones', 'volume', 'lang', 'template',
+                        'alexa_geraet', 'alexa_laut');     // Ansage-2 (ohne Sprechtoken)
             $aus = array();
             $gruende = array();
             foreach ($w as $uk => $uw) {

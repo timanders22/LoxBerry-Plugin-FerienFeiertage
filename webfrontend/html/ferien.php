@@ -180,7 +180,15 @@ if (isset($_GET['say'])) {
         $text = 'Hallo! Dies ist eine Testansage des Ferien-Plugins. Morgen ist ein ganz normaler Tag.';
     }
     $ok = fer_say($text);
-    echo 'SAY;OK=' . ($ok ? 1 : 0) . ";TEXT=$text\n";
+    /* Ansage-2: bei Alexa-NG nennt die Zeile im Fehlerfall HTTP-Code und GRUND
+     * (nie das Token); die anderen Ausgabearten antworten wie bisher. */
+    $zus = '';
+    $cfg_s = fer_config();
+    if (!$ok && $cfg_s['tts']['mode'] === 'alexang') {
+        $l = fer_alexa_letzte();
+        $zus = ';CODE=' . ($l !== null ? (int) $l['code'] : 0) . ';GRUND=' . fer_alexa_grund_kurz($l);
+    }
+    echo 'SAY;OK=' . ($ok ? 1 : 0) . $zus . ";TEXT=$text\n";
     exit;
 }
 

@@ -10,6 +10,27 @@ Bundesländern/Kantonen.
 
 Kompatibel mit LoxBerry 3.x und **LoxBerry 4** (reines PHP, PHP 7.4 und 8.x).
 
+## Neu in 1.2.18
+
+Ansage-2 aus der Verbesserungsliste (`Pruefung-Durchgang-2026-09-29/VERBESSERUNGEN_OFFEN.md`).
+Gemessen an einer Attrappe unter PHP 7.4 und 8.5; nicht am Gerät.
+
+* **Neue Ausgabeart „Alexa-NG“** für Ansagen über Amazon-Echo-Geräte, ab Werk
+  nicht gewählt. Voraussetzung ist das Plugin
+  [Alexa-NG](https://github.com/timanders22/LoxBerry-Plugin-Alexa-NG). Eingetragen
+  werden Gerät (leer = Standardgerät), Lautstärke (leer = bleibt) und das
+  Sprechtoken.
+* Das Sprechtoken wird wie ein Kennwort behandelt: nie angezeigt, nie in Adresse
+  oder Protokoll, nicht in „Einstellungen sichern“. Leer lassen behält es, ein
+  Haken löscht es. Eine Sicherung mit Token wird beim Zurückspielen abgewiesen.
+* Ausfälle nennen Protokoll, Reiter Test (eigene Zeile „Ansage über Alexa-NG“) und
+  `?say=1` mit HTTP-Code und Grund.
+* Ungültige Eingaben (Token zu kurz, Lautstärke außerhalb 0–100, Alexa-NG ohne
+  Token) werden beanstandet; es wird dann nichts gespeichert. Beanstandete Felder
+  tragen `aria-invalid`.
+* Hinweis: Eine mit dieser Fassung erstellte Sicherung lässt sich in 1.2.17 und
+  älter nicht zurückspielen (unbekannte Felder).
+
 ## Neu in 1.2.17
 
 Verbesserungen aus dem Durchgang vom 30.09.2026 (Verbesserungsliste
@@ -219,6 +240,15 @@ Nicht am Gerät gemessen.
   iCloud statt der sechs handgepflegten Zeilen. Übernommen werden
   Ganztagstermine; Termine mit Uhrzeit und Wiederholungen bleiben außen vor
 - **Vorabend-Ansage** (TTS) „Morgen ist schulfrei" und Push-Auslöser für Loxone
+- **Ansage über Alexa-NG** (Ausgabeart „Alexa-NG“, ab Werk nicht gewählt):
+  Echo-Geräte sprechen die Vorabend-Ansage über das Plugin
+  [LoxBerry-Plugin-Alexa-NG](https://github.com/timanders22/LoxBerry-Plugin-Alexa-NG).
+  Eingetragen werden Gerät (leer = Standardgerät von Alexa-NG), Lautstärke
+  (leer = bleibt) und das Sprechtoken aus Alexa-NG. Die Ansage geht per POST
+  an `http://127.0.0.1:<Webport>/plugins/alexang/index.php`. Fällt Alexa-NG
+  aus (Token falsch, nicht bei Amazon angemeldet, keine Antwort in 10 s),
+  entfällt die Ansage; Protokoll, Reiter Test und `?say=1` nennen HTTP-Code
+  und `GRUND`
 - **MQTT** über das LoxBerry MQTT Gateway, **JSON** für Drittsoftware. Beide
   Wege tragen dieselben Werte, weil sie aus einer einzigen Feldliste entstehen
 - **Selbstprüfung** im Reiter Test: beantwortet ohne Loxone, ob die Einrichtung
@@ -238,7 +268,7 @@ Nicht am Gerät gemessen.
 | `/plugins/ferien/ferien.php?debug=1` | Ferien-, Feiertags- und Brückentagsliste im Klartext |
 | `/plugins/ferien/ferien.php?refresh=1&token=…` | Daten sofort neu abrufen **(Token nötig, höchstens einmal je 5 min)** |
 | `/plugins/ferien/ferien.php?json=1` | kompletter Zustand als JSON |
-| `/plugins/ferien/ferien.php?say=1&token=…` | Test-Ansage **(Token nötig)** |
+| `/plugins/ferien/ferien.php?say=1&token=…` | Test-Ansage **(Token nötig)**; mit Alexa-NG im Fehlerfall `SAY;OK=0;CODE=…;GRUND=…` |
 | `/plugins/ferien/ferien.php?ptest=1&token=…` | Test-Pushnachricht auslösen **(Token nötig)** |
 | `/plugins/ferien/ferien.php?selftest=1&token=…` | nur prüfen, ob das Token stimmt — löst nichts aus |
 
@@ -251,6 +281,14 @@ Verbindungen gibt es zur öffentlichen OpenHolidays-API (ohne Kennung) und —
 (ICS). Diese Adresse ist bei Google oder iCloud oft ein geheimer Link; sie
 steht in der Konfiguration und in der Sicherungsdatei und ist wie ein Passwort
 zu behandeln.
+
+Das **Sprechtoken für Alexa-NG** (nur mit dieser Ausgabeart) wird wie ein
+Kennwort behandelt: Es geht nur im Körper einer POST-Anfrage an Alexa-NG auf
+demselben LoxBerry (127.0.0.1), nie in einer Adresse. Es wird nie angezeigt
+(das Feld bleibt leer, es steht nur „gespeichert (n Zeichen)“), nie
+protokolliert und steht nicht in der Sicherungsdatei. Leer lassen behält es,
+ein Haken löscht es. Beim Zurückspielen einer Sicherung bleibt das
+gespeicherte; eine Datei mit Sprechtoken wird abgewiesen.
 
 ## Fassung 1.2.9 — der Stat-Zwischenspeicher
 Die Protokollkappung (512 000 Byte) stand in
