@@ -3228,12 +3228,32 @@ function fer_mqtt_gateway_autostart() {
     return !empty($d['Mqtt']['Gatewayautostart']);
 }
 
-/** Vorlage fuer den Import in Loxone Config. Rueckgabe: array(name, inhalt) */
-function fer_vorlage() {
+/**
+ * Kopf der Importvorlage: Titel, Hinweistext, Adresse, Abfragezyklus. EINE
+ * Quelle fuer die Importdatei und die Baustein-Liste im Reiter "Einbindung in
+ * Loxone" (X-8, 02.10.2026) - bis 1.2.20 stand der Kopf nur als Literal in
+ * fer_vorlage(), und die Liste nannte den Titel gar nicht.
+ */
+function fer_vorlage_kopf() {
     $host = isset($_SERVER['HTTP_HOST']) && $_SERVER['HTTP_HOST'] !== ''
         ? preg_replace('/[^A-Za-z0-9\.\-:]/', '', (string) $_SERVER['HTTP_HOST'])
         : (gethostname() ?: 'loxberry');
     $ordner = getenv('LBPPLUGINDIR') ?: 'ferien';
+    return array(
+        'title' => 'Ferien und Feiertage',
+        'hint' => 'Schulferien, Feiertage, Brueckentage und Urlaub vom LoxBerry-Plugin Ferien und Feiertage. '
+                . 'Eine Zahl gilt nur zusammen mit OK=1.',
+        'address' => 'http://' . $host . '/plugins/' . $ordner . '/ferien.php',
+        'polling' => '300',
+    );
+}
+
+/**
+ * Die Befehle des virtuellen HTTP-Eingangs - EINE Quelle fuer die Importdatei
+ * und die Baustein-Liste (X-8, 02.10.2026). 'feld' liest nur die Liste; die
+ * Vorlage schreibt es nicht.
+ */
+function fer_eingangsbefehle() {
     $cmds = array();
     foreach (fer_felder() as $name => $f) {
         // Das sechste Element ist das MQTT-Thema; die Importdatei braucht es
@@ -3253,18 +3273,19 @@ function fer_vorlage() {
             'check' => fer_check($name),
             'unit' => ($einheit !== '' ? '<v.1> ' . $einheit : '<v.1>'),
             'analog' => $analog, 'min' => $min, 'max' => $max,
+            'feld' => $name,
         );
     }
-    return array('VI_ferien.xml', fer_xml_virtual_in_http(array(
-        'title' => 'Ferien und Feiertage',
-        'hint' => 'Schulferien, Feiertage, Brueckentage und Urlaub vom LoxBerry-Plugin Ferien und Feiertage. '
-                . 'Eine Zahl gilt nur zusammen mit OK=1.',
-        'address' => 'http://' . $host . '/plugins/' . $ordner . '/ferien.php',
-        'polling' => '300',
+    return $cmds;
+}
+
+/** Vorlage fuer den Import in Loxone Config. Rueckgabe: array(name, inhalt) */
+function fer_vorlage() {
+    return array('VI_ferien.xml', fer_xml_virtual_in_http(fer_vorlage_kopf() + array(
         'comment' => 'Erzeugt vom LoxBerry-Plugin Ferien und Feiertage (' . date('d.m.Y') . '). '
                    . 'Loxone Config legt beim Import neu an und ueberschreibt nichts - '
                    . 'zweimal eingelesen ergibt doppelte Bausteine.',
-    ), $cmds));
+    ), fer_eingangsbefehle()));
 }
 
 

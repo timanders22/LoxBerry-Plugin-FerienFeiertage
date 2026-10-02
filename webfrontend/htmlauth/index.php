@@ -1767,61 +1767,101 @@ $fe_praefix = trim((string) $fe_cfg['mqtt_topic']) !== '' ? trim((string) $fe_cf
 </form>
 
 <div class="sm-step"><b><?php echo fer_t('TEXT.SCHRITT_4_KOMPLETTE_BAUSTEIN_LISTE'); ?></b><br>
-<b><?php echo fer_t('TEXT.4A_WECKER_UND_BRIEFING_NUR_AN_SCHU'); ?></b>
-<table class="sm-tbl">
-<tr><th><?php echo fer_t('TEXT.BAUSTEIN'); ?></th><th><?php echo fer_t('TEXT.NAME_2'); ?></th><th><?php echo fer_t('TEXT.EINSTELLUNG'); ?></th><th><?php echo fer_t('TEXT.EINGNGE'); ?></th></tr>
-<tr><td><?php echo fer_t('TEXT.SCHWELLWERTSCHALTER_S1'); ?></td><td><?php echo fer_t('TEXT.MORGEN_IST_SCHULTAG'); ?></td><td><?php echo fer_t('TEXT.EIN_0_5_AUS_0_4'); ?></td><td><?php echo fer_t('TEXT.MSCHULTAG'); ?></td></tr>
-<tr><td><?php echo fer_t('TEXT.SCHWELLWERTSCHALTER_S2'); ?></td><td><?php echo fer_t('TEXT.HEUTE_IST_SCHULTAG'); ?></td><td><?php echo fer_t('TX.SCHWELLE'); ?></td><td><?php echo fer_t('TEXT.SCHULTAG_2'); ?></td></tr>
-<tr><td><?php echo fer_t('TEXT.UND_U1'); ?></td><td><?php echo fer_t('TEXT.WECKER_FREIGEBEN'); ?></td><td><?php echo fer_t('TEXT.AUF_DEN_FREIGABE_EINGANG_DES_WECKE'); ?></td><td><?php echo fer_t('TEXT.S2_EIGENER_SCHALTER_WECKER_AKTIV'); ?></td></tr>
-<tr><td><?php echo fer_t('TEXT.UND_U2'); ?></td><td><?php echo fer_t('TEXT.MORGEN_BRIEFING_FREIGEBEN'); ?></td><td><?php echo fer_t('TEXT.ERSETZT_DIE_BISHERIGE_FERIEN_FEIER'); ?></td><td><?php echo fer_t('TEXT.S2_BRIEFING_SCHALTER'); ?></td></tr>
-<tr><td><?php echo fer_t('TEXT.NICHT_N1_UND_U3'); ?></td><td><?php echo fer_t('TEXT.SPTE_ZEITEN_AN_FREIEN_TAGEN'); ?></td><td><?php echo fer_t('TEXT.Z_B_ROLLLADEN_ERST_8_30_STATT_7_00'); ?></td><td><?php echo fer_t('TEXT.N1_S2_U3_N1_ZEITIMPULS'); ?></td></tr>
-</table>
-<b><?php echo fer_t('TEXT.4B_VORABEND_MELDUNG_MORGEN_IST_FRE'); ?></b>
-<table class="sm-tbl">
-<tr><th><?php echo fer_t('TEXT.BAUSTEIN'); ?></th><th><?php echo fer_t('TEXT.NAME_2'); ?></th><th><?php echo fer_t('TEXT.EINSTELLUNG'); ?></th><th><?php echo fer_t('TEXT.EINGNGE'); ?></th></tr>
-<tr><td><?php echo fer_t('TEXT.SCHWELLWERTSCHALTER_S3'); ?></td><td><?php echo fer_t('TEXT.MELDEFENSTER_AKTIV'); ?></td><td><?php echo fer_t('TX.SCHWELLE'); ?></td><td><?php echo fer_t('TEXT.ANN'); ?></td></tr>
-<tr><td><?php echo fer_t('TEXT.SCHWELLWERTSCHALTER_S4'); ?></td><td><?php echo fer_t('TEXT.PUSH_FREIGEGEBEN'); ?></td><td><?php echo fer_t('TX.SCHWELLE'); ?></td><td><?php echo fer_t('TEXT.PUSH'); ?></td></tr>
-<tr><td><?php echo fer_t('TEXT.UND_U4'); ?></td><td><?php echo fer_t('TEXT.FREI_MELDUNG_JETZT'); ?></td><td></td><td><?php echo fer_t('TEXT.S3_S4'); ?></td></tr>
-<tr><td><?php echo fer_t('TEXT.ODER_O1'); ?></td><td><?php echo fer_t('TEXT.PUSH_SAMMLER'); ?></td><td><?php echo fer_t('TEXT.EINZIGE_QUELLE_DES_BENACHRICHTIGUN'); ?></td><td>U4</td></tr>
-<tr><td><?php echo fer_t('TEXT.BENACHRICHTIGUNGS_BAUSTEIN'); ?></td><td><?php echo fer_t('TEXT.PUSH_MORGEN_IST_FREI'); ?></td><td><?php echo fer_t('TEXT.TEXT_Z_B_MORGEN_IST_SCHULFREI_DER_'); ?></td><td><?php echo fer_t('TEXT.O1'); ?></td></tr>
-<tr><td><?php echo fer_t('TEXT.BENACHRICHTIGUNGS_BAUSTEIN_2'); ?></td><td><?php echo fer_t('TEXT.TEST_PUSH'); ?></td><td><?php echo fer_t('TEXT.EIGENER_BAUSTEIN_NUR_FR_DEN_TEST'); ?></td><td><?php echo fer_t('TEXT.SCHWELLWERTSCHALTER_AN_PTEST'); ?></td></tr>
-</table>
-<b><?php echo fer_t('TEXT.4C_FERIEN_COUNTDOWN_UND_BRCKENTAGE'); ?></b>
-<table class="sm-tbl">
-<tr><th><?php echo fer_t('TEXT.BAUSTEIN'); ?></th><th><?php echo fer_t('TEXT.NAME_2'); ?></th><th><?php echo fer_t('TEXT.EINSTELLUNG'); ?></th><th><?php echo fer_t('TEXT.EINGNGE'); ?></th></tr>
-<tr><td><?php echo fer_t('TEXT.STATUSBAUSTEIN'); ?></td><td><?php echo fer_t('TEXT.FERIEN_KACHEL'); ?></td><td><?php echo fer_t('TEXT.TEXT_NOCH_V1_0_TAGE_BIS_ZU_DEN_FER'); ?></td><td><?php echo fer_t('TEXT.I1_FERIENIN_I2_FERIENREST'); ?></td></tr>
-<tr><td><?php echo fer_t('TEXT.SCHWELLWERTSCHALTER_S5_IMPULS'); ?></td><td><?php echo fer_t('TEXT.BRCKENTAG_HINWEIS'); ?></td><td><?php echo fer_t('TEXT.S5_AN_MBRUECKE_MIT_EINEM_ZEITIMPUL'); ?></td><td><?php echo fer_t('TEXT.MBRUECKE'); ?></td></tr>
-<tr><td><?php echo fer_t('TEXT.SCHWELLWERTSCHALTER_S6'); ?></td><td><?php echo fer_t('TEXT.FERIENMODUS_ANWESENHEIT'); ?></td><td><?php echo fer_t('TEXT.AN_FERIEN_Z_B_HEIZPROGRAMM_ODER_BE'); ?></td><td><?php echo fer_t('TEXT.FERIEN_3'); ?></td></tr>
-</table>
-<b><?php echo fer_t('TEXT.4D_URLAUBSMODUS_ABWESENHEIT'); ?></b>
-<table class="sm-tbl">
-<tr><th><?php echo fer_t('TEXT.BAUSTEIN'); ?></th><th><?php echo fer_t('TEXT.NAME_2'); ?></th><th><?php echo fer_t('TEXT.EINSTELLUNG'); ?></th><th><?php echo fer_t('TEXT.EINGNGE'); ?></th></tr>
-<tr><td><?php echo fer_t('TEXT.SCHWELLWERTSCHALTER_S7'); ?></td><td><?php echo fer_t('TEXT.URLAUB_AKTIV'); ?></td><td><?php echo fer_t('TX.SCHWELLE'); ?></td><td><?php echo fer_t('TEXT.URLAUB'); ?></td></tr>
-<tr><td><?php echo fer_t('TEXT.SCHWELLWERTSCHALTER_S8'); ?></td><td><?php echo fer_t('TEXT.LETZTER_URLAUBSTAG_2'); ?></td><td><?php echo fer_t('TX.SCHWELLE'); ?></td><td><?php echo fer_t('TEXT.URLAUBENDE_2'); ?></td></tr>
-<tr><td><?php echo fer_t('TEXT.ODER_O2'); ?></td><td><?php echo fer_t('TX.URLAUBSMODUS'); ?></td><td><?php echo fer_t('TEXT.SAMMELT_KALENDER_URLAUB_UND_DEN_HA'); ?></td><td><?php echo fer_t('TEXT.S7_MERKER_URLAUB_MANUELL'); ?></td></tr>
-<tr><td><?php echo fer_t('TEXT.ANWESENHEITSSIMULATION'); ?></td><td><?php echo fer_t('TEXT.TEXT_3'); ?></td><td><?php echo fer_t('TEXT.EINGANG_AKTIVIEREN'); ?></td><td><?php echo fer_t('TEXT.O2'); ?></td></tr>
-<tr><td><?php echo fer_t('TEXT.INTELLIGENTE_RAUMREGELUNG'); ?></td><td><?php echo fer_t('TEXT.HEIZUNG'); ?></td><td><?php echo fer_t('TEXT.EINGANG_FR_DEN_BETRIEBSART_ABSENKB'); ?></td><td>&larr; O2</td></tr>
-<tr><td><?php echo fer_t('TEXT.NICHT_N2_UND_U5'); ?></td><td><?php echo fer_t('TEXT.VORWRMEN_ZUR_RCKKEHR'); ?></td><td><?php echo fer_t('TEXT.S8_HEBT_DIE_ABSENKUNG_AM_LETZTEN_U'); ?></td><td><?php echo fer_t('TEXT.N2_S8_U5_O2_N2_ABSENKUNG'); ?></td></tr>
-<tr><td><?php echo fer_t('TEXT.UND_U6_STECKDOSEN'); ?></td><td><?php echo fer_t('TEXT.VERBRAUCHER_ABSCHALTEN'); ?></td><td><?php echo fer_t('TEXT.AUS_BEFEHL_AN_STECKDOSEN_HANDTUCHH'); ?></td><td>&larr; O2</td></tr>
-<tr><td><?php echo fer_t('TX.STATUSBAUSTEIN'); ?></td><td><?php echo fer_t('TEXT.URLAUBS_KACHEL'); ?></td><td><?php echo fer_t('TEXT.TEXT_URLAUB_NOCH_V1_0_TAGE_BZW_ABR'); ?></td><td><?php echo fer_t('TEXT.I1_URLAUBREST_I2_URLAUBIN'); ?></td></tr>
-</table>
-<div class="sm-small"><?php echo fer_t('TEXT.WICHTIG_DEN_URLAUBSMODUS_NIE_DIREK'); ?> <b><?php echo fer_t('TEXT.NICHT'); ?></b> <?php echo fer_t('TEXT.ALLEIN_AM_KALENDER_HNGEN_SONDERN_Z'); ?></div>
-
-<b><?php echo fer_t('T12.BL_4E'); ?></b>
+<?php /* X-8 (02.10.2026, Entscheidung 36): Komplette Baustein-Liste in der Hausform
+         # | Baustein (Typ) | Name (Vorschlag) | Parameter | Eingaenge verbinden mit.
+         Bis 1.2.20 fuenf Teiltabellen ohne Nummer; die Teilueberschriften 4a-4e
+         stehen jetzt unter der Tabelle mit ihren Zeilennummern. Titel, Adresse,
+         Suchtexte, Grenzen und Einheiten kommen aus DENSELBEN Funktionen wie die
+         Importdatei (fer_vorlage_kopf(), fer_eingangsbefehle()). Typ, Name, Parameter
+         und Verbindung der Logik stehen in [BAUSTEIN] der Sprachdateien; {Kennung}
+         in einem Text wird zur laufenden Nummer "#n".
+         Zeile: array(Kennung, Typ, Name, Parameter, Argumente, Verbindung). Ein Name
+         als array('text' => ...) ist fertig (aus dem Code, maskiert) und geht nicht
+         noch einmal durch fer_t(). */
+$fe_bs_m = function ($s) { return '<span class="sm-mono">' . fe_e($s) . '</span>'; };
+$fe_bs_kopf = fer_vorlage_kopf();
+$fe_bs = array(
+    array('VI', 'T_VI', array('text' => fe_e($fe_bs_kopf['title'])), 'P_VI',
+          array($fe_bs_m($fe_bs_kopf['address']), fe_e($fe_bs_kopf['polling'])), 'V_KEINE'),
+);
+$fe_bs_letztes = 'VI';
+foreach (fer_eingangsbefehle() as $fe_bc) {
+    $fe_bs_letztes = 'F_' . $fe_bc['feld'];
+    $fe_bs[] = array($fe_bs_letztes, 'T_VI_BEFEHL', array('text' => fe_e($fe_bc['title'])), 'P_VI_BEFEHL',
+                     array(fe_e($fe_bc['comment']), $fe_bs_m($fe_bc['check']), (int) $fe_bc['min'],
+                           (int) $fe_bc['max'], $fe_bs_m($fe_bc['unit'])), 'V_UNTER_VI');
+}
+foreach (array(
+    // 4a) Wecker und Briefing nur an Schultagen
+    array('S1', 'T_SCHWELLE', 'S1_NAME', 'P_SCHWELLE', array(), 'S1_VERB'),
+    array('S2', 'T_SCHWELLE', 'S2_NAME', 'P_SCHWELLE', array(), 'S2_VERB'),
+    array('U1', 'T_UND', 'U1_NAME', 'U1_PARAM', array(), 'U1_VERB'),
+    array('U2', 'T_UND', 'U2_NAME', 'U2_PARAM', array(), 'U2_VERB'),
+    array('N1', 'T_NICHT', 'N1_NAME', 'P_KEINE', array(), 'N1_VERB'),
+    array('U3', 'T_UND', 'U3_NAME', 'U3_PARAM', array(), 'U3_VERB'),
+    // 4b) Vorabend-Meldung
+    array('S3', 'T_SCHWELLE', 'S3_NAME', 'P_SCHWELLE', array(), 'S3_VERB'),
+    array('S4', 'T_SCHWELLE', 'S4_NAME', 'P_SCHWELLE', array(), 'S4_VERB'),
+    array('U4', 'T_UND', 'U4_NAME', 'P_KEINE', array(), 'U4_VERB'),
+    array('O1', 'T_ODER', 'O1_NAME', 'O1_PARAM', array(), 'O1_VERB'),
+    array('NB1', 'T_BENACHR', 'NB1_NAME', 'NB1_PARAM', array(), 'NB1_VERB'),
+    array('SP', 'T_SCHWELLE', 'SP_NAME', 'P_SCHWELLE', array(), 'SP_VERB'),
+    array('NB2', 'T_BENACHR_TEST', 'NB2_NAME', 'NB2_PARAM', array(), 'NB2_VERB'),
+    // 4c) Ferien-Countdown und Brueckentage
+    array('ST1', 'T_STATUS', 'ST1_NAME', 'ST1_PARAM', array(), 'ST1_VERB'),
+    array('S5', 'T_SCHWELLE', 'S5_NAME', 'P_SCHWELLE', array(), 'S5_VERB'),
+    array('UB', 'T_UND', 'UB_NAME', 'P_KEINE', array(), 'UB_VERB'),
+    array('NB3', 'T_BENACHR_OPT', 'NB3_NAME', 'NB3_PARAM', array(), 'NB3_VERB'),
+    array('S6', 'T_SCHWELLE', 'S6_NAME', 'S6_PARAM', array(), 'S6_VERB'),
+    // 4d) Urlaubsmodus (Abwesenheit)
+    array('S7', 'T_SCHWELLE', 'S7_NAME', 'P_SCHWELLE', array(), 'S7_VERB'),
+    array('S8', 'T_SCHWELLE', 'S8_NAME', 'P_SCHWELLE', array(), 'S8_VERB'),
+    array('O2', 'T_ODER', 'O2_NAME', 'O2_PARAM', array(), 'O2_VERB'),
+    array('AW', 'T_ANWESEND', 'AW_NAME', 'P_KEINE', array(), 'AW_VERB'),
+    array('N2', 'T_NICHT', 'N2_NAME', 'P_KEINE', array(), 'N2_VERB'),
+    array('U5', 'T_UND', 'U5_NAME', 'U5_PARAM', array(), 'U5_VERB'),
+    array('RR', 'T_RAUM', 'RR_NAME', 'RR_PARAM', array(), 'RR_VERB'),
+    array('VB', 'T_VERBR', 'VB_NAME', 'VB_PARAM', array(), 'VB_VERB'),
+    array('ST2', 'T_STATUS', 'ST2_NAME', 'ST2_PARAM', array(), 'ST2_VERB'),
+    // 4e) Neue Werte ab Fassung 1.2.0
+    array('S9', 'T_SCHWELLE', 'S9_NAME', 'S9_PARAM', array(), 'S9_VERB'),
+    array('S10', 'T_SCHWELLE', 'S10_NAME', 'P_SCHWELLE', array(), 'S10_VERB'),
+    array('S11', 'T_SCHWELLE', 'S11_NAME', 'S11_PARAM', array(), 'S11_VERB'),
+    array('ST3', 'T_STATUS', 'ST3_NAME', 'ST3_PARAM', array(), 'ST3_VERB'),
+    array('S12', 'T_SCHWELLE', 'S12_NAME', 'P_SCHWELLE', array(), 'S12_VERB'),
+) as $fe_z) { $fe_bs[] = $fe_z; }
+$fe_bs_teile = array(
+    array(fer_t('BAUSTEIN.ABSCHNITT_VI'), 'VI', $fe_bs_letztes),
+    array(fer_t('TEXT.4A_WECKER_UND_BRIEFING_NUR_AN_SCHU'), 'S1', 'U3'),
+    array(fer_t('TEXT.4B_VORABEND_MELDUNG_MORGEN_IST_FRE'), 'S3', 'NB2'),
+    array(fer_t('TEXT.4C_FERIEN_COUNTDOWN_UND_BRCKENTAGE'), 'ST1', 'S6'),
+    array(fer_t('TEXT.4D_URLAUBSMODUS_ABWESENHEIT'), 'S7', 'ST2'),
+    array(fer_t('T12.BL_4E'), 'S9', 'S12'),
+);
+$fe_bs_nr = array();
+foreach ($fe_bs as $fe_i => $fe_z) { $fe_bs_nr[$fe_z[0]] = $fe_i + 1; }
+$fe_bs_t = function ($z) use ($fe_bs_nr) {
+    if (is_array($z)) { return $z['text']; }
+    return preg_replace_callback('/\{([A-Za-z0-9_]+)\}/', function ($m) use ($fe_bs_nr) {
+        return isset($fe_bs_nr[$m[1]]) ? '#' . $fe_bs_nr[$m[1]] : $m[0];
+    }, (string) fer_t('BAUSTEIN.' . $z));
+}; ?>
+<?php echo $fe_bs_t('TEXT'); ?>
 <table class="sm-tbl" style="width:100%;">
-<tr><th><?php echo fer_t('TEXT.BAUSTEIN'); ?></th><th><?php echo fer_t('TEXT.NAME_2'); ?></th><th><?php echo fer_t('TEXT.EINSTELLUNG'); ?></th><th><?php echo fer_t('TEXT.EINGNGE'); ?></th></tr>
-<tr><td><?php echo fer_t('T12.BL_SWS'); ?> S9</td><td><?php echo fer_t('T12.BL_ABSENKUNG'); ?></td>
-    <td><?php echo fer_t('T12.BL_ABSENKUNG_E'); ?></td><td>&larr; FREITAGE</td></tr>
-<tr><td><?php echo fer_t('T12.BL_SWS'); ?> S10</td><td><?php echo fer_t('T12.BL_SCHULBEGINN'); ?></td>
-    <td><?php echo fer_t('TX.SCHWELLE'); ?></td><td>&larr; MERSTERSCHULTAG</td></tr>
-<tr><td><?php echo fer_t('T12.BL_SWS'); ?> S11</td><td><?php echo fer_t('T12.BL_VORWAERMEN'); ?></td>
-    <td><?php echo fer_t('T12.BL_VORWAERMEN_E'); ?></td><td>&larr; URLAUBHEIM</td></tr>
-<tr><td><?php echo fer_t('T12.BL_STATUS'); ?></td><td><?php echo fer_t('T12.BL_BRUECKE_KACHEL'); ?></td>
-    <td><?php echo fer_t('T12.BL_BRUECKE_KACHEL_E'); ?></td><td>&larr; BRUECKEIN</td></tr>
-<tr><td><?php echo fer_t('T12.BL_SWS'); ?> S12</td><td><?php echo fer_t('T12.BL_KIND2'); ?></td>
-    <td><?php echo fer_t('TX.SCHWELLE'); ?></td><td>&larr; MSCHULTAG2</td></tr>
+<tr><th>#</th><th><?php echo fer_t('BAUSTEIN.T_TYP'); ?></th><th><?php echo fer_t('BAUSTEIN.T_NAME'); ?></th><th><?php echo fer_t('BAUSTEIN.T_PARAM'); ?></th><th><?php echo fer_t('BAUSTEIN.T_VERB'); ?></th></tr>
+<?php foreach ($fe_bs as $fe_i => $fe_z) {
+    $fe_p = $fe_bs_t($fe_z[3]);
+    if ($fe_z[4]) { $fe_p = vsprintf($fe_p, $fe_z[4]); } ?>
+<tr><td><?= $fe_i + 1 ?></td><td><?php echo $fe_bs_t($fe_z[1]); ?></td><td><span class="sm-mono"><?php echo $fe_bs_t($fe_z[2]); ?></span></td><td><?php echo $fe_p; ?></td><td><?php echo $fe_bs_t($fe_z[5]); ?></td></tr>
+<?php } ?>
 </table>
-<div class="sm-small"><?php echo fer_t('T12.BL_4E_H'); ?></div>
+<div class="sm-small" style="margin-top:6px;">
+<?php foreach ($fe_bs_teile as $fe_tl) { ?>
+<b><?php echo $fe_tl[0]; ?></b> <?= sprintf(fe_e(fer_t('BAUSTEIN.ZEILEN')), '#' . $fe_bs_nr[$fe_tl[1]], '#' . $fe_bs_nr[$fe_tl[2]]) ?><br>
+<?php } ?>
+</div>
+<div class="sm-small" style="margin-top:6px;"><?php echo $fe_bs_t('ERLAEUTERUNG'); ?></div>
+<div class="sm-small" style="margin-top:6px;"><?php echo fer_t('T12.BL_4E_H'); ?></div>
 <b><?php echo fer_t('TEXT.PRAXIS_ERFAHRUNGEN_ZUM_BENACHRICHT'); ?></b> <?php echo fer_t('TEXT.ER_SENDET_NUR_BEI_EINER_01_FLANKE_'); ?>
 </div>
 

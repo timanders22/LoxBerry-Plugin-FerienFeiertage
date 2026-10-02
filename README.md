@@ -10,6 +10,25 @@ Bundesländern/Kantonen.
 
 Kompatibel mit LoxBerry 3.x und **LoxBerry 4** (reines PHP, PHP 7.4 und 8.x).
 
+## Neu in 1.2.20
+
+Baustein-Liste zum Nachbauen (Nachzug B: X-8, Hausregel A4).
+Gemessen mit der gerenderten Oberfläche unter PHP 7.4 und 8.5 gegen die mitgelieferten Vorlagen; nicht am Gerät.
+
+* **Baustein-Liste zum Nachbauen:** Schritt 4 im Reiter „Einbindung in Loxone“ ist jetzt EINE nummerierte Liste
+  (# | Baustein | Name | Parameter | Eingänge verbinden mit) statt fünf Teiltabellen ohne Nummern. Sie nennt die
+  Importvorlage „Ferien und Feiertage“ mit Adresse und allen 47 Befehlen (Befehlserkennung, Min/Max, Einheit) und danach
+  die Bausteine der fünf Anwendungen: Wecker/Briefing nur an Schultagen, Vorabend-Meldung, Ferien-Countdown und
+  Brückentage, Urlaubsmodus, die Werte ab 1.2.0. Die Abschnitte 4a bis 4e stehen unter der Tabelle mit ihren
+  Zeilennummern.
+* Zusammengefasste Zeilen sind getrennt („NICHT + UND“ jetzt zwei Bausteine); jedes UND/ODER hat höchstens zwei
+  Eingänge mit je einer Quelle; jeder Benachrichtigungs-Baustein hat genau eine Quelle (der Brückentag-Hinweis bekommt
+  einen eigenen, optionalen). Die Raumregelung im Urlaub hängt am UND „Absenken im Urlaub“, damit das Vorwärmen am
+  letzten Urlaubstag greift.
+* Titel, Adresse und Befehle der Liste kommen aus denselben Funktionen wie die Importdatei; die Importdatei selbst ist
+  unverändert.
+* **In Loxone:** nichts zu tun. Wer die Logik nachbauen will, arbeitet die Liste von oben nach unten ab.
+
 ## Neu in 1.2.19
 
 Ansage-3: Ausgabe über Google-Lautsprecher. Gemessen an Attrappen unter PHP 7.4 und 8.5 sowie gegen den echten Sprech-Endpunkt von Chromecast 4 Lox NG 1.3.15 (Dienst-Attrappe); die Ausgabe über Alexa NG und Music Server misst vorher = nachher gleich. Nicht am Gerät, nicht an echten Lautsprechern.
