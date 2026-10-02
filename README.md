@@ -10,6 +10,25 @@ Bundesländern/Kantonen.
 
 Kompatibel mit LoxBerry 3.x und **LoxBerry 4** (reines PHP, PHP 7.4 und 8.x).
 
+## Neu in 1.2.21
+
+Gemeinsame Sprachausgabe, Ansagetext nicht mehr im Protokoll (Entscheidung 40, Stufe 1).
+Gemessen mit dem Ferien-Prüfstand gegen Attrappen und den echten Endpunkt von Chromecast 4 Lox NG 1.3.18,
+PHP 7.4 und 8.5; nicht am Gerät, nicht an einem echten Lautsprecher.
+
+* **Der Ansagetext steht nicht mehr im Protokoll und nicht mehr in der Antwort von `?say=1`**, sondern nur seine Länge:
+  Protokoll „Ansage gesendet (… Text 77 Zeichen) -> OK“, Antwort `SAY;OK=1;TEXTLAENGE=77` (mit Alexa-NG im Fehlerfall
+  weiter `CODE=…;GRUND=…`). Ausnahme: Ausgabeart Original-Audioserver – dort ist der Text die Antwort für Loxone Config
+  und steht weiter als `TEXT=…` da.
+* Die Sprachausgabe läuft jetzt über die gemeinsame Sprachausgabe der Plugins dieses Hauses (Datei
+  `sprachausgabe.php`, dieselbe in allen Plugins mit Ansage). Einstellungen, Felder, Testansage, Sicherungen und
+  Verhalten bleiben gleich.
+* Der Webport für Alexa-NG und Chromecast 4 Lox NG wird jetzt auch unter `WEBSERVER` in `general.json` gefunden.
+* Der Abruf beim Music Server und bei einer eigenen Adressvorlage folgt keiner Weiterleitung mehr und gilt nur bei
+  HTTP 2xx als gesendet.
+
+**In Loxone:** Wer aus der Antwort von `?say=1` den Text `TEXT=` gelesen hat, liest jetzt `TEXTLAENGE=` (außer beim Original-Audioserver).
+
 ## Neu in 1.2.20
 
 Baustein-Liste zum Nachbauen (Nachzug B: X-8, Hausregel A4).
@@ -329,7 +348,7 @@ Nicht am Gerät gemessen.
 | `/plugins/ferien/ferien.php?debug=1` | Ferien-, Feiertags- und Brückentagsliste im Klartext |
 | `/plugins/ferien/ferien.php?refresh=1&token=…` | Daten sofort neu abrufen **(Token nötig, höchstens einmal je 5 min)** |
 | `/plugins/ferien/ferien.php?json=1` | kompletter Zustand als JSON |
-| `/plugins/ferien/ferien.php?say=1&token=…` | Test-Ansage **(Token nötig)**; mit Alexa-NG im Fehlerfall `SAY;OK=0;CODE=…;GRUND=…`; mit Google-Lautsprecher immer `SAY;OK=…;CODE=…;GRUND=…;TEXTLAENGE=…` (ohne den Text) |
+| `/plugins/ferien/ferien.php?say=1&token=…` | Test-Ansage **(Token nötig)**; Antwort `SAY;OK=…;TEXTLAENGE=…` (die Länge, nicht der Text), mit Alexa-NG im Fehlerfall zusätzlich `CODE=…;GRUND=…`, mit Google-Lautsprecher immer `CODE=…;GRUND=…`; nur beim Original-Audioserver `SAY;OK=0;TEXT=…` |
 | `/plugins/ferien/ferien.php?ptest=1&token=…` | Test-Pushnachricht auslösen **(Token nötig)** |
 | `/plugins/ferien/ferien.php?selftest=1&token=…` | nur prüfen, ob das Token stimmt — löst nichts aus |
 

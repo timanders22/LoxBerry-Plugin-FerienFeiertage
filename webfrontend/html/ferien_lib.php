@@ -49,6 +49,18 @@ function fer_zone_aus($alt)
 }
 
 
+/* Gemeinsame Sprachausgabe (Abschrift von Werkzeuge/gemeinsam/sprachausgabe.php,
+ * Nr. 36 b, Stufe 1). Liegt neben dieser Datei. Laedt ein anderes Plugin diese
+ * Bibliothek (Abfahrts-Assistent, AWM-Abfuhr) und hat es schon eine eigene Abschrift
+ * geladen, gilt jene; die Datei schuetzt sich selbst gegen doppeltes Laden. */
+require_once __DIR__ . '/sprachausgabe.php';
+
+/** Kontext fuer die gemeinsame Sprachausgabe: Webport und Kennung dieses Plugins. */
+function fer_ansage_k() {
+    return array('port' => fer_webport(), 'kopf' => array('User-Agent: LoxBerry Ferien-Plugin'), 'ordner' => '');
+}
+
+
 /* Den LoxBerry-Wurzelordner ohne festen Systempfad bestimmen.
  *
  * Vom eigenen Ablageort aufwaerts, bis ein Verzeichnis gefunden ist, das
@@ -1857,50 +1869,14 @@ function fer_mqtt_nutzlast($wert) {
 /* ---------------- Ansage (TTS) - identisch zu den anderen Plugins ---------------- */
 
 function fer_tts_url($text) {
+    /* Nr. 36 b: die Adresse baut die gemeinsame Sprachausgabe (ansage_tts_url()). Eine
+     * unbekannte, von Hand eingetragene Art bekommt wie bisher die Adressvorlage. */
     $cfg = fer_config();
     $tts = $cfg['tts'];
-    $mode = $tts['mode'];
-    if ($mode === 'audioserver') {
-        return null;
+    if (!isset($tts['mode']) || !in_array($tts['mode'], array('musicserver', 'ms4h', 'custom', 'audioserver'), true)) {
+        $tts['mode'] = 'custom';
     }
-    if ($mode === 'musicserver' && (string) $tts['ip'] === '') {
-        return '';   // ohne IP laesst sich die Music-Server-Adresse nicht bauen
-    }
-
-    /* Zonenliste EINMAL fuer alle Modi normalisieren. Vorher wurde nur im
-     * Modus musicserver je Zone getrimmt; in den Vorlagen-Modi ging die
-     * Eingabe roh in {zones} - aus "2, 4, 6" wurde eine Adresse mit
-     * Leerzeichen. */
-    $zl = array();
-    foreach (explode(',', (string) $tts['zones']) as $z) {
-        $z = trim($z);
-        if ($z !== '') { $zl[] = $z; }
-    }
-    $tts['zones'] = implode(',', $zl);
-    if ($mode === 'musicserver') {
-        $vol = max(1, min(100, (int) $tts['volume']));
-        $zones = array();
-        foreach (explode(',', (string) $tts['zones']) as $z) {
-            $z = trim($z);
-            if ($z === '') { continue; }
-            $zones[] = (strpos($z, '~') === false) ? $z . '~' . $vol : $z;
-        }
-        $zoneStr = $zones ? implode(',', $zones) : '1~' . $vol;
-        return 'http://' . $tts['ip'] . ':' . (int) $tts['port'] . '/audio/grouped/tts/' . $zoneStr . '/' . rawurlencode($tts['lang'] . '|' . $text);
-    }
-    $tpl = trim((string) $tts['template']);
-    if ($tpl === '') {
-        $tpl = 'http://{ip}:{port}/tts?text={text}&zone={zones}&vol={vol}';
-    }
-    /* Die IP wird nur verlangt, wenn die Vorlage sie auch verwendet.
-     * Vorher stand die Pruefung unbedingt am Anfang der Funktion - eine
-     * eigene Vorlage ohne {ip} war damit unbenutzbar (AWM-1.2.0-Fund,
-     * hier nachgezogen). */
-    if ((string) $tts['ip'] === '' && strpos($tpl, '{ip}') !== false) {
-        return '';
-    }
-    return str_replace(array('{ip}', '{port}', '{zones}', '{vol}', '{lang}', '{text}'),
-        array($tts['ip'], (int) $tts['port'], $tts['zones'], (int) $tts['volume'], $tts['lang'], rawurlencode($text)), $tpl);
+    return ansage_tts_url($text, $tts);
 }
 
 function fer_say($text) {
@@ -1923,9 +1899,14 @@ function fer_say($text) {
         fer_log('Ansage uebersprungen: keine TTS-IP konfiguriert');
         return false;
     }
-    $r = fer_http($url, 10);
-    fer_log('Ansage gesendet: "' . $text . '" -> ' . ($r !== false ? 'OK' : 'FEHLER'));
-    return $r !== false;
+    /* Nr. 36 b: abgerufen ueber den Transport der gemeinsamen Sprachausgabe (ohne
+     * Weiterleitung, ohne Proxy, Erfolg nur bei HTTP 2xx). Ins Protokoll kommt vom
+     * Ansagetext nur seine Laenge (Entscheidung Nr. 18/40). */
+    $k = fer_ansage_k();
+    $a = ansage_ausfuehren(ansage_anfrage('GET', $url, null, 10, $k), $k);
+    $ok = $a['code'] >= 200 && $a['code'] < 300;
+    fer_log('Ansage gesendet (Text ' . ansage_zeichen($text) . ' Zeichen) -> ' . ($ok ? 'OK' : 'FEHLER'));
+    return $ok;
 }
 
 /* ---------------- Ausgabeart Alexa-NG (Ansage-2, ab Werk nicht gewaehlt) ----------------
@@ -1945,18 +1926,11 @@ function fer_say($text) {
  * Reiter Test und ?say= nennen HTTP-Code und GRUND.
  */
 
-/** Der Webport des LoxBerry (general.json, Webserver.Port); ohne Angabe 80. */
+/** Der Webport des LoxBerry (general.json, Webserver.Port oder WEBSERVER.Port); ohne Angabe 80.
+ *  Nr. 36 b: aus der gemeinsamen Sprachausgabe. */
 function fer_webport() {
     $p = fer_paths();
-    if ($p['lbhome'] !== '') {
-        $d = @json_decode((string) @file_get_contents($p['lbhome'] . '/config/system/general.json'), true);
-        if (is_array($d) && isset($d['Webserver']) && is_array($d['Webserver'])
-            && isset($d['Webserver']['Port']) && is_scalar($d['Webserver']['Port'])
-            && (int) $d['Webserver']['Port'] >= 1 && (int) $d['Webserver']['Port'] <= 65535) {
-            return (int) $d['Webserver']['Port'];
-        }
-    }
-    return 80;
+    return ansage_webport($p['lbhome'] !== '' ? $p['lbhome'] . '/config/system/general.json' : '');
 }
 
 /** Die Adresse des Alexa-NG-Endpunkts - ohne Token. */
@@ -1966,50 +1940,25 @@ function fer_alexa_adresse() {
 
 /** Form des Sprechtokens: 8 bis 128 Zeichen aus A-Z a-z 0-9 _ - (Alexa-NG erzeugt 24 Hexzeichen). */
 function fer_alexa_token_ok($t) {
-    return is_string($t) && preg_match('/^[A-Za-z0-9_\-]{8,128}\z/', $t) === 1;
+    return ansage_token_ok($t);     // Nr. 36 b: dieselbe Form, eine Quelle
 }
 
 /**
  * Ein POST an Alexa-NG. Rueckgabe: array(HTTP-Status, erste Antwortzeile, Art)
  * mit Art 'antwort' (Status > 0), 'verbindung' (keine Verbindung) oder 'zeit'
- * (keine Antwort in $tmo Sekunden). Ohne Weiterleitung. Der Status kommt aus
- * stream_get_meta_data(), nicht aus $http_response_header (PHP 8.5). Die
- * Antwortzeile wird um ein etwa darin stehendes Token bereinigt und auf
- * harmlose Zeichen gekuerzt, bevor sie irgendwo hingeht.
+ * (keine Antwort in $tmo Sekunden). Ohne Weiterleitung, ohne Proxy. Die
+ * Antwortzeile ist um ein etwa darin stehendes Token bereinigt und auf harmlose
+ * Zeichen gekuerzt (160), bevor sie irgendwo hingeht.
  * Ansage-3: $adresse = ein anderer Endpunkt derselben Schnittstelle
  * (fer_google_adresse()); ohne Angabe Alexa-NG wie bisher.
+ * Nr. 36 b: gerufen ueber die gemeinsame Sprachausgabe (curl, sonst Datenstrom).
  */
 function fer_alexa_rufen(array $felder, $tmo, $adresse = null) {
-    $ctx = stream_context_create(array('http' => array(
-        'method' => 'POST',
-        'header' => "Content-Type: application/x-www-form-urlencoded\r\nConnection: close\r\n",
-        'content' => http_build_query($felder, '', '&'),
-        'timeout' => $tmo, 'user_agent' => 'LoxBerry Ferien-Plugin',
-        'ignore_errors' => true, 'follow_location' => 0,
-    )));
-    $t0 = microtime(true);
-    $fh = @fopen($adresse === null ? fer_alexa_adresse() : (string) $adresse, 'r', false, $ctx);
-    if ($fh === false) {
-        return array(0, '', (microtime(true) - $t0) >= $tmo - 0.5 ? 'zeit' : 'verbindung');
+    $a = ansage_ng_rufen($adresse === null ? fer_alexa_adresse() : (string) $adresse, $felder, $tmo, fer_ansage_k());
+    if ($a['code'] > 0) {
+        return array($a['code'], substr((string) preg_replace('/[^A-Za-z0-9;=_.:,*\- ]/', '', $a['roh']), 0, 160), 'antwort');
     }
-    $meta = stream_get_meta_data($fh);
-    $inhalt = (string) @stream_get_contents($fh, 8192);
-    $nach = stream_get_meta_data($fh);
-    fclose($fh);
-    $code = 0;
-    foreach ((array) (isset($meta['wrapper_data']) ? $meta['wrapper_data'] : array()) as $z) {
-        if (is_string($z) && preg_match('#^HTTP/\S+\s+(\d{3})#', $z, $m)) { $code = (int) $m[1]; }
-    }
-    if ($inhalt === '' && !empty($nach['timed_out'])) {
-        return array(0, '', 'zeit');
-    }
-    $zeilen = preg_split('/\r?\n/', trim($inhalt));
-    $erste = trim((string) $zeilen[0]);
-    if (isset($felder['token']) && is_string($felder['token']) && $felder['token'] !== '') {
-        $erste = str_replace($felder['token'], '***', $erste);
-    }
-    $erste = substr(preg_replace('/[^A-Za-z0-9;=_.:,*\- ]/', '', $erste), 0, 160);
-    return array($code, $erste, $code > 0 ? 'antwort' : 'verbindung');
+    return array(0, '', $a['grund_id'] === 'HTTP_ZEIT' ? 'zeit' : 'verbindung');
 }
 
 /** GRUND=... aus einer Antwortzeile von Alexa-NG ('' ohne). */
@@ -2083,7 +2032,8 @@ function fer_alexa_sprechen($text) {
     list($code, $zeile, $art) = fer_alexa_rufen($f, 10);
     $ok = $code === 200 && strpos($zeile, 'SPRECHEN;OK=1') === 0;
     fer_alexa_merken($ok, $code, $zeile, $art);
-    fer_log('Ansage gesendet (Alexa-NG' . ($g !== '' ? ', Geraet ' . $g : '') . '): "' . $text . '" -> '
+    fer_log('Ansage gesendet (Alexa-NG' . ($g !== '' ? ', Geraet ' . $g : '') . ', Text '
+        . ansage_zeichen($text) . ' Zeichen) -> '
         . ($ok ? 'OK' : 'FEHLER ' . fer_alexa_befund($code, $zeile, $art, 10)));
     return $ok;
 }
@@ -3553,10 +3503,8 @@ function fer_sicherung_lesen($roh, $geltend = null, &$namen = null)
 function fer_rueckspiel_altwerte($voll = null)
 {
     if ($voll === null) { $voll = fer_config(); }
-    // Ansage-2: wie "Einstellungen sichern" ohne das Alexa-NG-Sprechtoken.
-    if (isset($voll['tts']) && is_array($voll['tts'])) { unset($voll['tts']['alexa_token']); }
-    // Ansage-3: ebenso ohne das Sprechtoken fuer Google-Lautsprecher.
-    if (isset($voll['tts']) && is_array($voll['tts'])) { unset($voll['tts']['google_token']); }
+    // Ansage-2/3: wie "Einstellungen sichern" ohne die Sprechtoken (Nr. 36 b: eine Quelle).
+    if (isset($voll['tts']) && is_array($voll['tts'])) { $voll['tts'] = ansage_sicherung_bereinigen($voll['tts']); }
     $js = json_encode($voll, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
     if ($js === false) { return array('(JSON)'); }
     $namen = array();

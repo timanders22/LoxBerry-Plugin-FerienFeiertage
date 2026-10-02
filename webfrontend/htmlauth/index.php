@@ -936,9 +936,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['fer_sichern'])) {
     $fer_voll = fer_config();
     /* Ansage-2: das Alexa-NG-Sprechtoken wird wie ein Kennwort behandelt und
      * geht NICHT mit; das Zurueckspielen behaelt das geltende. */
-    if (isset($fer_voll['tts']) && is_array($fer_voll['tts'])) { unset($fer_voll['tts']['alexa_token']); }
-    // Ansage-3: ebenso das Sprechtoken fuer Google-Lautsprecher.
-    if (isset($fer_voll['tts']) && is_array($fer_voll['tts'])) { unset($fer_voll['tts']['google_token']); }
+    // Ansage-3: ebenso das Sprechtoken fuer Google-Lautsprecher (Nr. 36 b: eine Quelle).
+    if (isset($fer_voll['tts']) && is_array($fer_voll['tts'])) { $fer_voll['tts'] = ansage_sicherung_bereinigen($fer_voll['tts']); }
     $fer_altw = fer_rueckspiel_altwerte($fer_voll);
     if ($fer_altw) {
         $fer_voll = array('_warnung' => sprintf(fer_t('SICHWARN.KOPF'), implode(', ', $fer_altw))) + $fer_voll;

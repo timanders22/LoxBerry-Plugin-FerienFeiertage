@@ -197,7 +197,13 @@ if (isset($_GET['say'])) {
             . ';GRUND=' . fer_google_grund_kurz($l) . ';TEXTLAENGE=' . fer_google_textlaenge($text) . "\n";
         exit;
     }
-    echo 'SAY;OK=' . ($ok ? 1 : 0) . $zus . ";TEXT=$text\n";
+    /* Nr. 36 b / Nr. 40: vom Ansagetext nur seine Laenge; beim Original-Audioserver ist der
+     * Text die Antwort (Loxone Config spricht ihn ueber den Textgenerator). */
+    if ($cfg_s['tts']['mode'] === 'audioserver') {
+        echo 'SAY;OK=' . ($ok ? 1 : 0) . $zus . ";TEXT=$text\n";
+    } else {
+        echo 'SAY;OK=' . ($ok ? 1 : 0) . $zus . ';TEXTLAENGE=' . ansage_zeichen($text) . "\n";
+    }
     exit;
 }
 
