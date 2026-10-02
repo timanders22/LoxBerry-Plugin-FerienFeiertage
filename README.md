@@ -10,6 +10,15 @@ Bundesländern/Kantonen.
 
 Kompatibel mit LoxBerry 3.x und **LoxBerry 4** (reines PHP, PHP 7.4 und 8.x).
 
+## Neu in 1.2.22
+
+Gemeinsame Sprachausgabe auf 1.0.2 (Entscheidung 40).
+Gemessen mit der Ferien-Gegenprobe unter PHP 7.4 und 8.5 (alle Punkte vorher = nachher); nicht am Gerät.
+
+* Die gemeinsame Datei `sprachausgabe.php` ist auf den Stand der übrigen Plugins gehoben (1.0.2). Ansagen, Einstellungen, Antworten und Protokoll bleiben unverändert.
+
+**In Loxone:** nichts zu tun.
+
 ## Neu in 1.2.21
 
 Gemeinsame Sprachausgabe, Ansagetext nicht mehr im Protokoll (Entscheidung 40, Stufe 1).

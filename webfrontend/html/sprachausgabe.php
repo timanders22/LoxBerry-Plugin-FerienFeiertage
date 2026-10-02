@@ -121,7 +121,7 @@ if (PHP_SAPI !== 'cli') {
 
 if (!defined('ANSAGE_FASSUNG')) {
 
-define('ANSAGE_FASSUNG', '1.0.1');
+define('ANSAGE_FASSUNG', '1.0.2');
 
 /** Hoechstlaenge eines Ansagetexts in Zeichen (Schnittstelle Alexa-NG/Chromecast: 1-1000). */
 define('ANSAGE_TEXT_MAX', 1000);
@@ -1107,11 +1107,13 @@ function ansage_formular_lesen(array $post, array $alt, array &$mangel, array &$
  * Den Formularblock zeichnen (ohne <form>: er steht im Einstellungsformular
  * der Linie). $h:
  *   'w' function ($name, $gespeichert) -> anzuzeigender Wert (X-2)
- *   'm' function ($name) -> Zusatz fuer das Feld, z. B. ' class="sm-beanstandet"'
+ *   'm' function ($name) -> Zusatz fuer das Feld, z. B. die Markierung der Linie fuer ein beanstandetes Feld
  *   'c' function ($name, $gespeichert) -> bool (Haken, X-2)
  *   'modi', 'namen' wie bei ansage_formular_lesen()
  * Das Token steht nie in der Seite: das Feld ist immer leer, der Platzhalter
  * nennt nur, ob eines gespeichert ist und wie lang es ist.
+ * Klassen nur aus VORLAGE_hausstandard.css.html (sm-feld, sm-hilfe, sm-hinweis; seit 1.0.2). Eine Linie, die
+ * den Baustein benutzt, traegt fehlende Vorlagenklassen in ihre CSS nach (Entwurf, Stufe 2).
  */
 function ansage_formular_html(array $tts, array $h = array(), array $k = array())
 {
@@ -1125,33 +1127,31 @@ function ansage_formular_html(array $tts, array $h = array(), array $k = array()
     $modi = (isset($h['modi']) && is_array($h['modi'])) ? $h['modi'] : ansage_modi();
     $o = array();
     $gewaehlt = (string) call_user_func($w, $n['mode'], $tts['mode']);
-    $o[] = '<div class="sm-row">';
-    $o[] = '    <div>';
-    $o[] = '        <label for="ansage_mode">' . $e($t('L_ART')) . '</label>';
-    $o[] = '        <select data-role="none" name="' . $e($n['mode']) . '" id="ansage_mode" onchange="ansageUmschalten()"'
+    $o[] = '<div class="sm-feld">';
+    $o[] = '    <label for="ansage_mode">' . $e($t('L_ART')) . '</label>';
+    $o[] = '    <select data-role="none" name="' . $e($n['mode']) . '" id="ansage_mode" onchange="ansageUmschalten()"'
          . call_user_func($m, $n['mode']) . '>';
     foreach ($modi as $mo) {
         if (!in_array($mo, ansage_modi(), true)) { continue; }
-        $o[] = '            <option value="' . $e($mo) . '"' . ($gewaehlt === $mo ? ' selected' : '') . '>'
+        $o[] = '        <option value="' . $e($mo) . '"' . ($gewaehlt === $mo ? ' selected' : '') . '>'
              . $e($t('O_' . strtoupper($mo))) . '</option>';
     }
-    $o[] = '        </select>';
-    $o[] = '        <div class="sm-small">' . $e($t('ART_HINWEIS')) . '</div>';
-    $o[] = '    </div>';
+    $o[] = '    </select>';
+    $o[] = '    <div class="sm-hilfe">' . $e($t('ART_HINWEIS')) . '</div>';
     $o[] = '</div>';
     $feld = function ($id, $typ, $label, $zusatz, $hinweis) use ($e, $t, $w, $m, $n, $tts) {
         $wert = $tts[$id];
         if (($id === 'alexa_laut' || $id === 'google_laut') && (int) $wert < 0) { $wert = ''; }
         $z = array();
-        $z[] = '    <div>';
-        $z[] = '        <label for="ansage_' . $id . '">' . $e($t($label)) . '</label>';
-        $z[] = '        <input data-role="none" type="' . $typ . '" id="ansage_' . $id . '" name="' . $e($n[$id])
+        $z[] = '<div class="sm-feld">';
+        $z[] = '    <label for="ansage_' . $id . '">' . $e($t($label)) . '</label>';
+        $z[] = '    <input data-role="none" type="' . $typ . '" id="ansage_' . $id . '" name="' . $e($n[$id])
              . '" value="' . $e((string) call_user_func($w, $n[$id], $wert)) . '"' . $zusatz . call_user_func($m, $n[$id]) . '>';
-        if ($hinweis !== '') { $z[] = '        <div class="sm-small">' . $e($t($hinweis)) . '</div>'; }
-        $z[] = '    </div>';
+        if ($hinweis !== '') { $z[] = '    <div class="sm-hilfe">' . $e($t($hinweis)) . '</div>'; }
+        $z[] = '</div>';
         return $z;
     };
-    $o[] = '<div id="ansage_klassisch" class="sm-row">';
+    $o[] = '<div id="ansage_klassisch">';
     $o = array_merge($o,
         $feld('ip', 'text', 'L_IP', ' maxlength="253" placeholder="' . $e($t('P_IP')) . '"', 'IP_HINWEIS'),
         $feld('port', 'number', 'L_PORT', ' min="1" max="65535"', ''),
@@ -1159,33 +1159,33 @@ function ansage_formular_html(array $tts, array $h = array(), array $k = array()
         $feld('volume', 'number', 'L_LAUTSTAERKE', ' min="1" max="100"', ''),
         $feld('lang', 'text', 'L_SPRACHE', ' maxlength="2"', ''));
     $o[] = '</div>';
-    $o[] = '<div id="ansage_vorlage">';
+    $o[] = '<div id="ansage_vorlage" class="sm-feld">';
     $o[] = '    <label for="ansage_template">' . $e($t('L_VORLAGE')) . '</label>';
     $o[] = '    <textarea data-role="none" id="ansage_template" name="' . $e($n['template']) . '" rows="2" maxlength="500"'
          . ' placeholder="http://{ip}:{port}/tts?text={text}&amp;zone={zones}&amp;vol={vol}"' . call_user_func($m, $n['template']) . '>'
          . $e((string) call_user_func($w, $n['template'], $tts['template'])) . '</textarea>';
-    $o[] = '    <div class="sm-small">' . $e($t('VORLAGE_HINWEIS')) . '</div>';
+    $o[] = '    <div class="sm-hilfe">' . $e($t('VORLAGE_HINWEIS')) . '</div>';
     $o[] = '</div>';
-    $o[] = '<div id="ansage_audioserver" class="sm-alert sm-info">' . $e($t('AUDIOSERVER_HINWEIS')) . '</div>';
+    $o[] = '<div id="ansage_audioserver" class="sm-hinweis">' . $e($t('AUDIOSERVER_HINWEIS')) . '</div>';
     foreach (array('alexa' => 'ALEXA', 'google' => 'GOOGLE') as $art => $art_k) {
         $o[] = '<div id="ansage_' . $art . '">';
-        $o[] = '<div class="sm-alert sm-info">' . $e($t($art_k . '_HINWEIS')) . '</div>';
-        $o[] = '<div class="sm-row">';
+        $o[] = '<div class="sm-hinweis">' . $e($t($art_k . '_HINWEIS')) . '</div>';
         $o = array_merge($o,
             $feld($art . '_geraet', 'text', 'L_' . $art_k . '_GERAET', ' maxlength="200"', $art_k . '_GERAET_HINWEIS'),
             $feld($art . '_laut', 'number', 'L_' . $art_k . '_LAUT', ' min="0" max="100"', $art_k . '_LAUT_HINWEIS'));
-        $o[] = '</div>';
         $gesp = is_string($tts[$art . '_token']) ? $tts[$art . '_token'] : '';
         $ph = $gesp !== '' ? sprintf($t('P_TOKEN_DA'), strlen($gesp)) : $t('P_TOKEN_LEER');
-        $o[] = '<label for="ansage_' . $art . '_token">' . $e($t('L_' . $art_k . '_TOKEN')) . '</label>';
-        $o[] = '<input data-role="none" type="password" id="ansage_' . $art . '_token" name="' . $e($n[$art . '_token'])
+        $o[] = '<div class="sm-feld">';
+        $o[] = '    <label for="ansage_' . $art . '_token">' . $e($t('L_' . $art_k . '_TOKEN')) . '</label>';
+        $o[] = '    <input data-role="none" type="password" id="ansage_' . $art . '_token" name="' . $e($n[$art . '_token'])
              . '" value="" autocomplete="new-password" placeholder="' . $e($ph) . '"' . call_user_func($m, $n[$art . '_token']) . '>';
-        $o[] = '<label style="display:inline-flex;align-items:center;gap:6px;">';
-        $o[] = '    <input data-role="none" type="checkbox" name="' . $e($n[$art . '_token_loeschen']) . '" value="1"'
+        $o[] = '    <label style="display:inline-flex;align-items:center;gap:6px;">';
+        $o[] = '        <input data-role="none" type="checkbox" name="' . $e($n[$art . '_token_loeschen']) . '" value="1"'
              . (call_user_func($c, $n[$art . '_token_loeschen'], false) ? ' checked' : '')
              . call_user_func($m, $n[$art . '_token_loeschen']) . '> ' . $e($t('L_TOKEN_LOESCHEN'));
-        $o[] = '</label>';
-        $o[] = '<div class="sm-small">' . $e($t($art_k . '_TOKEN_HINWEIS')) . '</div>';
+        $o[] = '    </label>';
+        $o[] = '    <div class="sm-hilfe">' . $e($t($art_k . '_TOKEN_HINWEIS')) . '</div>';
+        $o[] = '</div>';
         $o[] = '</div>';
     }
     $o[] = '<script>';
