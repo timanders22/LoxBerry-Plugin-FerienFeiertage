@@ -179,27 +179,14 @@ if (isset($_GET['say'])) {
     if ($text === '') {
         $text = 'Hallo! Dies ist eine Testansage des Ferien-Plugins. Morgen ist ein ganz normaler Tag.';
     }
-    $ok = fer_say($text);
-    /* Ansage-2: bei Alexa-NG nennt die Zeile im Fehlerfall HTTP-Code und GRUND
-     * (nie das Token); die anderen Ausgabearten antworten wie bisher. */
-    $zus = '';
-    $cfg_s = fer_config();
-    if (!$ok && $cfg_s['tts']['mode'] === 'alexang') {
-        $l = fer_alexa_letzte();
-        $zus = ';CODE=' . ($l !== null ? (int) $l['code'] : 0) . ';GRUND=' . fer_alexa_grund_kurz($l);
-    }
-    /* Ansage-3: bei Google-Lautsprecher nennt die Zeile immer HTTP-Code und GRUND
-     * (UNVERAENDERT, TEXT_NULL, Fehler); statt des Ansagetexts nur seine Laenge
-     * (wie im Protokoll). Die anderen Ausgabearten antworten wie bisher. */
-    if ($cfg_s['tts']['mode'] === 'cc4lox') {
-        $l = fer_alexa_letzte('google_letzte.json');
-        echo 'SAY;OK=' . ($ok ? 1 : 0) . ';CODE=' . ($l !== null ? (int) $l['code'] : 0)
-            . ';GRUND=' . fer_google_grund_kurz($l) . ';TEXTLAENGE=' . fer_google_textlaenge($text) . "\n";
-        exit;
-    }
-    /* Nr. 36 b / Nr. 40: vom Ansagetext nur seine Laenge; beim Original-Audioserver ist der
-     * Text die Antwort (Loxone Config spricht ihn ueber den Textgenerator). */
-    if ($cfg_s['tts']['mode'] === 'audioserver') {
+    /* Nr. 36 b, Stufe 2: gesprochen ueber die gemeinsame Sprachausgabe; die Antwort
+     * bleibt in der Form bis 1.2.22 (fer_say_zusatz()). Vom Ansagetext nur seine Laenge;
+     * beim Original-Audioserver ist der Text die Antwort (Loxone Config spricht ihn ueber
+     * den Textgenerator). */
+    $r = fer_say($text);
+    $ok = $r['stand'] === 1;
+    $zus = fer_say_zusatz($r);
+    if ($r['art'] === 'audioserver') {
         echo 'SAY;OK=' . ($ok ? 1 : 0) . $zus . ";TEXT=$text\n";
     } else {
         echo 'SAY;OK=' . ($ok ? 1 : 0) . $zus . ';TEXTLAENGE=' . ansage_zeichen($text) . "\n";

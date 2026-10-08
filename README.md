@@ -10,6 +10,33 @@ Bundesländern/Kantonen.
 
 Kompatibel mit LoxBerry 3.x und **LoxBerry 4** (reines PHP, PHP 7.4 und 8.x).
 
+## Neu in 1.2.23
+
+Sprachausgabe in Hausform über die gemeinsame Sprachausgabe 1.1.1 (Entscheidung 40, Stufe 2).
+Gemessen unter PHP 7.4 und 8.5 gegen Attrappen (Music Server, Alexa-NG, Chromecast); nicht am Gerät, nicht an
+einem echten Lautsprecher.
+
+* **Einstellungen, Abschnitt „Sprachausgabe“:** das Formular der gemeinsamen Sprachausgabe (wie Intercom und
+  Raumklima). Neu in der Auswahl ist „aus“. Ab Werk bleibt es beim Loxone Music Server ohne Adresse; gespeicherte
+  Einstellungen bleiben, wie sie sind.
+* Adresse des Music Servers und Adressvorlage müssen im Heimnetz liegen. Eine andere Adresse wird beim Speichern
+  und beim Zurückspielen abgewiesen und vor jedem Senden erneut geprüft (sie trüge den Ansagetext hinaus).
+* Strenger als bisher: Lautstärke für Alexa-NG und Google 1 bis 100 (0 war stumm und galt trotzdem als
+  gesendet), Zonen nur Zahlen, je wahlweise mit `~Lautstärke` 1 bis 100. Ein gespeicherter Wert, der das
+  verletzt, wird beim nächsten Speichern beanstandet (dann wird nichts gespeichert); „Einstellungen sichern“
+  nennt ihn vorher.
+* **Testansage als Knopf im Reiter Test** (ein fester Satz mit den gespeicherten Einstellungen, für jede
+  Ausgabeart; Neuladen spricht nicht erneut). Der bisherige Verweis auf `?say=1` mit dem Token entfällt dort;
+  `?say=1` selbst bleibt für Loxone, mit unveränderter Antwort.
+* Reiter Test: eine Zeile „Ist die Sprachausgabe eingerichtet?“ für alle Ausgabearten, mit der letzten Ansage.
+  Alexa-NG und Chromecast werden mit `selftest=1` gefragt, dort wird nichts gesprochen; die zusätzliche Abfrage
+  der Amazon-Anmeldung bei Alexa-NG entfällt.
+* Protokoll: eine Zeile je Ansage, „Ansage: art=… stand=… zeichen=… http=…“ – nie Text oder Token.
+* Einbindung in Loxone: Die Spalte „Eingänge verbinden mit“ der Baustein-Liste steht jetzt in der Form, aus der
+  das Leitungswerkzeug die Leitungen ableitet („Ausgang von MSCHULTAG (#2)“, beim Status „V1 = …“).
+
+**In Loxone:** nichts zu tun.
+
 ## Neu in 1.2.22
 
 Gemeinsame Sprachausgabe auf 1.0.2 (Entscheidung 40).

@@ -50,14 +50,31 @@ function fer_zone_aus($alt)
 
 
 /* Gemeinsame Sprachausgabe (Abschrift von Werkzeuge/gemeinsam/sprachausgabe.php,
- * Nr. 36 b, Stufe 1). Liegt neben dieser Datei. Laedt ein anderes Plugin diese
- * Bibliothek (Abfahrts-Assistent, AWM-Abfuhr) und hat es schon eine eigene Abschrift
- * geladen, gilt jene; die Datei schuetzt sich selbst gegen doppeltes Laden. */
+ * Nr. 36 b). Seit 1.2.23 Stufe 2: Sprechen, Formular, Wertpruefung, Zeile im Reiter
+ * Test und Testansage kommen aus dem Modul (Fassung 1.1.1). Liegt neben dieser Datei.
+ * Laedt ein anderes Plugin diese Bibliothek (Abfahrts-Assistent, AWM-Abfuhr) und hat
+ * es schon eine eigene Abschrift geladen, gilt jene; die Datei schuetzt sich selbst
+ * gegen doppeltes Laden. Was dort laeuft (fer_data(), fer_day(), fer_state() und
+ * fer_config()), ruft deshalb nur Modulfunktionen, die es schon in 1.0.2 gab. */
 require_once __DIR__ . '/sprachausgabe.php';
 
-/** Kontext fuer die gemeinsame Sprachausgabe: Webport und Kennung dieses Plugins. */
+/** Die Ausgabearten, die dieses Plugin anbietet: wie bis 1.2.22 und dazu "aus" (ohne Sonos4Lox). */
+function fer_ansage_modi() {
+    return array('aus', 'musicserver', 'ms4h', 'audioserver', 'custom', 'alexang', 'cc4lox');
+}
+
+/**
+ * Kontext fuer die gemeinsame Sprachausgabe: Webport, Kennung dieses Plugins, Ordner
+ * der letzten Ansage (Zwischenordner, wie bis 1.2.22 alexa_letzte.json) und die Texte
+ * ([ANSAGE] der Sprachdateien). Zwei Saetze des Moduls sagen "ab Werk aus"; hier ist
+ * ab Werk der Music Server ohne Adresse eingestellt - dafuer stehen eigene Saetze
+ * unter [TTS].
+ */
 function fer_ansage_k() {
-    return array('port' => fer_webport(), 'kopf' => array('User-Agent: LoxBerry Ferien-Plugin'), 'ordner' => '');
+    return array('port' => fer_webport(), 'kopf' => array('User-Agent: LoxBerry Ferien-Plugin'),
+                 'ordner' => fer_tmpdir(),
+                 't' => function ($s) { return fer_t($s); },
+                 'schluessel' => array('ART_HINWEIS' => 'TTS.ART_HINWEIS', 'O_AUS' => 'TTS.O_AUS'));
 }
 
 
@@ -374,14 +391,13 @@ function fer_config() {
         'ferienstart' => 1,          // melden am Vorabend des Ferienbeginns
         'bridge_month' => 1,         // im Januar die Brueckentage des Jahres melden
     );
-    $cfg['tts'] += array('mode' => 'musicserver', 'ip' => '', 'port' => 7091,
-                         'zones' => '1', 'volume' => 8, 'lang' => 'de', 'template' => '',
-                         // Ansage-2: Alexa-NG (ab Werk nicht gewaehlt). Das Sprechtoken
-                         // ist ein Geheimnis: nie im Formular, nicht in der Sicherung.
-                         'alexa_geraet' => '', 'alexa_token' => '', 'alexa_laut' => -1,
-                         // Ansage-3: Google-Lautsprecher ueber Chromecast 4 Lox NG (ab Werk
-                         // nicht gewaehlt). Eigenes Sprechtoken, Regeln wie beim Alexa-NG-Token.
-                         'google_geraet' => '', 'google_token' => '', 'google_laut' => -1);
+    /* Nr. 36 b, Stufe 2: die Vorgaben des Blocks tts kommen aus der gemeinsamen
+     * Sprachausgabe - dieselben Schluessel wie bis 1.2.22 (dazu sonos_zone/sonos_laut
+     * seit Modul 1.1.0, hier ohne Wirkung). Ab Werk weiterhin "musicserver" ohne
+     * Adresse: gesendet wird erst mit eingetragener Adresse. Vervollstaendigt, nicht
+     * ersetzt - gespeicherte Werte bleiben, wie sie sind. Die Sprechtoken sind
+     * Geheimnisse: nie im Formular, nicht in der Sicherung. */
+    list($cfg['tts']) = ansage_vervollstaendigen($cfg['tts'], 'musicserver');
     return $cfg;
 }
 
@@ -1866,332 +1882,83 @@ function fer_mqtt_nutzlast($wert) {
     return trim(preg_replace('/ {2,}/', ' ', $w));
 }
 
-/* ---------------- Ansage (TTS) - identisch zu den anderen Plugins ---------------- */
-
-function fer_tts_url($text) {
-    /* Nr. 36 b: die Adresse baut die gemeinsame Sprachausgabe (ansage_tts_url()). Eine
-     * unbekannte, von Hand eingetragene Art bekommt wie bisher die Adressvorlage. */
-    $cfg = fer_config();
-    $tts = $cfg['tts'];
-    if (!isset($tts['mode']) || !in_array($tts['mode'], array('musicserver', 'ms4h', 'custom', 'audioserver'), true)) {
-        $tts['mode'] = 'custom';
-    }
-    return ansage_tts_url($text, $tts);
-}
-
-function fer_say($text) {
-    /* Ansage-2: Alexa-NG hat keine Ansage-Adresse, sondern einen POST mit
-     * Sprechtoken (fer_alexa_sprechen() protokolliert selbst, ohne Token). */
-    $cfg_a = fer_config();
-    if (isset($cfg_a['tts']['mode']) && $cfg_a['tts']['mode'] === 'alexang') {
-        return fer_alexa_sprechen($text);
-    }
-    /* Ansage-3: Google-Lautsprecher - dieselbe Schnittstelle, eigene Adresse und eigenes Token. */
-    if (isset($cfg_a['tts']['mode']) && $cfg_a['tts']['mode'] === 'cc4lox') {
-        return fer_google_sprechen($text);
-    }
-    $url = fer_tts_url($text);
-    if ($url === null) {
-        fer_log('Ansage: Modus "Original Loxone Audioserver" - Ausgabe erfolgt ueber Loxone Config');
-        return false;
-    }
-    if ($url === '') {
-        fer_log('Ansage uebersprungen: keine TTS-IP konfiguriert');
-        return false;
-    }
-    /* Nr. 36 b: abgerufen ueber den Transport der gemeinsamen Sprachausgabe (ohne
-     * Weiterleitung, ohne Proxy, Erfolg nur bei HTTP 2xx). Ins Protokoll kommt vom
-     * Ansagetext nur seine Laenge (Entscheidung Nr. 18/40). */
-    $k = fer_ansage_k();
-    $a = ansage_ausfuehren(ansage_anfrage('GET', $url, null, 10, $k), $k);
-    $ok = $a['code'] >= 200 && $a['code'] < 300;
-    fer_log('Ansage gesendet (Text ' . ansage_zeichen($text) . ' Zeichen) -> ' . ($ok ? 'OK' : 'FEHLER'));
-    return $ok;
-}
-
-/* ---------------- Ausgabeart Alexa-NG (Ansage-2, ab Werk nicht gewaehlt) ----------------
+/* ---------------- Ansage (TTS) - gemeinsame Sprachausgabe, Stufe 2 ----------------
  *
- * Das Plugin LoxBerry-Plugin-Alexa-NG (Ordner alexang,
- * https://github.com/timanders22/LoxBerry-Plugin-Alexa-NG) laesst Amazon-
- * Echo-Geraete sprechen. Die Ansage geht per POST an seinen Endpunkt auf
- * DIESEM LoxBerry (Webport aus general.json): aktion=sprechen, token, geraet
- * (leer = Standardgeraet von Alexa-NG, dann nicht mitgeschickt), text,
- * optional laut. Erfolg ist nur eine Antwort, die mit SPRECHEN;OK=1 beginnt.
- *
- * Das Sprechtoken ist ein Kennwort des anderen Plugins: es steht nie in einer
- * Adresse (Adressen landen in Zugriffsprotokollen), nie im Formular, nie im
- * Protokoll, nie in der Sicherung. Faellt Alexa-NG aus (403, 503, 200 mit
- * OK=0, keine Verbindung, Zeitueberschreitung), entfaellt die Ansage - es gibt
- * keinen stillen Wechsel auf einen anderen Lautsprecher -, und Protokoll,
- * Reiter Test und ?say= nennen HTTP-Code und GRUND.
+ * Bis 1.2.22 hatte jede Ausgabeart ihren eigenen Zweig (Music Server, Alexa-NG,
+ * Google-Lautsprecher) mit eigenem Protokoll, eigener Merkdatei und eigener Zeile im
+ * Reiter Test. Seit 1.2.23 spricht ansage_sprechen(): eine Bewertung fuer alle Arten
+ * (Alexa-NG/Chromecast nur HTTP 200 und SPRECHEN;OK=1, Music Server und Vorlagen
+ * HTTP 2xx), Adresse und Vorlage vor jedem Senden erneut auf das Heimnetz geprueft,
+ * keine Weiterleitung, kein Proxy, 10 s. Faellt ein anderes Plugin aus, entfaellt die
+ * Ansage - kein stiller Wechsel auf einen anderen Lautsprecher, keine Wiederholung.
+ * Ins Protokoll kommt nur ansage_kurz(): Art, Stand, Zeichenzahl, HTTP-Code,
+ * Antwortzeile bzw. Kennung - nie Text, nie Token, nie die Adresse des Music Servers.
  */
 
-/** Der Webport des LoxBerry (general.json, Webserver.Port oder WEBSERVER.Port); ohne Angabe 80.
- *  Nr. 36 b: aus der gemeinsamen Sprachausgabe. */
+/** Der Webport des LoxBerry (general.json, Webserver.Port oder WEBSERVER.Port); ohne Angabe 80. */
 function fer_webport() {
     $p = fer_paths();
     return ansage_webport($p['lbhome'] !== '' ? $p['lbhome'] . '/config/system/general.json' : '');
 }
 
-/** Die Adresse des Alexa-NG-Endpunkts - ohne Token. */
-function fer_alexa_adresse() {
-    return 'http://127.0.0.1:' . fer_webport() . '/plugins/alexang/index.php';
-}
-
-/** Form des Sprechtokens: 8 bis 128 Zeichen aus A-Z a-z 0-9 _ - (Alexa-NG erzeugt 24 Hexzeichen). */
-function fer_alexa_token_ok($t) {
-    return ansage_token_ok($t);     // Nr. 36 b: dieselbe Form, eine Quelle
-}
-
 /**
- * Ein POST an Alexa-NG. Rueckgabe: array(HTTP-Status, erste Antwortzeile, Art)
- * mit Art 'antwort' (Status > 0), 'verbindung' (keine Verbindung) oder 'zeit'
- * (keine Antwort in $tmo Sekunden). Ohne Weiterleitung, ohne Proxy. Die
- * Antwortzeile ist um ein etwa darin stehendes Token bereinigt und auf harmlose
- * Zeichen gekuerzt (160), bevor sie irgendwo hingeht.
- * Ansage-3: $adresse = ein anderer Endpunkt derselben Schnittstelle
- * (fer_google_adresse()); ohne Angabe Alexa-NG wie bisher.
- * Nr. 36 b: gerufen ueber die gemeinsame Sprachausgabe (curl, sonst Datenstrom).
+ * Eine Ansage ueber die eingestellte Ausgabeart. Rueckgabe: das Ergebnis des Moduls
+ * (stand 1 = gesendet, 0 = gescheitert, -1 = nichts gesendet ohne Fehler: aus,
+ * Original-Audioserver).
  */
-function fer_alexa_rufen(array $felder, $tmo, $adresse = null) {
-    $a = ansage_ng_rufen($adresse === null ? fer_alexa_adresse() : (string) $adresse, $felder, $tmo, fer_ansage_k());
-    if ($a['code'] > 0) {
-        return array($a['code'], substr((string) preg_replace('/[^A-Za-z0-9;=_.:,*\- ]/', '', $a['roh']), 0, 160), 'antwort');
-    }
-    return array(0, '', $a['grund_id'] === 'HTTP_ZEIT' ? 'zeit' : 'verbindung');
-}
-
-/** GRUND=... aus einer Antwortzeile von Alexa-NG ('' ohne). */
-function fer_alexa_grund($zeile) {
-    return preg_match('/(?:^|;)GRUND=([A-Za-z0-9_]{1,40})/', (string) $zeile, $m) ? $m[1] : '';
-}
-
-/** Ein Ergebnis fuer das Protokoll (ASCII, wie alle Protokollzeilen) - nie mit Token. */
-function fer_alexa_befund($code, $zeile, $art, $tmo) {
-    if ($art === 'zeit') { return 'Zeitueberschreitung, keine Antwort nach ' . (int) $tmo . ' s'; }
-    if ($art === 'verbindung') { return 'keine Verbindung zu ' . fer_alexa_adresse() . ' (Alexa-NG installiert?)'; }
-    if ($art === 'kein_token') { return 'kein Sprechtoken gespeichert'; }
-    $g = fer_alexa_grund($zeile);
-    return 'HTTP ' . (int) $code . (strpos((string) $zeile, ';OK=0') !== false ? ', OK=0' : '')
-        . ($g !== '' ? ', GRUND=' . $g : ($zeile !== '' ? ', Antwort "' . substr((string) $zeile, 0, 60) . '"' : ''));
-}
-
-/** Dasselbe in der Sprache der Oberflaeche (Reiter Test). */
-function fer_alexa_testtext($code, $zeile, $art, $tmo) {
-    if ($art === 'zeit') { return sprintf(fer_t('ALEXA.T_ZEIT'), (int) $tmo); }
-    if ($art === 'verbindung') { return sprintf(fer_t('ALEXA.T_KEINE_VERBINDUNG'), fer_alexa_adresse()); }
-    if ($art === 'kein_token') { return fer_t('ALEXA.T_KEIN_TOKEN'); }
-    return fer_alexa_befund($code, $zeile, $art, $tmo);
-}
-
-/** Das Ergebnis der letzten Ansage ablegen (Zwischenordner, 0600) - nie Token oder Text. */
-function fer_alexa_merken($ok, $code, $zeile, $art, $datei = 'alexa_letzte.json') {
-    fer_json_schreiben(fer_tmpdir() . '/' . basename((string) $datei), array(
-        'zeit' => time(), 'ok' => $ok ? 1 : 0, 'code' => (int) $code,
-        'grund' => fer_alexa_grund($zeile), 'art' => (string) $art, 'zeile' => (string) $zeile,
-    ));
-}
-
-/** Das Ergebnis der letzten Ansage oder null. */
-function fer_alexa_letzte($datei = 'alexa_letzte.json') {
-    $f = fer_tmpdir() . '/' . basename((string) $datei);
-    if (!is_file($f)) { return null; }
-    $d = json_decode((string) @file_get_contents($f), true);
-    if (!is_array($d) || !isset($d['zeit'], $d['ok'], $d['code'], $d['art'])) { return null; }
-    return array('zeit' => (int) $d['zeit'], 'ok' => !empty($d['ok']), 'code' => (int) $d['code'],
-                 'grund' => (isset($d['grund']) && is_string($d['grund'])) ? $d['grund'] : '',
-                 'art' => (string) $d['art'],
-                 'zeile' => (isset($d['zeile']) && is_string($d['zeile'])) ? $d['zeile'] : '');
-}
-
-/** GRUND fuer die Antwortzeile von ?say=: der von Alexa-NG oder ein eigener. */
-function fer_alexa_grund_kurz($l) {
-    if (!is_array($l)) { return '-'; }
-    if ($l['grund'] !== '') { return $l['grund']; }
-    $eigen = array('zeit' => 'ZEIT', 'verbindung' => 'KEINE_VERBINDUNG', 'kein_token' => 'KEIN_TOKEN');
-    return isset($eigen[$l['art']]) ? $eigen[$l['art']] : '-';
-}
-
-/** Eine Ansage ueber Alexa-NG (10 s). Rueckgabe true nur bei SPRECHEN;OK=1. */
-function fer_alexa_sprechen($text) {
+function fer_say($text) {
     $cfg = fer_config();
-    $t = $cfg['tts'];
-    $tok = (isset($t['alexa_token']) && is_string($t['alexa_token'])) ? $t['alexa_token'] : '';
-    if (!fer_alexa_token_ok($tok)) {
-        fer_alexa_merken(false, 0, '', 'kein_token');
-        fer_log('Ansage uebersprungen: Ausgabeart Alexa-NG, aber kein Sprechtoken gespeichert');
-        return false;
-    }
-    $f = array('aktion' => 'sprechen', 'token' => $tok);
-    $g = (isset($t['alexa_geraet']) && is_string($t['alexa_geraet'])) ? $t['alexa_geraet'] : '';
-    if ($g !== '') { $f['geraet'] = $g; }
-    $f['text'] = (string) $text;
-    if (isset($t['alexa_laut']) && is_int($t['alexa_laut']) && $t['alexa_laut'] >= 0 && $t['alexa_laut'] <= 100) {
-        $f['laut'] = $t['alexa_laut'];
-    }
-    list($code, $zeile, $art) = fer_alexa_rufen($f, 10);
-    $ok = $code === 200 && strpos($zeile, 'SPRECHEN;OK=1') === 0;
-    fer_alexa_merken($ok, $code, $zeile, $art);
-    fer_log('Ansage gesendet (Alexa-NG' . ($g !== '' ? ', Geraet ' . $g : '') . ', Text '
-        . ansage_zeichen($text) . ' Zeichen) -> '
-        . ($ok ? 'OK' : 'FEHLER ' . fer_alexa_befund($code, $zeile, $art, 10)));
-    return $ok;
+    $r = ansage_sprechen($text, $cfg['tts'], fer_ansage_k());
+    fer_log('Ansage: ' . ansage_kurz($r));
+    return $r;
 }
 
 /**
- * Die Zeile "Ansage ueber Alexa-NG" im Reiter Test - null, wenn Alexa-NG nicht
- * die Ausgabeart ist. Gefragt werden selftest=1 (prueft nur das Token, kein
- * Amazon) und aktion=status (Anmeldung bei Amazon), beide per POST, je
- * hoechstens 5 s. Dazu das Ergebnis der letzten echten Ansage: ein 503, ein
- * 200 mit OK=0 oder eine Zeitueberschreitung beim Senden steht damit auch
- * hier, nicht nur im Protokoll. Rueckgabe: array(Frage, ok, Hinweis).
+ * CODE und GRUND fuer die Antwort von ?say=1 - in derselben Form wie bis 1.2.22:
+ * bei Alexa-NG nur im Fehlerfall, bei Google-Lautsprechern immer, sonst nicht.
+ * GRUND ist der GRUND der Gegenseite oder die bisherige Kurzform (ZEIT,
+ * KEINE_VERBINDUNG, KEIN_TOKEN, CHROMECAST_FEHLT), sonst "-". Nie Text oder Token.
  */
-function fer_alexa_pruefzeile($cfg) {
-    if (!isset($cfg['tts']['mode']) || $cfg['tts']['mode'] !== 'alexang') { return null; }
-    $frage = fer_t('ALEXA.F_TEST');
-    $aus = empty($cfg['notify']['audio']) ? ' ' . fer_t('ALEXA.T_AUDIO_AUS') : '';
-    $tok = (isset($cfg['tts']['alexa_token']) && is_string($cfg['tts']['alexa_token'])) ? $cfg['tts']['alexa_token'] : '';
-    if (!fer_alexa_token_ok($tok)) {
-        return array($frage, false, fer_t('ALEXA.T_KEIN_TOKEN') . $aus);
+function fer_say_zusatz(array $r) {
+    $m = $r['art'];
+    if (!($m === 'cc4lox' || ($m === 'alexang' && $r['stand'] !== 1))) { return ''; }
+    $grund = '-';
+    $id = explode('|', (string) $r['kennung']);
+    if (preg_match('/(?:^|;)GRUND=([A-Za-z0-9_]{1,40})/', (string) $r['zeile'], $g)) {
+        $grund = $g[1];
+    } elseif (preg_match('/_KEINE_ANTWORT\z/', $id[0])) {
+        $grund = in_array('HTTP_ZEIT', $id, true) ? 'ZEIT' : 'KEINE_VERBINDUNG';
+    } elseif (preg_match('/_KEIN_TOKEN\z/', $id[0])) {
+        $grund = 'KEIN_TOKEN';
+    } elseif ($id[0] === 'GOOGLE_FEHLT') {
+        $grund = 'CHROMECAST_FEHLT';
     }
-    list($c1, $z1, $a1) = fer_alexa_rufen(array('selftest' => '1', 'token' => $tok), 5);
-    if ($c1 !== 200 || strpos($z1, 'SELFTEST;OK=1') !== 0) {
-        return array($frage, false, sprintf(fer_t('ALEXA.T_SELFTEST_FEHL'), fer_alexa_testtext($c1, $z1, $a1, 5)) . $aus);
-    }
-    list($c2, $z2, $a2) = fer_alexa_rufen(array('aktion' => 'status'), 5);
-    $ok = $c2 === 200 && strpos($z2, 'ALEXANG;OK=1') === 0;
-    $txt = $ok ? fer_t('ALEXA.T_OK') : sprintf(fer_t('ALEXA.T_STATUS_FEHL'), fer_alexa_testtext($c2, $z2, $a2, 5));
-    $l = fer_alexa_letzte();
-    if ($l !== null) {
-        $txt .= ' ' . sprintf(fer_t($l['ok'] ? 'ALEXA.T_LETZTE_OK' : 'ALEXA.T_LETZTE_FEHL'), date('d.m.Y H:i', $l['zeit']),
-            $l['ok'] ? 'SPRECHEN;OK=1' : fer_alexa_testtext($l['code'], $l['zeile'], $l['art'], 10));
-        if (!$l['ok']) { $ok = false; }
-    }
-    return array($frage, $ok, $txt . $aus);
-}
-
-/* ---------------- Ausgabeart Google-Lautsprecher (Ansage-3, ab Werk nicht gewaehlt) ----------------
- *
- * Das Plugin Chromecast 4 Lox NG (Ordner chromecast-4lox-ng, ab 1.3.15,
- * https://github.com/timanders22/LoxBerry-Plugin-Chromecast4lox) laesst
- * Google-Lautsprecher (Chromecast, Nest, Google Home) sprechen. Die
- * Schnittstelle ist die von Alexa-NG: POST an seinen Endpunkt auf DIESEM
- * LoxBerry (127.0.0.1, Webport aus general.json - andere Absender weist er mit
- * 403 NUR_LOKAL ab) mit aktion=sprechen, token, geraet (leer = Standardgeraet
- * des Chromecast-Plugins, dann nicht mitgeschickt), text, optional laut. Erfolg
- * ist nur HTTP 200 mit SPRECHEN;OK=1 (auch UNVERAENDERT und TEXT_NULL). Gerufen
- * wird ueber DIESELBE Funktion fer_alexa_rufen(), nur mit dieser Adresse.
- *
- * Eigenes Sprechtoken (tts.google_token), getrennt vom Alexa-NG-Token, mit
- * denselben Regeln. Anders als bei Alexa-NG steht auch der Ansagetext nicht
- * im Protokoll und nicht in der ?say-Antwort, nur seine Laenge. Faellt der
- * Endpunkt aus (403, 404, 409, 429, 503, keine Verbindung, Zeitueberschreitung),
- * entfaellt die Ansage: kein stiller Wechsel auf einen anderen Lautsprecher und
- * keine eigene Wiederholung (bei UNKLAR=1 kann sie dort schon laufen).
- */
-
-/** Die Adresse des Chromecast-Endpunkts - ohne Token. */
-function fer_google_adresse() {
-    return 'http://127.0.0.1:' . fer_webport() . '/plugins/chromecast-4lox-ng/index.php';
-}
-
-/** Die Laenge des Ansagetexts in Zeichen (der Text selbst geht nirgends hin ausser zum Endpunkt). */
-function fer_google_textlaenge($text) {
-    $n = @preg_match_all('/./su', (string) $text);
-    return is_int($n) ? $n : strlen((string) $text);
-}
-
-/** 404 ohne GRUND: das Chromecast-Plugin fehlt oder ist aelter als 1.3.15 (Webserver-Seite). */
-function fer_google_fehlt($code, $zeile, $art) {
-    return $art === 'antwort' && (int) $code === 404 && fer_alexa_grund($zeile) === '';
-}
-
-/** Ein Ergebnis fuer das Protokoll (ASCII) - nie Token oder Text. */
-function fer_google_befund($code, $zeile, $art, $tmo) {
-    if ($art === 'verbindung') {
-        return 'keine Verbindung zu ' . fer_google_adresse() . ' (Webserver erreichbar?)';
-    }
-    if (fer_google_fehlt($code, $zeile, $art)) {
-        return 'HTTP 404 ohne GRUND - Chromecast 4 Lox NG fehlt oder ist zu alt (ab 1.3.15)';
-    }
-    return fer_alexa_befund($code, $zeile, $art, $tmo);
-}
-
-/** Dasselbe in der Sprache der Oberflaeche (Reiter Test, Meldung der Testansage). */
-function fer_google_testtext($code, $zeile, $art, $tmo) {
-    if ($art === 'zeit') { return sprintf(fer_t('ALEXA.T_ZEIT'), (int) $tmo); }
-    if ($art === 'verbindung') { return sprintf(fer_t('GOOGLE.T_KEINE_VERBINDUNG'), fer_google_adresse()); }
-    if ($art === 'kein_token') { return fer_t('GOOGLE.T_KEIN_TOKEN'); }
-    if (fer_google_fehlt($code, $zeile, $art)) { return fer_t('GOOGLE.T_FEHLT'); }
-    return fer_alexa_befund($code, $zeile, $art, $tmo);
-}
-
-/** GRUND fuer die Antwortzeile von ?say=: der des Endpunkts oder ein eigener. */
-function fer_google_grund_kurz($l) {
-    if (is_array($l) && fer_google_fehlt($l['code'], $l['zeile'], $l['art'])) { return 'CHROMECAST_FEHLT'; }
-    return fer_alexa_grund_kurz($l);
-}
-
-/** Eine Ansage ueber Chromecast 4 Lox NG (10 s). Rueckgabe true nur bei HTTP 200 und SPRECHEN;OK=1. */
-function fer_google_sprechen($text) {
-    $cfg = fer_config();
-    $t = $cfg['tts'];
-    $n = fer_google_textlaenge($text);
-    $tok = (isset($t['google_token']) && is_string($t['google_token'])) ? $t['google_token'] : '';
-    if (!fer_alexa_token_ok($tok)) {
-        fer_alexa_merken(false, 0, '', 'kein_token', 'google_letzte.json');
-        fer_log('Ansage uebersprungen: Ausgabeart Google-Lautsprecher, aber kein Sprechtoken fuer Chromecast 4 Lox NG gespeichert');
-        return false;
-    }
-    $f = array('aktion' => 'sprechen', 'token' => $tok);
-    $g = (isset($t['google_geraet']) && is_string($t['google_geraet'])) ? $t['google_geraet'] : '';
-    if ($g !== '') { $f['geraet'] = $g; }
-    $f['text'] = (string) $text;
-    if (isset($t['google_laut']) && is_int($t['google_laut']) && $t['google_laut'] >= 0 && $t['google_laut'] <= 100) {
-        $f['laut'] = $t['google_laut'];
-    }
-    list($code, $zeile, $art) = fer_alexa_rufen($f, 10, fer_google_adresse());
-    $ok = $code === 200 && strpos($zeile, 'SPRECHEN;OK=1') === 0;
-    fer_alexa_merken($ok, $code, $zeile, $art, 'google_letzte.json');
-    $gr = fer_alexa_grund($zeile);
-    fer_log('Ansage gesendet (Google-Lautsprecher, ' . ($g !== '' ? 'Geraet ' . $g : 'Standardgeraet')
-        . ', Text ' . $n . ' Zeichen) -> '
-        . ($ok ? 'OK' . ($gr !== '' ? ', GRUND=' . $gr : '') : 'FEHLER ' . fer_google_befund($code, $zeile, $art, 10)));
-    return $ok;
+    return ';CODE=' . (int) $r['http'] . ';GRUND=' . $grund;
 }
 
 /**
- * Die Zeile "Ansage ueber Google-Lautsprecher" im Reiter Test - null, wenn das
- * nicht die Ausgabeart ist. Gefragt wird nur selftest=1 per POST (prueft das
- * Token, spricht nichts), hoechstens 5 s; fer_selbsttest() laeuft nur bei
- * offenem Reiter Test. SPRECHEN=0 (Sprachausgabe dort aus) und DIENST=0 (Dienst
- * laeuft nicht) machen die Zeile rot: jede Ansage scheiterte dann (409/503).
- * Dazu das Ergebnis der letzten echten Ansage. Rueckgabe: array(Frage, ok, Hinweis).
+ * Die Zeile "Ist die Sprachausgabe eingerichtet?" im Reiter Test (ansage_pruefzeile()).
+ * Alexa-NG und Chromecast werden mit selftest=1 gefragt (prueft nur das Token, spricht
+ * nicht, hoechstens 5 s; fer_selbsttest() laeuft nur bei offenem Reiter Test), der Music
+ * Server nie - eine Probe dort spraeche. Dazu die letzte Ansage. Rueckgabe:
+ * array(Frage, ok, Hinweis) mit ok true/false/null wie die uebrigen Zeilen, oder null:
+ * wie bis 1.2.22 entfaellt die Zeile, wenn die Vorabend-Ansage aus ist und die Ausgabe
+ * ueber eine Adresse ginge.
  */
-function fer_google_pruefzeile($cfg) {
-    if (!isset($cfg['tts']['mode']) || $cfg['tts']['mode'] !== 'cc4lox') { return null; }
-    $frage = fer_t('GOOGLE.F_TEST');
-    $aus = empty($cfg['notify']['audio']) ? ' ' . fer_t('ALEXA.T_AUDIO_AUS') : '';
-    $tok = (isset($cfg['tts']['google_token']) && is_string($cfg['tts']['google_token'])) ? $cfg['tts']['google_token'] : '';
-    if (!fer_alexa_token_ok($tok)) {
-        return array($frage, false, fer_t('GOOGLE.T_KEIN_TOKEN') . $aus);
-    }
-    list($c1, $z1, $a1) = fer_alexa_rufen(array('selftest' => '1', 'token' => $tok), 5, fer_google_adresse());
-    if ($c1 !== 200 || strpos($z1, 'SELFTEST;OK=1') !== 0) {
-        return array($frage, false, sprintf(fer_t('GOOGLE.T_SELFTEST_FEHL'), fer_google_testtext($c1, $z1, $a1, 5)) . $aus);
-    }
-    $ok = true;
-    $zus = array();
-    if (preg_match('/(?:^|;)SPRECHEN=0(?:;|$)/', $z1)) { $zus[] = fer_t('GOOGLE.T_SPRECHEN_AUS'); $ok = false; }
-    if (preg_match('/(?:^|;)DIENST=0(?:;|$)/', $z1)) { $zus[] = fer_t('GOOGLE.T_DIENST_AUS'); $ok = false; }
-    $txt = $ok ? fer_t('GOOGLE.T_OK') : sprintf(fer_t('GOOGLE.T_OK_ABER'), implode(' ', $zus));
-    $l = fer_alexa_letzte('google_letzte.json');
-    if ($l !== null) {
-        $txt .= ' ' . sprintf(fer_t($l['ok'] ? 'GOOGLE.T_LETZTE_OK' : 'GOOGLE.T_LETZTE_FEHL'), date('d.m.Y H:i', $l['zeit']),
-            $l['ok'] ? $l['zeile'] : fer_google_testtext($l['code'], $l['zeile'], $l['art'], 10));
-        if (!$l['ok']) { $ok = false; }
-    }
-    return array($frage, $ok, $txt . $aus);
+function fer_pruefe_ansage($cfg) {
+    $tts = (isset($cfg['tts']) && is_array($cfg['tts'])) ? $cfg['tts'] : array();
+    $mode = (isset($tts['mode']) && is_string($tts['mode'])) ? $tts['mode'] : '';
+    $an = !empty($cfg['notify']['audio']);
+    if (!$an && !ansage_ist_ng($mode)) { return null; }
+    $k = fer_ansage_k();
+    $k['e'] = function ($s) { return (string) $s; };     // die Tabelle maskiert selbst (fe_e)
+    list($stand, $txt) = ansage_pruefzeile($tts, true, $k);
+    /* 1 Haken, 0 Kreuz; -1 (Hinweis: dort ausgeschaltet, letzte Ansage gescheitert)
+     * bleibt ein Kreuz wie bis 1.2.22, ausser beim Original-Audioserver (Strich);
+     * -2 (aus) ist ein Strich. */
+    $ok = $stand === 1 ? true : ($stand === 0 ? false : (($stand === -1 && $mode !== 'audioserver') ? false : null));
+    if (!$an) { $txt .= ' ' . fer_t('TTS.T_VORABEND_AUS'); }
+    return array(fer_t('TTS.F_ANSAGE'), $ok, $txt);
 }
 
 /** Ansagetext fuer den Vorabend. */
@@ -2996,17 +2763,10 @@ function fer_selbsttest($basis = '', $vorher = null) {
     }
 
     /* --- 6. Ansage ------------------------------------------------------ */
-    /* Ansage-2: ist Alexa-NG die Ausgabeart, gibt es keine Ansage-Adresse zu
-     * bilden; die eigene Zeile fragt Alexa-NG selbst (fer_alexa_pruefzeile()). */
-    $alexa_z = fer_alexa_pruefzeile($cfg);
-    /* Ansage-3: dasselbe fuer Google-Lautsprecher (gewaehlt ist hoechstens eine der beiden). */
-    if ($alexa_z === null) { $alexa_z = fer_google_pruefzeile($cfg); }
-    if ($alexa_z !== null) {
-        $add($alexa_z[0], $alexa_z[1], $alexa_z[2]);
-    } elseif (!empty($cfg['notify']['audio'])) {
-        $url = fer_tts_url('Probe');
-        $add(fer_t('PRUEF.F_ANSAGE'), $url === null ? null : ($url !== ''),
-            fer_t($url === null ? 'PRUEF.H_ANSAGE_AUDIOSERVER' : ($url !== '' ? 'PRUEF.JA' : 'PRUEF.H_ANSAGE_OHNE_IP')));
+    /* Nr. 36 b, Stufe 2: eine Zeile fuer alle Ausgabearten (fer_pruefe_ansage()). */
+    $az = fer_pruefe_ansage($cfg);
+    if ($az !== null) {
+        $add($az[0], $az[1], $az[2]);
     }
 
     return $z;
@@ -3475,13 +3235,13 @@ function fer_sicherung_lesen($roh, $geltend = null, &$namen = null)
     /* Ansage-2: das geltende Sprechtoken bleibt (es steht in keiner Sicherung). */
     if (!$mangel && is_array($neu['tts'])) {
         $alt_tok = (is_array($geltend) && isset($geltend['tts']) && is_array($geltend['tts'])
-            && isset($geltend['tts']['alexa_token']) && fer_alexa_token_ok($geltend['tts']['alexa_token']))
+            && isset($geltend['tts']['alexa_token']) && ansage_token_ok($geltend['tts']['alexa_token']))
             ? $geltend['tts']['alexa_token'] : '';
         $neu['tts']['alexa_token'] = $alt_tok;
         if ($alt_tok !== '') { $hinweise[] = fer_t('ALEXA.SICH_BLEIBT'); }
         /* Ansage-3: ebenso das geltende Sprechtoken fuer Google-Lautsprecher. */
         $alt_gtok = (is_array($geltend) && isset($geltend['tts']) && is_array($geltend['tts'])
-            && isset($geltend['tts']['google_token']) && fer_alexa_token_ok($geltend['tts']['google_token']))
+            && isset($geltend['tts']['google_token']) && ansage_token_ok($geltend['tts']['google_token']))
             ? $geltend['tts']['google_token'] : '';
         $neu['tts']['google_token'] = $alt_gtok;
         if ($alt_gtok !== '') { $hinweise[] = fer_t('GOOGLE.SICH_BLEIBT'); }
@@ -3618,44 +3378,21 @@ function fer_wert_pruefen($k, $w)
         case 'notify.time':
             $r = $text($w, '/^([01]?\d|2[0-3]):[0-5]\d\z/', 'SS:MM (00:00-23:59)', false);
             return $r;
-        case 'tts.mode':
-            return $auswahl($w, array('musicserver', 'ms4h', 'audioserver', 'custom', 'alexang', 'cc4lox'));
-        case 'tts.google_geraet':      // Ansage-3: dieselbe Form (1-200, ohne Steuerzeichen)
-        case 'tts.alexa_geraet':
-            /* Ansage-2: leer = Standardgeraet von Alexa-NG; sonst bis 200 Byte
-             * ohne Steuerzeichen (Normalname, Komma-Liste, gruppe:<name>, alle). */
-            $r = $text($w, $ohne_steuer, fer_t('MELD.FORM_TEXT'), true);
-            if ($r[0] && strlen($r[1]) > 200) { return array(false, null, sprintf(fer_t('MELD.W_LAENGE'), 200)); }
-            return $r;
-        case 'tts.google_laut':        // Ansage-3: -1 = Ansagelautstaerke des Chromecast-Plugins
-        case 'tts.alexa_laut':
-            /* -1 = die Lautstaerke des Geraets bleibt (im Formular: leer); sonst 0..100. */
-            if ($w === -1) { return array(true, -1, ''); }
-            return $zahl($w, 0, 100);
-        case 'tts.google_token':       // Ansage-3: dieselbe Form (8-128 aus A-Z a-z 0-9 _ -)
-        case 'tts.alexa_token':
-            /* Nur das Formular fragt hiernach; der Grund zeigt den Wert nie. */
-            if (!is_string($w)) {
-                return array(false, null, sprintf(fer_t('MELD.W_TYP'), $typ($w)));
+        case 'tts.mode': case 'tts.ip': case 'tts.port': case 'tts.zones': case 'tts.volume':
+        case 'tts.lang': case 'tts.template': case 'tts.alexa_geraet': case 'tts.alexa_laut':
+        case 'tts.google_geraet': case 'tts.google_laut': case 'tts.sonos_zone': case 'tts.sonos_laut':
+            /* Nr. 36 b, Stufe 2: dieselbe Pruefung wie beim Speichern und vor dem Senden
+             * (ansage_wert_pruefen(): Ausgabeart aus fer_ansage_modi(), Adresse und Vorlage
+             * im Heimnetz, Zonen, Lautstaerke 1-100). Der Grund nennt nie den Wert. Die
+             * Sprechtoken kommen hier nie an: fer_sicherung_lesen() weist sie vorher ab. */
+            $ag = '';
+            $s = substr($k, 4);
+            $p = ansage_wert_pruefen(array($s => $w), $ag, fer_ansage_modi());
+            if ($p === null) {
+                $ag = (string) preg_replace('/^UNTER\|[^|]*\|/', '', $ag);
+                return array(false, null, ansage_kennung_text($ag, fer_ansage_k()));
             }
-            if (!fer_alexa_token_ok($w)) {
-                return array(false, null, sprintf(fer_t('MELD.W_FORM'), '', fer_t('ALEXA.FORM_TOKEN')));
-            }
-            return array(true, $w, '');
-        case 'tts.ip':
-            return $text($w, '/^[A-Za-z0-9.\-]{1,253}\z/', fer_t('MELD.FORM_IP'), true);
-        case 'tts.port':
-            return $zahl($w, 1, 65535);
-        case 'tts.zones':
-            return $text($w, '/^[0-9~, ]{1,100}\z/', fer_t('MELD.FORM_ZONEN'), false);
-        case 'tts.volume':
-            return $zahl($w, 1, 100);
-        case 'tts.lang':
-            return $text($w, '/^[a-z]{2}\z/', fer_t('MELD.FORM_SPRACHE'), false);
-        case 'tts.template':
-            $r = $text($w, $ohne_steuer, fer_t('MELD.FORM_TEXT'), true);
-            if ($r[0] && strlen($r[1]) > 500) { return array(false, null, sprintf(fer_t('MELD.W_LAENGE'), 500)); }
-            return $r;
+            return array(true, $p[$s], '');
         case 'notify':
         case 'tts':
             if (!is_array($w) || ($w !== array() && array_keys($w) === range(0, count($w) - 1))) {
@@ -3663,9 +3400,8 @@ function fer_wert_pruefen($k, $w)
             }
             $soll = $k === 'notify'
                 ? array('audio', 'push', 'time', 'freetag', 'ferienstart', 'bridge_month')
-                : array('mode', 'ip', 'port', 'zones', 'volume', 'lang', 'template',
-                        'alexa_geraet', 'alexa_laut',      // Ansage-2 (ohne Sprechtoken)
-                        'google_geraet', 'google_laut');   // Ansage-3 (ohne Sprechtoken)
+                // Nr. 36 b, Stufe 2: die Schluessel des Moduls ohne die Sprechtoken
+                : array_values(array_diff(array_keys(ansage_vorgaben()), ansage_geheim()));
             $aus = array();
             $gruende = array();
             foreach ($w as $uk => $uw) {
