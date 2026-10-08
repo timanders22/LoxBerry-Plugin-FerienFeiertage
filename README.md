@@ -10,6 +10,16 @@ Bundesländern/Kantonen.
 
 Kompatibel mit LoxBerry 3.x und **LoxBerry 4** (reines PHP, PHP 7.4 und 8.x).
 
+## Neu in 1.2.24
+
+Kopf wie alle Hausplugins: Statusübersicht über den Reitern, Zusammenfassung oben im ersten Reiter.
+
+* **Statusübersicht über den Reitern:** Dienst (ohne – der Minuten-Cron holt die Daten), Region, ob die
+  Daten der Quelle heute und morgen abdecken, und der letzte gelungene Abruf – aus dem, was die Seite schon
+  liest, ohne eigene Abfrage. Der Tageskasten darüber (heute, morgen, nächste Ferien) bleibt, wie er ist.
+* **Zusammenfassung** des Plugins in einem grünen Kasten oben im Reiter Einstellungen.
+* Nur Oberfläche; gerendert unter PHP 7.4, 8.4 und 8.5, nicht am Gerät angesehen.
+
 ## Neu in 1.2.23
 
 Sprachausgabe in Hausform über die gemeinsame Sprachausgabe 1.1.1 (Entscheidung 40, Stufe 2).

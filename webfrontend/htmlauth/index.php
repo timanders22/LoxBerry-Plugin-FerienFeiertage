@@ -1161,6 +1161,35 @@ if ($fe_frame) { LBWeb::lbheader('Ferien und Feiertage', 'https://wiki.loxberry.
 <?php if (!empty($fe_st['warnung'])) { ?><div class="sm-alert sm-warn"><b><?php echo fer_t('TEXT.ACHTUNG'); ?></b> <?php echo fer_t('TEXT.DIE_FERIEN_FEIERTAGSDATEN_REICHEN_'); ?></div><?php } ?>
 <?php } ?>
 
+<?php /* Kopf (Entscheidung Nr. 43, seit 1.2.24): Statusuebersicht ueber den
+   Reitern, immer sichtbar (der Tageskasten darueber nur mit Daten). Nur
+   $fe_cfg und $fe_st (fer_state(), oben schon gelesen) - keine eigene
+   Abfrage. Einen Dienst gibt es nicht: der Minuten-Cron (bin/cron.php)
+   holt die Daten und meldet ueber MQTT. */
+$fe_k_land = isset($fe_cfg['country']) && is_string($fe_cfg['country']) ? $fe_cfg['country'] : '';
+$fe_k_sub = isset($fe_cfg['subdivision']) && is_string($fe_cfg['subdivision']) ? $fe_cfg['subdivision'] : '';
+$fe_k_ts = !empty($fe_st['stand_ok']) ? strtotime((string) $fe_st['stand_ok']) : false;
+$fe_k_alter = isset($fe_st['alter_tage']) ? (int) $fe_st['alter_tage'] : -1; ?>
+<table class="sm-tbl" style="max-width:620px">
+<tr><th><?php echo fer_t('TEXT.KOPF_EIGENSCHAFT'); ?></th><th><?php echo fer_t('TEXT.KOPF_WERT'); ?></th></tr>
+<tr><td><?php echo fer_t('TEXT.KOPF_DIENST'); ?></td><td><?php echo fer_t('TEXT.KOPF_OHNE_DIENST'); ?></td></tr>
+<tr><td><?php echo fer_t('TEXT.REGION'); ?></td>
+    <td><?= fe_e(in_array($fe_k_land, fer_laender(), true) ? fer_t('LAND.' . $fe_k_land) : $fe_k_land) ?><?= $fe_k_sub !== '' ? ' &middot; ' . fe_e($fe_k_sub) : '' ?></td></tr>
+<tr><td><?php echo fer_t('TEXT.KOPF_DATEN'); ?></td>
+<?php if (empty($fe_st['quelle_da'])) { ?>
+    <td><?php echo fer_t('TEXT.NOCH_KEINE_DATEN_GELADEN'); ?></td>
+<?php } elseif (!empty($fe_st['ok'])) { ?>
+    <td><?php echo fer_t('TEXT.KOPF_DATEN_OK'); ?></td>
+<?php } else { ?>
+    <td><?php echo fer_t('TEXT.KOPF_DATEN_LUECKE'); ?></td>
+<?php } ?></tr>
+<tr><td><?php echo fer_t('TEXT.KOPF_ABRUF'); ?></td>
+    <td><?= $fe_k_ts ? fe_e(date('d.m.Y H:i', $fe_k_ts))
+        . ($fe_k_alter > 0 ? ' (' . fe_e(sprintf(fer_t('TEXT.KOPF_VOR_TAGEN'), $fe_k_alter)) . ')'
+           : ($fe_k_alter === 0 ? ' (' . fe_e(fer_t('TEXT.KOPF_HEUTE')) . ')' : ''))
+        : '&ndash;' ?></td></tr>
+</table>
+
 <?php /* Echte Verweise, keine <div>-Attrappen.
    Bis 1.0.1 waren die Reiter <div>-Elemente, die erst ein Klick-Empfaenger
    in JavaScript benutzbar machte. Alle Bereiche stehen aber auf
@@ -1186,6 +1215,7 @@ if ($fe_frame) { LBWeb::lbheader('Ferien und Feiertage', 'https://wiki.loxberry.
 
 <!-- ================= <?php echo fer_t('TEXT.EINSTELLUNGEN'); ?> ================= -->
 <div class="sm-pane<?= fe_aktiv('tab-settings') ?>" id="tab-settings">
+<div class="sm-hinweis"><?php echo fer_t('TEXT.WAS_IST_DAS'); ?></div>
 <div class="sm-legende">
 <span><i class="sm-punkt sm-b-technik"></i> <?php echo fer_t('LEGENDE.TECHNIK'); ?></span>
 <span><i class="sm-punkt sm-b-aktion"></i> <?php echo fer_t('LEGENDE.AKTION'); ?></span>
