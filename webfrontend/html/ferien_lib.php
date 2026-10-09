@@ -66,15 +66,18 @@ function fer_ansage_modi() {
 /**
  * Kontext fuer die gemeinsame Sprachausgabe: Webport, Kennung dieses Plugins, Ordner
  * der letzten Ansage (Zwischenordner, wie bis 1.2.22 alexa_letzte.json) und die Texte
- * ([ANSAGE] der Sprachdateien). Zwei Saetze des Moduls sagen "ab Werk aus"; hier ist
- * ab Werk der Music Server ohne Adresse eingestellt - dafuer stehen eigene Saetze
- * unter [TTS].
+ * ([ANSAGE] der Sprachdateien). Ab Werk ist der Music Server ohne Adresse eingestellt:
+ * 'werk' => 'musicserver' (Modul 1.1.2) - die Auswahl nennt "aus" schlicht und den
+ * Music Server "(ab Werk)". Den Hinweis unter der Auswahl behaelt die Linie
+ * (TTS.ART_HINWEIS, mit dem Haken "Audioausgabe aktiv"); die Umlenkung O_AUS ist seit
+ * 1.2.25 gestrichen (X-10).
  */
 function fer_ansage_k() {
     return array('port' => fer_webport(), 'kopf' => array('User-Agent: LoxBerry Ferien-Plugin'),
                  'ordner' => fer_tmpdir(),
                  't' => function ($s) { return fer_t($s); },
-                 'schluessel' => array('ART_HINWEIS' => 'TTS.ART_HINWEIS', 'O_AUS' => 'TTS.O_AUS'));
+                 'werk' => 'musicserver',
+                 'schluessel' => array('ART_HINWEIS' => 'TTS.ART_HINWEIS'));
 }
 
 

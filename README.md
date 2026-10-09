@@ -10,6 +10,22 @@ Bundesländern/Kantonen.
 
 Kompatibel mit LoxBerry 3.x und **LoxBerry 4** (reines PHP, PHP 7.4 und 8.x).
 
+## Neu in 1.2.25
+
+Gemeinsame Sprachausgabe 1.1.2.
+
+* **Sprachausgabe 1.1.2:** gemeinsames Modul und Abschnitt [ANSAGE] mit 157 Sätzen. Die Auswahl der
+  Ausgabeart nennt den Loxone Music Server jetzt „(ab Werk)“ und „aus“ schlicht „aus“ – das Modul
+  weiß, dass hier ab Werk der Music Server eingestellt ist. Der eigene Hinweis unter der Auswahl
+  (Haken „Audioausgabe aktiv“) bleibt. Dazu aus dem Modul: eigene Sätze zu einem unbekannten
+  Eintrag im Block der Sprachausgabe, Zeichenzahl bei kaputtem UTF-8 in Zeichen, die Meldung
+  „Port abgewiesen“ nennt das Feld nicht mehr doppelt.
+* Abfuhrkalender und Abfahrts-Assistent binden die Bibliothek dieses Plugins ein und teilen sich
+  damit das Modul; alle drei kommen mit 1.1.2.
+* Baustein-Liste unverändert – frei formuliert sind nur noch die Stellen, an denen Sie eigene
+  Schalter, Zeitimpulse oder vorhandene Bausteine anschließen.
+* Gerendert unter PHP 7.4, 8.4 und 8.5, nicht am Gerät angesehen.
+
 ## Neu in 1.2.24
 
 Kopf wie alle Hausplugins: Statusübersicht über den Reitern, Zusammenfassung oben im ersten Reiter.
