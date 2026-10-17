@@ -2068,9 +2068,15 @@ function fer_ptest_active() {
  */
 function fer_meldeflags($st = null)
 {
+    /* Welle Bild 18 (1.2.26; Entwurf Welle 18 ff, Entscheidung 15, vom Hausherrn am 17.10.2026 bestaetigt): ann
+     * fragt jetzt auch fer_ann_erlaubt(). Bis 1.2.25 ging das Meldefenster an Loxone auf, sobald es einen Ansagetext
+     * gab (morgen Feiertag, Ferien oder Brueckentag) - auch wenn im Plugin "Melden, wenn morgen schulfrei ist" bzw.
+     * "Melden am Vorabend des Ferienbeginns" abgewaehlt war; nur die eigene Ansage hielt sich daran. Jetzt bleibt
+     * ANN dort 0, wo der Anwender "nicht melden" gewaehlt hat - Zeile, MQTT und ?json=1 gleich. */
     $cfg = fer_config();
+    if ($st === null) { $st = fer_state(); }
     return array(
-        'ann'   => fer_ann_active($st),
+        'ann'   => (fer_ann_active($st) && fer_ann_erlaubt($st, $cfg)) ? 1 : 0,
         'audio' => empty($cfg['notify']['audio']) ? 0 : 1,
         'push'  => empty($cfg['notify']['push']) ? 0 : 1,
         'ptest' => fer_ptest_active(),
@@ -2418,7 +2424,39 @@ function fer_felder() {
          * gescheiterter Abruf frischt es nicht auf. "ALTER_TAGE=" steckt in
          * keinem anderen Feldnamen. */
         'ALTER_TAGE'  => array(1, -1, 3650, 'Tage',  'Tage seit dem letzten gelungenen Abruf (-1 = noch keiner)', 'alter_tage'),
+
+        /* --- neu in 1.2.26, hinten angehaengt (Welle Bild 18, Entwurf Welle 18 ff, Entscheidung 3; Hausherr
+         * 17.10.2026): das Lebenszeichen. Alle anderen Werte sind Tageswerte - steht der LoxBerry oder sein
+         * Minutenlauf, behaelt Loxone sie, und nichts verraet es. ZAEHLER steigt je Minutenlauf um 1 (0..999,
+         * -1 = noch kein Lauf); eine Analogwertvalidierung in Loxone merkt, wenn er stehen bleibt. Bauart wie
+         * die Schwesterlinie AWM-Abfuhr (awm_zaehler()). Das Thema bleibt LEER: ein Wert, der sich jede Minute
+         * aendert, gehoert nicht in die MQTT-Signatur (Regeln/07) - ueber MQTT gibt es status/ts.
+         * "ZAEHLER=" steckt in keinem anderen Feldnamen. */
+        'ZAEHLER'     => array(1, -1, 999, '',      'Lebenszeichen: Laufzaehler 0 bis 999, +1 je Minutenlauf', ''),
     );
+}
+
+/**
+ * Das Lebenszeichen ZAEHLER (Welle Bild 18, 1.2.26; Entwurf Welle 18 ff, Entscheidung 3). $weiter = true zaehlt ihn
+ * hoch - das tut nur der Minutenlauf (bin/cron.php), einmal je Lauf. Gelesen wird er von fer_werte() fuer die
+ * Loxone-Zeile.
+ *
+ * Bauart wie awm_zaehler() der Schwesterlinie AWM-Abfuhr: 0..999 im Kreis, -1 = noch kein Lauf. Die Datei liegt im
+ * Zwischenordner (fer_tmpdir(), unter /tmp), nicht im Datenordner: sie wird jede Minute geschrieben, und das gehoert
+ * auf die Ramdisk, nicht auf die SD-Karte.
+ */
+function fer_zaehler($weiter = false)
+{
+    $f = fer_tmpdir() . '/zaehler.txt';
+    $n = is_file($f) ? (int) @file_get_contents($f) : -1;
+    if (!$weiter) {
+        return ($n >= 0 && $n <= 999) ? $n : -1;
+    }
+    $n = ($n < 0 || $n >= 999) ? 0 : $n + 1;
+    if (!fer_datei_schreiben($f, (string) $n)) {
+        fer_log('Lebenszeichen: der Zaehler liess sich nicht schreiben (' . $f . ').');
+    }
+    return $n;
 }
 
 /**
@@ -2506,6 +2544,7 @@ function fer_werte($st, $flags = null) {
         'MSCHULTAG2' => (int) $m['schultag2'],
         'FERIEN2IN' => (int) $st['naechste2']['in'],
         'ALTER_TAGE' => isset($st['alter_tage']) ? (int) $st['alter_tage'] : -1,
+        'ZAEHLER' => fer_zaehler(false),
     );
 }
 
@@ -2676,13 +2715,21 @@ function fer_selbsttest($basis = '', $vorher = null) {
             : sprintf(fer_t('PRUEF.H_VERDECKT_FEHL'), implode(', ', $verdeckt)));
 
     // Deckt der MQTT-Weg alles ab, was der HTTP-Weg fuehrt?
+    /* Welle Bild 18 (1.2.26): das Lebenszeichen ZAEHLER traegt bewusst kein Thema (Entwurf Welle 18 ff,
+     * Entscheidung 3, wie AWM) - ueber MQTT gibt es dafuer status/ts. Jedes andere Feld ohne Thema bleibt ein
+     * Befund. */
     $ohne_t = array();
+    $mit_t = 0;
     foreach (fer_felder() as $name => $fd) {
-        if (!isset($fd[5]) || $fd[5] === '') { $ohne_t[] = $name; }
+        if (!isset($fd[5]) || $fd[5] === '') {
+            if ($name !== 'ZAEHLER') { $ohne_t[] = $name; }
+        } else {
+            $mit_t++;
+        }
     }
     $add(fer_t('PRUEF.F_MQTT_DECKUNG'), count($ohne_t) === 0,
         count($ohne_t) === 0
-            ? sprintf(fer_t('PRUEF.H_MQTT_DECKUNG_OK'), count(fer_felder()), count(fer_mqtt_texte($st)))
+            ? sprintf(fer_t('PRUEF.H_MQTT_DECKUNG_OK'), $mit_t, count(fer_mqtt_texte($st)))
             : sprintf(fer_t('PRUEF.H_MQTT_DECKUNG_FEHL'), implode(', ', $ohne_t)));
 
     // Ist die Importdatei fuer Loxone Config wohlgeformt - mit Hinweistext
@@ -2699,7 +2746,8 @@ function fer_selbsttest($basis = '', $vorher = null) {
         if ($wohl) {
             foreach ($x->VirtualInHttpCmd as $c) {
                 $nb++;
-                if (strlen((string) $c['Comment']) > 40) { $lang++; }
+                /* 1.2.26: in Zeichen, nicht in Byte - die Kommentare tragen jetzt Umlaute (Sprachdatei). */
+                if (preg_match_all('/./su', (string) $c['Comment']) > 40) { $lang++; }
                 if (trim((string) $c['HintText']) === '') { $ohne_h++; }
             }
         }
@@ -2897,29 +2945,100 @@ function fer_vx($s) {
  * Kachelnamen ab. Die volle Bedeutung steht jetzt im Hinweistext.
  */
 function fer_kurztext($name) {
-    static $k = array(
-        'OK' => 'Daten der Quelle gueltig', 'FERIEN' => 'heute Ferien', 'FEIERTAG' => 'heute Feiertag',
-        'WOCHENENDE' => 'heute Wochenende', 'SCHULFREI' => 'heute schulfrei', 'SCHULTAG' => 'heute Schultag',
-        'BRUECKE' => 'heute Brueckentag', 'MFERIEN' => 'morgen Ferien', 'MFEIERTAG' => 'morgen Feiertag',
-        'MSCHULFREI' => 'morgen schulfrei', 'MSCHULTAG' => 'morgen Schultag', 'MBRUECKE' => 'morgen Brueckentag',
-        'FERIENIN' => 'Ferien beginnen in', 'FERIENREST' => 'laufende Ferien: Resttage',
-        'FERIENDAUER' => 'Ferien: Dauer', 'FEIERTAGIN' => 'naechster Feiertag in', 'URLAUB' => 'heute Urlaub',
-        'MURLAUB' => 'morgen Urlaub', 'URLAUBIN' => 'Urlaub beginnt in', 'URLAUBREST' => 'laufender Urlaub: Resttage',
-        'URLAUBDAUER' => 'Urlaub: Dauer', 'URLAUBENDE' => 'letzter Urlaubstag', 'WARN' => 'Warnhinweis aktiv',
-        'ANN' => 'Meldefenster aktiv', 'AUDIO' => 'Ansage freigegeben', 'PUSH' => 'Push freigegeben',
-        'PTEST' => 'Test-Push ausloesen', 'WOCHENTAG' => 'Wochentag heute (1 = Mo)',
-        'MWOCHENTAG' => 'Wochentag morgen (1 = Mo)', 'FREITAGE' => 'freie Tage am Stueck ab heute',
-        'MFREITAGE' => 'freie Tage am Stueck ab morgen', 'FERIENENDE' => 'heute letzter Ferientag',
-        'MERSTERSCHULTAG' => 'morgen erster Schultag', 'HALBTAG' => 'heute halber Feiertag',
-        'MHALBTAG' => 'morgen halber Feiertag', 'BRUECKEIN' => 'naechster Brueckentag in',
-        'FERIENNAECHSTEIN' => 'Ferien nach den laufenden in', 'FEIERTAG2IN' => 'uebernaechster Feiertag in',
-        'URLAUBHEIM' => 'Vorwaermen zur Rueckkehr', 'FERIEN2' => 'heute Ferien Region 2',
-        'MFERIEN2' => 'morgen Ferien Region 2', 'SCHULFREI2' => 'heute schulfrei Region 2',
-        'MSCHULFREI2' => 'morgen schulfrei Region 2', 'SCHULTAG2' => 'heute Schultag Region 2',
-        'MSCHULTAG2' => 'morgen Schultag Region 2', 'FERIEN2IN' => 'Ferien Region 2 in',
-        'ALTER_TAGE' => 'Tage seit letztem Abruf',
+    /* Welle Bild 18 (1.2.26; Entwurf Welle 18 ff, Entscheidung 12): die kurzen Beschriftungen stehen in der
+     * Sprachdatei ([T12] VL_K_<Feld>; deutsch mit Umlauten, englisch uebersetzt) - Sprachregel 13.10.2026: Titel fest,
+     * Kommentare uebersetzt. Bis 1.2.25 standen sie hier fest deutsch und ohne Umlaute. */
+    $k = fer_t('T12.VL_K_' . $name);
+    return $k !== 'T12.VL_K_' . $name ? $k : $name;
+}
+
+/**
+ * Die Baustein-Listen fuer den Reiter "Einbindung in Loxone" (Welle Bild 18, 1.2.26; Hausherr 11.10.2026:
+ * Vollausstattung, ein absoluter Laie soll das Maximum leicht uebernehmen koennen; Entwurf Welle 18 ff,
+ * Entscheidungen 1, 4, 14 und 16). Drei Seiten aus dem LoxBerry-Plugins Musterprojekt, dort in Loxone Config
+ * gebaut und verbunden (Musterprojekt/baustein_listen.txt, Abschnitte "Ferien und Feiertage" 36, "... Meldungen" 33
+ * und "... Haus" 35 Zeilen, wortgleich). Je Tabellenzeile EIN Sprachschluessel BAUSTEIN.Z<seite>_<nn> =
+ * "Typ | Name | Parameter | Eingaenge" ohne Auszeichnung; index.php gibt jede Zelle und jeden Satz maskiert aus.
+ *
+ * Die Liste zeigt das MQTT-Praefix ab Werk ("ferien"). Wie das MQTT-Gateway den Namen bildet, wird das fuehrende
+ * "ferien_" im Namen der Virtuellen Texteingaenge und das Abo "ferien/#" durch das eingestellte Praefix ersetzt;
+ * ab Werk bleibt alles wortgleich mit der Liste. FERIEN_... (Titel der Vorlage) bleibt.
+ *
+ * Bis 1.2.25 stand im Reiter eine Tabelle mit 80 Zeilen (Behaelter, 47 Befehle, 32 Logikzeilen), die zwoelf
+ * Schwellwertschalter an 0/1-Felder setzte - genau die Bauart, die am 07.09.2026 an dieser Linie im Haus eine
+ * Push-Meldung je Abholung (alle 300 s) erzeugte (Regeln/09) -, und die keine Ausfallerkennung kannte.
+ *
+ * Rueckgabe: je Seite 'kopf', 'seite' (Name der Musterseite), 'bild', 'schritte' und 'hinweise' (Saetze),
+ * 'zeilen' (je array(Nummer, Typ, Name, Parameter, Eingaenge)) - alles reiner Text.
+ */
+function fer_bausteinliste()
+{
+    $cfg = fer_config();
+    $thema = trim((string) $cfg['mqtt_topic']);
+    if ($thema === '') { $thema = 'ferien'; }
+    $flach = str_replace('/', '_', fer_mqtt_thema($thema));
+    $map = array('ferien/#' => $thema . '/#');
+    $seiten = array(
+        array('kopf' => fer_t('BAUSTEIN.BS1_KOPF'), 'seite' => 'Ferien und Feiertage', 'bild' => 'einbindung_loxone.png', 'z' => 1, 'n' => 36,
+              'schritte' => array(
+                fer_t('BAUSTEIN.BS1_S1'),
+                fer_t('BAUSTEIN.BS1_S2'),
+                fer_t('BAUSTEIN.BS1_S3'),
+                fer_t('BAUSTEIN.BS1_S4'),
+                fer_t('BAUSTEIN.BS1_S5'),
+                fer_t('BAUSTEIN.BS1_S6'),
+                fer_t('BAUSTEIN.BS1_S7')),
+              'hinweise' => array(
+                fer_t('BAUSTEIN.BS1_H1'),
+                fer_t('BAUSTEIN.BS1_H2'),
+                fer_t('BAUSTEIN.BS1_H3'),
+                fer_t('BAUSTEIN.BS1_H4'),
+                fer_t('BAUSTEIN.BS1_H5'),
+                fer_t('BAUSTEIN.BS1_H6'))),
+        array('kopf' => fer_t('BAUSTEIN.BS2_KOPF'), 'seite' => 'Ferien und Feiertage Meldungen', 'bild' => 'einbindung_loxone_meldungen.png', 'z' => 2, 'n' => 33,
+              'schritte' => array(
+                fer_t('BAUSTEIN.BS2_S1'),
+                fer_t('BAUSTEIN.BS2_S2'),
+                fer_t('BAUSTEIN.BS2_S3'),
+                fer_t('BAUSTEIN.BS2_S4'),
+                fer_t('BAUSTEIN.BS2_S5'),
+                fer_t('BAUSTEIN.BS2_S6'),
+                fer_t('BAUSTEIN.BS2_S7')),
+              'hinweise' => array(
+                fer_t('BAUSTEIN.BS2_H1'),
+                fer_t('BAUSTEIN.BS2_H2'),
+                fer_t('BAUSTEIN.BS2_H3'),
+                fer_t('BAUSTEIN.BS2_H4'),
+                fer_t('BAUSTEIN.BS2_H5'))),
+        array('kopf' => fer_t('BAUSTEIN.BS3_KOPF'), 'seite' => 'Ferien und Feiertage Haus', 'bild' => 'einbindung_loxone_haus.png', 'z' => 3, 'n' => 35,
+              'schritte' => array(
+                fer_t('BAUSTEIN.BS3_S1'),
+                fer_t('BAUSTEIN.BS3_S2'),
+                fer_t('BAUSTEIN.BS3_S3'),
+                fer_t('BAUSTEIN.BS3_S4'),
+                fer_t('BAUSTEIN.BS3_S5'),
+                fer_t('BAUSTEIN.BS3_S6')),
+              'hinweise' => array(
+                fer_t('BAUSTEIN.BS3_H1'),
+                fer_t('BAUSTEIN.BS3_H2'),
+                fer_t('BAUSTEIN.BS3_H3'),
+                fer_t('BAUSTEIN.BS3_H4'),
+                fer_t('BAUSTEIN.BS3_H5'))),
     );
-    return isset($k[$name]) ? $k[$name] : $name;
+    $aus = array();
+    $ersetzen = function ($x) use ($map) { return strtr($x, $map); };
+    foreach ($seiten as $s) {
+        $zeilen = array();
+        for ($i = 1; $i <= $s['n']; $i++) {
+            $c = array_pad(explode(' | ', fer_t(sprintf('BAUSTEIN.Z%d_%02d', $s['z'], $i)), 4), 4, '');
+            if (strpos($c[1], 'ferien_') === 0) { $c[1] = $flach . substr($c[1], 6); }
+            $zeilen[] = array($i, $c[0], $c[1], $ersetzen($c[2]), $ersetzen($c[3]));
+        }
+        $aus[] = array('kopf' => $s['kopf'], 'seite' => $s['seite'], 'bild' => $s['bild'],
+                       'schritte' => array_map($ersetzen, $s['schritte']),
+                       'hinweise' => array_map($ersetzen, $s['hinweise']), 'zeilen' => $zeilen);
+    }
+    return $aus;
 }
 
 /** Hausstandard: Gateway-Autostart aus general.json (PLUGIN_HAUSREGELN Abschnitt 3). */
@@ -2952,12 +3071,15 @@ function fer_vorlage_kopf() {
         ? preg_replace('/[^A-Za-z0-9\.\-:]/', '', (string) $_SERVER['HTTP_HOST'])
         : (gethostname() ?: 'loxberry');
     $ordner = getenv('LBPPLUGINDIR') ?: 'ferien';
+    /* Welle Bild 18 (1.2.26): der Hinweistext aus der Sprachdatei (Entscheidung 12); 'host' und 'ordner' dazu fuer die
+     * Ausgangsvorlage (fer_vorlage_vo()) - die Importdatei schreibt sie nicht. */
     return array(
         'title' => 'Ferien und Feiertage',
-        'hint' => 'Schulferien, Feiertage, Brueckentage und Urlaub vom LoxBerry-Plugin Ferien und Feiertage. '
-                . 'Eine Zahl gilt nur zusammen mit OK=1.',
+        'hint' => fer_t('T12.VL_KOPF_HINT'),
         'address' => 'http://' . $host . '/plugins/' . $ordner . '/ferien.php',
         'polling' => '300',
+        'host' => $host,
+        'ordner' => $ordner,
     );
 }
 
@@ -2976,15 +3098,20 @@ function fer_eingangsbefehle() {
         $min     = $f[1];
         $max     = $f[2];
         $einheit = $f[3];
-        $text    = $f[4];
+        /* Welle Bild 18 (1.2.26; Entwurf Welle 18 ff, Entscheidung 12): Kommentar und Hinweistext aus der Sprachdatei
+         * ([T12] VL_K_/VL_H_<Feld>), Unit <v.0> - alle Felder sind ganze Zahlen (bis 1.2.25 "<v.1>", also "12.0 Tage").
+         * Der Hinweistext nennt bei Feldern, die -1 tragen koennen, was -1 heisst; beim Lebenszeichen ZAEHLER
+         * "noch kein Lauf". Form wie Musterprojekt/vorlagen_w18/VI_ferien.xml. */
         $kurz = fer_kurztext($name);
+        $text = fer_t('T12.VL_H_' . $name);
+        $minus = ($name === 'ZAEHLER') ? fer_t('T12.VL_MINUS1_ZAEHLER') : fer_t('T12.LX_MINUS1');
         $cmds[] = array(
             'title' => 'FERIEN_' . $name,
             'comment' => $kurz . ($einheit !== '' ? ' [' . $einheit . ']' : ''),
             'hint' => $text . ($einheit !== '' ? ' [' . $einheit . ']' : '')
-                    . ($min < 0 ? ' - ' . fer_t('T12.LX_MINUS1') : ''),
+                    . ($min < 0 ? ' - ' . $minus : ''),
             'check' => fer_check($name),
-            'unit' => ($einheit !== '' ? '<v.1> ' . $einheit : '<v.1>'),
+            'unit' => ($einheit !== '' ? '<v.0> ' . $einheit : '<v.0>'),
             'analog' => $analog, 'min' => $min, 'max' => $max,
             'feld' => $name,
         );
@@ -2995,10 +3122,56 @@ function fer_eingangsbefehle() {
 /** Vorlage fuer den Import in Loxone Config. Rueckgabe: array(name, inhalt) */
 function fer_vorlage() {
     return array('VI_ferien.xml', fer_xml_virtual_in_http(fer_vorlage_kopf() + array(
-        'comment' => 'Erzeugt vom LoxBerry-Plugin Ferien und Feiertage (' . date('d.m.Y') . '). '
-                   . 'Loxone Config legt beim Import neu an und ueberschreibt nichts - '
-                   . 'zweimal eingelesen ergibt doppelte Bausteine.',
+        'comment' => sprintf(fer_t('T12.VL_KOPF_KOMMENTAR'), date('d.m.Y')),
     ), fer_eingangsbefehle()));
+}
+
+/**
+ * Virtueller Ausgang (Welle Bild 18, 1.2.26; Entwurf Welle 18 ff, Entscheidung 8). Form wie die Ausfuhr aus Loxone
+ * Config und wie Musterprojekt/vorlagen_w18/VQ_ferien_aktionen.xml: Wurzel VirtualOut mit HintText, Title, Comment,
+ * Address, CmdInit, CloseAfterSend="true", CmdSep; erstes Kind Info templateType="3"; je Befehl Title, Comment,
+ * CmdOnMethod, CmdOffMethod, CmdOn, CmdOnHTTP, CmdOnPost, CmdOff, CmdOffHTTP, CmdOffPost, CmdAnswer, Analog, Repeat,
+ * RepeatRate, HintText (digital, nur CmdOn). CRLF und Tabulator wie fer_xml_virtual_in_http().
+ */
+function fer_xml_virtual_out($kopf, $cmds) {
+    $crlf = "\r\n";
+    $o = '<?xml version="1.0" encoding="utf-8"?>' . $crlf;
+    $o .= '<VirtualOut HintText="" Title="' . fer_vx($kopf['title']) . '" Comment="' . fer_vx($kopf['comment'])
+        . '" Address="' . fer_vx($kopf['address']) . '" CmdInit="" CloseAfterSend="true" CmdSep="">' . $crlf;
+    $o .= "\t" . '<Info templateType="3" minVersion="17010727"/>' . $crlf;
+    foreach ($cmds as $c) {
+        $o .= "\t" . '<VirtualOutCmd Title="' . fer_vx($c['title']) . '" Comment="' . fer_vx($c['comment'])
+            . '" CmdOnMethod="GET" CmdOffMethod="GET" CmdOn="' . fer_vx($c['on']) . '" CmdOnHTTP="" CmdOnPost=""'
+            . ' CmdOff="" CmdOffHTTP="" CmdOffPost="" CmdAnswer="" Analog="false" Repeat="0" RepeatRate="0"'
+            . ' HintText=""/>' . $crlf;
+    }
+    $o .= '</VirtualOut>' . $crlf;
+    return $o;
+}
+
+/**
+ * Die Ausgangsvorlage "Ferien und Feiertage Aktionen" (Welle Bild 18, 1.2.26; Entwurf Welle 18 ff, Entscheidung 8):
+ * die zwei Aufrufe, mit denen Loxone das Plugin anspricht - Ansage jetzt (?say=1) und Test-Push (?ptest=1), je mit
+ * dem Aktionstoken. Titel fest deutsch (Sprachregel 13.10.2026), Kommentare aus der Sprachdatei. ?refresh=1 bewusst
+ * nicht (Bremse 300 s, die Daten kommen woechentlich; "Jetzt abrufen" im Reiter Einstellungen genuegt). Kein
+ * Verhalten aendert sich - die Adressen gibt es seit 1.1.x. Nach "Neues Token erzeugen" neu herunterladen.
+ * Rueckgabe: array(name, inhalt).
+ */
+function fer_vorlage_vo() {
+    $kopf = fer_vorlage_kopf();
+    $cfg = fer_config();
+    $token = is_string($cfg['aktionstoken']) ? $cfg['aktionstoken'] : '';
+    $basis = '/plugins/' . $kopf['ordner'] . '/ferien.php?';
+    return array('VQ_ferien_aktionen.xml', fer_xml_virtual_out(array(
+        'title' => 'Ferien und Feiertage Aktionen',
+        'comment' => fer_t('T12.VL_VO_KOMMENTAR'),
+        'address' => 'http://' . $kopf['host'],
+    ), array(
+        array('title' => 'Ansage jetzt sprechen', 'comment' => fer_t('T12.VL_VO_K_SAY'),
+              'on' => $basis . 'say=1&token=' . rawurlencode($token)),
+        array('title' => 'Test-Push auslösen', 'comment' => fer_t('T12.VL_VO_K_PTEST'),
+              'on' => $basis . 'ptest=1&token=' . rawurlencode($token)),
+    )));
 }
 
 

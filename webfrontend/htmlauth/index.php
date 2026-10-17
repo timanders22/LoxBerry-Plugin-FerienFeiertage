@@ -385,6 +385,15 @@ $fe_tab = preg_match($fe_muster, (string) (isset($_POST['activetab']) ? $_POST['
     ? (string) $_POST['activetab'] : 'tab-settings';
 
 // ---------- Loxone-Vorlage herunterladen (Hausstandard) ----------
+/* Welle Bild 18 (1.2.26; Entwurf Welle 18 ff, Entscheidung 8): dazu die Ausgangsvorlage "Ferien und Feiertage
+   Aktionen" (Ansage jetzt, Test-Push) mit dem Aktionstoken. */
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['vorlage_vo']) && function_exists('fer_vorlage_vo')) {
+    list($fe_vname, $fe_vinhalt) = fer_vorlage_vo();
+    header('Content-Type: application/x-download');
+    header('Content-Disposition: attachment; filename="' . $fe_vname . '"');
+    echo $fe_vinhalt;
+    exit;
+}
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['vorlage']) && function_exists('fer_vorlage')) {
     list($fe_vname, $fe_vinhalt) = fer_vorlage();
     header('Content-Type: application/x-download');
@@ -1094,6 +1103,15 @@ if ($fe_frame) { LBWeb::lbheader('Ferien und Feiertage', 'https://wiki.loxberry.
    der Umleitung. EIGENE Zutat, nicht aus VORLAGE_hausstandard.css.html; nur
    background-color, damit der Pfeil der Auswahlfelder bleibt. */
 .sm-wrap .sm-beanstandet { border: 2px solid #e0620d !important; background-color: #fdf4ec !important; }
+/* Welle Bild 18 (1.2.26): Bild der Bausteine aus dem gemeinsamen Musterprojekt, Seiten, Schritte und Hinweise
+   je Baustein-Liste (wie Spotpreis Octopus 1.1.25). */
+.sm-bild { margin: 12px 0; }
+.sm-bild img { max-width: 100%; height: auto; border: 1px solid #ccc; border-radius: 4px; background: #fff; }
+.sm-bild figcaption { font-size: .9em; color: #555; margin-top: 4px; }
+.sm-wrap h4.sm-h4 { color: #4f7d17; font-size: 0.98em; font-weight: 700; margin: 22px 0 4px;
+    padding-top: 10px; border-top: 1px solid #e0e0e0; }
+.sm-schritte { margin: 6px 0 0 18px; padding: 0; }
+.sm-schritte li { margin: 3px 0; }
 
 </style>
 <div class="sm-wrap">
@@ -1547,8 +1565,10 @@ $fe_praefix = trim((string) $fe_cfg['mqtt_topic']) !== '' ? trim((string) $fe_cf
 </div>
 
 <h2><?php echo fer_t('T12.MQ_THEMEN'); ?></h2>
+<?php /* 1.2.26: gezaehlt werden nur Felder mit Thema - das Lebenszeichen ZAEHLER steht nur in der Loxone-Zeile. */
+$fe_mit_thema = array_filter(fer_felder(), function ($f) { return $f[5] !== ''; }); ?>
 <div class="sm-small" style="margin-bottom:6px;"><?= sprintf(fe_e(fer_t('T12.MQ_THEMEN_H')),
-    count(fer_felder()) + count(fer_mqtt_texte($fe_st)) + count(fer_mqtt_lebenszeichen($fe_st))) ?>
+    count($fe_mit_thema) + count(fer_mqtt_texte($fe_st)) + count(fer_mqtt_lebenszeichen($fe_st))) ?>
 <?php echo fer_t('MELD.MQ_RETAIN_H'); ?></div>
 <?php /* M4 (1.2.16): Spalte "zurueckbehalten" (Entscheidung 3). Alle Themen
    dieser Linie sind Tageswerte oder Dienstaussagen und gehen mit "publish"
@@ -1556,7 +1576,7 @@ $fe_praefix = trim((string) $fe_cfg['mqtt_topic']) !== '' ? trim((string) $fe_cf
    nachlesen kann und ein spaeteres retained Thema hier auffaellt. */ ?>
 <table class="sm-tbl" style="width:100%;">
 <tr><th><?php echo fer_t('T12.MQ_THEMA'); ?></th><th><?php echo fer_t('T12.MQ_FELD'); ?></th><th><?php echo fer_t('TEXT.BEDEUTUNG'); ?></th><th><?php echo fer_t('MELD.MQ_RETAIN'); ?></th></tr>
-<?php foreach (fer_felder() as $fe_fn => $fe_fd) { ?>
+<?php foreach ($fe_mit_thema as $fe_fn => $fe_fd) { ?>
 <tr><td><span class="sm-mono"><?= fe_e($fe_praefix . '/' . $fe_fd[5]) ?></span></td>
 <td><span class="sm-mono"><?= fe_e($fe_fn) ?></span></td><td><?= fe_e($fe_fd[4]) ?></td><td><?php echo fer_t('MELD.NEIN'); ?></td></tr>
 <?php } ?>
@@ -1612,7 +1632,8 @@ $fe_praefix = trim((string) $fe_cfg['mqtt_topic']) !== '' ? trim((string) $fe_cf
 </div>
 
 <div class="sm-step"><b><?php echo fer_t('TEXT.SCHRITT_3_KACHELN_FR_DIE_APP'); ?></b><br>
-<?php echo fer_t('TEXT.FERIENIN_UND_FERIENREST_ALS_ANALOG'); ?> <span class="sm-mono"><?php echo fer_t('TEXT.V_0_TAGE'); ?></span> <?php echo fer_t('TEXT.FERIEN_IN_X_TAGEN_IST_ERFAHRUNGSGE'); ?>
+<?php /* 1.2.26 (Entwurf Welle 18 ff, Entscheidung 14): die Kacheln sind die Status der drei Seiten. */ ?>
+<?php echo fe_e(fer_t('BAUSTEIN.KACHELN')); ?>
 </div>
 
 <h2><?php echo fer_t('TEXT.H_VORLAGE'); ?></h2>
@@ -1626,104 +1647,54 @@ $fe_praefix = trim((string) $fe_cfg['mqtt_topic']) !== '' ? trim((string) $fe_cf
   <input data-role="none" type="hidden" name="vorlage" value="1">
   <button data-role="none" class="sm-btn sm-b-technik" type="submit"><?php echo fer_t('TEXT.K_VORLAGE'); ?></button>
 </form>
+<?php /* 1.2.26 (Entwurf Welle 18 ff, Entscheidung 8): Ausgangsvorlage fuer Ansage und Test-Push. */ ?>
+<form action="index.php" method="post" style="margin-bottom:6px;">
+  <?php echo fer_fmt(); ?>
+  <input data-role="none" type="hidden" name="activetab" value="tab-loxone">
+  <input data-role="none" type="hidden" name="vorlage_vo" value="1">
+  <button data-role="none" class="sm-btn sm-b-technik" type="submit"><?php echo fer_t('TEXT.K_VORLAGE_VO'); ?></button>
+</form>
+<div class="sm-hilfe" style="margin-bottom:14px;"><?php echo fe_e(fer_t('TEXT.H_VORLAGE_VO')); ?></div>
 
 <div class="sm-step"><b><?php echo fer_t('TEXT.SCHRITT_4_KOMPLETTE_BAUSTEIN_LISTE'); ?></b><br>
-<?php /* X-8 (02.10.2026, Entscheidung 36): Komplette Baustein-Liste in der Hausform
-         # | Baustein (Typ) | Name (Vorschlag) | Parameter | Eingaenge verbinden mit.
-         Bis 1.2.20 fuenf Teiltabellen ohne Nummer; die Teilueberschriften 4a-4e
-         stehen jetzt unter der Tabelle mit ihren Zeilennummern. Titel, Adresse,
-         Suchtexte, Grenzen und Einheiten kommen aus DENSELBEN Funktionen wie die
-         Importdatei (fer_vorlage_kopf(), fer_eingangsbefehle()). Typ, Name, Parameter
-         und Verbindung der Logik stehen in [BAUSTEIN] der Sprachdateien; {Kennung}
-         in einem Text wird zur laufenden Nummer "#n".
-         Zeile: array(Kennung, Typ, Name, Parameter, Argumente, Verbindung). Ein Name
-         als array('text' => ...) ist fertig (aus dem Code, maskiert) und geht nicht
-         noch einmal durch fer_t(). */
-$fe_bs_m = function ($s) { return '<span class="sm-mono">' . fe_e($s) . '</span>'; };
-$fe_bs_kopf = fer_vorlage_kopf();
-$fe_bs = array(
-    array('VI', 'T_VI', array('text' => fe_e($fe_bs_kopf['title'])), 'P_VI',
-          array($fe_bs_m($fe_bs_kopf['address']), fe_e($fe_bs_kopf['polling'])), 'V_KEINE'),
-);
-$fe_bs_letztes = 'VI';
-foreach (fer_eingangsbefehle() as $fe_bc) {
-    $fe_bs_letztes = 'F_' . $fe_bc['feld'];
-    $fe_bs[] = array($fe_bs_letztes, 'T_VI_BEFEHL', array('text' => fe_e($fe_bc['title'])), 'P_VI_BEFEHL',
-                     array(fe_e($fe_bc['comment']), $fe_bs_m($fe_bc['check']), (int) $fe_bc['min'],
-                           (int) $fe_bc['max'], $fe_bs_m($fe_bc['unit'])), 'V_UNTER_VI');
-}
-foreach (array(
-    // 4a) Wecker und Briefing nur an Schultagen
-    array('S1', 'T_SCHWELLE', 'S1_NAME', 'P_SCHWELLE', array(), 'S1_VERB'),
-    array('S2', 'T_SCHWELLE', 'S2_NAME', 'P_SCHWELLE', array(), 'S2_VERB'),
-    array('U1', 'T_UND', 'U1_NAME', 'U1_PARAM', array(), 'U1_VERB'),
-    array('U2', 'T_UND', 'U2_NAME', 'U2_PARAM', array(), 'U2_VERB'),
-    array('N1', 'T_NICHT', 'N1_NAME', 'P_KEINE', array(), 'N1_VERB'),
-    array('U3', 'T_UND', 'U3_NAME', 'U3_PARAM', array(), 'U3_VERB'),
-    // 4b) Vorabend-Meldung
-    array('S3', 'T_SCHWELLE', 'S3_NAME', 'P_SCHWELLE', array(), 'S3_VERB'),
-    array('S4', 'T_SCHWELLE', 'S4_NAME', 'P_SCHWELLE', array(), 'S4_VERB'),
-    array('U4', 'T_UND', 'U4_NAME', 'P_KEINE', array(), 'U4_VERB'),
-    array('O1', 'T_ODER', 'O1_NAME', 'O1_PARAM', array(), 'O1_VERB'),
-    array('NB1', 'T_BENACHR', 'NB1_NAME', 'NB1_PARAM', array(), 'NB1_VERB'),
-    array('SP', 'T_SCHWELLE', 'SP_NAME', 'P_SCHWELLE', array(), 'SP_VERB'),
-    array('NB2', 'T_BENACHR_TEST', 'NB2_NAME', 'NB2_PARAM', array(), 'NB2_VERB'),
-    // 4c) Ferien-Countdown und Brueckentage
-    array('ST1', 'T_STATUS', 'ST1_NAME', 'ST1_PARAM', array(), 'ST1_VERB'),
-    array('S5', 'T_SCHWELLE', 'S5_NAME', 'P_SCHWELLE', array(), 'S5_VERB'),
-    array('UB', 'T_UND', 'UB_NAME', 'P_KEINE', array(), 'UB_VERB'),
-    array('NB3', 'T_BENACHR_OPT', 'NB3_NAME', 'NB3_PARAM', array(), 'NB3_VERB'),
-    array('S6', 'T_SCHWELLE', 'S6_NAME', 'S6_PARAM', array(), 'S6_VERB'),
-    // 4d) Urlaubsmodus (Abwesenheit)
-    array('S7', 'T_SCHWELLE', 'S7_NAME', 'P_SCHWELLE', array(), 'S7_VERB'),
-    array('S8', 'T_SCHWELLE', 'S8_NAME', 'P_SCHWELLE', array(), 'S8_VERB'),
-    array('O2', 'T_ODER', 'O2_NAME', 'O2_PARAM', array(), 'O2_VERB'),
-    array('AW', 'T_ANWESEND', 'AW_NAME', 'P_KEINE', array(), 'AW_VERB'),
-    array('N2', 'T_NICHT', 'N2_NAME', 'P_KEINE', array(), 'N2_VERB'),
-    array('U5', 'T_UND', 'U5_NAME', 'U5_PARAM', array(), 'U5_VERB'),
-    array('RR', 'T_RAUM', 'RR_NAME', 'RR_PARAM', array(), 'RR_VERB'),
-    array('VB', 'T_VERBR', 'VB_NAME', 'VB_PARAM', array(), 'VB_VERB'),
-    array('ST2', 'T_STATUS', 'ST2_NAME', 'ST2_PARAM', array(), 'ST2_VERB'),
-    // 4e) Neue Werte ab Fassung 1.2.0
-    array('S9', 'T_SCHWELLE', 'S9_NAME', 'S9_PARAM', array(), 'S9_VERB'),
-    array('S10', 'T_SCHWELLE', 'S10_NAME', 'P_SCHWELLE', array(), 'S10_VERB'),
-    array('S11', 'T_SCHWELLE', 'S11_NAME', 'S11_PARAM', array(), 'S11_VERB'),
-    array('ST3', 'T_STATUS', 'ST3_NAME', 'ST3_PARAM', array(), 'ST3_VERB'),
-    array('S12', 'T_SCHWELLE', 'S12_NAME', 'P_SCHWELLE', array(), 'S12_VERB'),
-) as $fe_z) { $fe_bs[] = $fe_z; }
-$fe_bs_teile = array(
-    array(fer_t('BAUSTEIN.ABSCHNITT_VI'), 'VI', $fe_bs_letztes),
-    array(fer_t('TEXT.4A_WECKER_UND_BRIEFING_NUR_AN_SCHU'), 'S1', 'U3'),
-    array(fer_t('TEXT.4B_VORABEND_MELDUNG_MORGEN_IST_FRE'), 'S3', 'NB2'),
-    array(fer_t('TEXT.4C_FERIEN_COUNTDOWN_UND_BRCKENTAGE'), 'ST1', 'S6'),
-    array(fer_t('TEXT.4D_URLAUBSMODUS_ABWESENHEIT'), 'S7', 'ST2'),
-    array(fer_t('T12.BL_4E'), 'S9', 'S12'),
-);
-$fe_bs_nr = array();
-foreach ($fe_bs as $fe_i => $fe_z) { $fe_bs_nr[$fe_z[0]] = $fe_i + 1; }
-$fe_bs_t = function ($z) use ($fe_bs_nr) {
-    if (is_array($z)) { return $z['text']; }
-    return preg_replace_callback('/\{([A-Za-z0-9_]+)\}/', function ($m) use ($fe_bs_nr) {
-        return isset($fe_bs_nr[$m[1]]) ? '#' . $fe_bs_nr[$m[1]] : $m[0];
-    }, (string) fer_t('BAUSTEIN.' . $z));
-}; ?>
-<?php echo $fe_bs_t('TEXT'); ?>
-<table class="sm-tbl" style="width:100%;">
-<tr><th>#</th><th><?php echo fer_t('BAUSTEIN.T_TYP'); ?></th><th><?php echo fer_t('BAUSTEIN.T_NAME'); ?></th><th><?php echo fer_t('BAUSTEIN.T_PARAM'); ?></th><th><?php echo fer_t('BAUSTEIN.T_VERB'); ?></th></tr>
-<?php foreach ($fe_bs as $fe_i => $fe_z) {
-    $fe_p = $fe_bs_t($fe_z[3]);
-    if ($fe_z[4]) { $fe_p = vsprintf($fe_p, $fe_z[4]); } ?>
-<tr><td><?= $fe_i + 1 ?></td><td><?php echo $fe_bs_t($fe_z[1]); ?></td><td><span class="sm-mono"><?php echo $fe_bs_t($fe_z[2]); ?></span></td><td><?php echo $fe_p; ?></td><td><?php echo $fe_bs_t($fe_z[5]); ?></td></tr>
-<?php } ?>
-</table>
-<div class="sm-small" style="margin-top:6px;">
-<?php foreach ($fe_bs_teile as $fe_tl) { ?>
-<b><?php echo $fe_tl[0]; ?></b> <?= sprintf(fe_e(fer_t('BAUSTEIN.ZEILEN')), '#' . $fe_bs_nr[$fe_tl[1]], '#' . $fe_bs_nr[$fe_tl[2]]) ?><br>
-<?php } ?>
+<?php /* Welle Bild 18 (1.2.26; Hausherr 11.10.2026: Vollausstattung, laientauglich; Entwurf Welle 18 ff,
+   Entscheidungen 1, 4, 14, 16): drei Seiten aus dem LoxBerry-Plugins Musterprojekt (fer_bausteinliste()). Je Seite:
+   Ueberschrift, Kasten "So uebernehmen Sie diese Seite", Tabelle, Hinweise, Bild, Link - alle immer sichtbar. Jede
+   Zelle und jeder Satz ist reiner Text und wird maskiert; nur MUSTERPROJEKT traegt den Link. Bis 1.2.25 stand hier
+   eine Tabelle mit 80 Zeilen samt zwoelf Schwellwertschaltern an 0/1-Feldern ($fe_bs). */
+$fe_bl = fer_bausteinliste();
+$fe_bl_thema = trim((string) $fe_cfg['mqtt_topic']) !== '' ? trim((string) $fe_cfg['mqtt_topic']) : 'ferien'; ?>
+<div class="sm-hilfe"><?php echo fe_e(sprintf(fer_t('BAUSTEIN.VORTEXT'), $fe_bl_thema)); ?></div>
 </div>
-<div class="sm-small" style="margin-top:6px;"><?php echo $fe_bs_t('ERLAEUTERUNG'); ?></div>
-<div class="sm-small" style="margin-top:6px;"><?php echo fer_t('T12.BL_4E_H'); ?></div>
-<b><?php echo fer_t('TEXT.PRAXIS_ERFAHRUNGEN_ZUM_BENACHRICHT'); ?></b> <?php echo fer_t('TEXT.ER_SENDET_NUR_BEI_EINER_01_FLANKE_'); ?>
+<?php foreach ($fe_bl as $fe_bs) { ?>
+<h4 class="sm-h4"><?php echo fe_e($fe_bs['kopf']); ?></h4>
+<div class="sm-hinweis"><b><?php echo fe_e(fer_t('BAUSTEIN.SCHRITTE_TITEL')); ?></b>
+<ol class="sm-schritte">
+<?php foreach ($fe_bs['schritte'] as $fe_bx) { ?>
+<li><?php echo fe_e($fe_bx); ?></li>
+<?php } ?>
+</ol></div>
+<div class="sm-breit"><table class="sm-tbl">
+<tr><th>#</th><th><?php echo fer_t('BAUSTEIN.T_TYP'); ?></th><th><?php echo fer_t('BAUSTEIN.T_NAME'); ?></th>
+    <th><?php echo fer_t('BAUSTEIN.T_PARAM'); ?></th><th><?php echo fer_t('BAUSTEIN.T_VERB'); ?></th></tr>
+<?php foreach ($fe_bs['zeilen'] as $fe_bz) { ?>
+<tr><td><?php echo (int) $fe_bz[0]; ?></td><td><?php echo fe_e($fe_bz[1]); ?></td><td><?php echo fe_e($fe_bz[2]); ?></td>
+    <td><?php echo fe_e($fe_bz[3]); ?></td><td><?php echo fe_e($fe_bz[4]); ?></td></tr>
+<?php } ?>
+</table></div>
+<div class="sm-warnung"><b><?php echo fe_e(fer_t('BAUSTEIN.HINWEISE_TITEL')); ?></b>
+<ul class="sm-schritte">
+<?php foreach ($fe_bs['hinweise'] as $fe_bx) { ?>
+<li><?php echo fe_e($fe_bx); ?></li>
+<?php } ?>
+</ul></div>
+<figure class="sm-bild">
+<img src="<?php echo fe_e($fe_bs['bild']); ?>" alt="<?php echo fe_e(fer_t('BAUSTEIN.BILD_ALT')); ?>" loading="lazy">
+<figcaption><?php echo fe_e(sprintf(fer_t('BAUSTEIN.BILD_UNTERSCHRIFT'), $fe_bs['seite'])); ?></figcaption>
+</figure>
+<div class="sm-hilfe"><?php echo fer_t('BAUSTEIN.MUSTERPROJEKT'); ?></div>
+<?php } ?>
+<div class="sm-step"><b><?php echo fer_t('TEXT.PRAXIS_ERFAHRUNGEN_ZUM_BENACHRICHT'); ?></b> <?php echo fer_t('TEXT.ER_SENDET_NUR_BEI_EINER_01_FLANKE_'); ?>
 </div>
 
 <div class="sm-step"><b><?php echo fer_t('TEXT.SCHRITT_5_MQTT_ALTERNATIVE_JSON'); ?></b><br>

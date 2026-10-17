@@ -10,6 +10,42 @@ Bundesländern/Kantonen.
 
 Kompatibel mit LoxBerry 3.x und **LoxBerry 4** (reines PHP, PHP 7.4 und 8.x).
 
+## Neu in 1.2.26
+
+Einbindung in Loxone in Vollausstattung: drei Seiten aus dem gemeinsamen Musterprojekt mit drei Bildern und
+Schritt-für-Schritt-Anleitung, ein Lebenszeichen und eine fertige Vorlage für Ansage und Test-Push.
+
+* **Reiter „Einbindung in Loxone“, Schritt 4:** Statt der bisherigen Liste mit 80 Zeilen stehen dort die drei
+  Seiten des [LoxBerry-Plugins Musterprojekts](https://github.com/timanders22/LoxBerry-Plugins-Musterprojekt),
+  je mit Kasten „So übernehmen Sie diese Seite“, Tabelle, Hinweisen und Bild: „Ferien und Feiertage“ (36 Zeilen:
+  läuft das Plugin – mit dem Lebenszeichen an einer Analogwertvalidierung –, heute, morgen und die vorhandenen
+  Betriebsmodi „Feiertag“ und „Freier Tag/Schulferien“, nur mit gültigen Daten), „Ferien und Feiertage Meldungen“
+  (33: Vorabend-Push, Erinnerung am Abend vor dem ersten Schultag, Test-Push, Ansage, Countdown, Namen über MQTT)
+  und „Ferien und Feiertage Haus“ (35: Wecker, Rollladen am Morgen, Urlaubsmodus mit den Betriebsmodi „Urlaub“
+  und „Anwesenheitssimulation“, Heizung absenken, zweite Region).
+* **Die alte Liste setzte zwölf Schwellwertschalter an 0/1-Felder** – genau die Bauart, die am 07.09.2026 im
+  Haus eine Push-Meldung bei jeder Abholung (alle 5 Minuten) erzeugte. Die neuen Seiten hängen jede Meldung an
+  den digitalen Ausgang des Befehls; der einzige Schwellwertschalter sitzt an der Zahl `FREITAGE`, mit 600 s
+  Einschaltverzögerung dahinter. Wer die alte Liste gebaut hat, nimmt die Seiten neu.
+* **Neu: Lebenszeichen `ZAEHLER`** hinten in der Loxone-Zeile (0 bis 999, +1 je Minutenlauf, -1 = noch kein
+  Lauf; wie beim Abfuhrkalender). Alle anderen Werte sind Tageswerte – steht der LoxBerry, behält Loxone sie,
+  und nur der stehende Zähler verrät es. Kein bestehender Suchtext ändert sich; über MQTT gibt es den Wert nicht
+  (dort ist `status/ts` das Lebenszeichen).
+* **Verhalten geändert: `ANN` beachtet die Melde-Häkchen.** Bis 1.2.25 ging das Meldefenster an Loxone auch
+  dann auf, wenn „Melden, wenn morgen schulfrei ist“ bzw. „Melden am Vorabend des Ferienbeginns“ abgewählt
+  war; nur die eigene Ansage hielt sich daran. Jetzt bleibt `ANN` dort 0 – in der Zeile, über MQTT und in
+  `?json=1`. Der Brückentag bleibt ein eigener Anlass.
+* **Neu: Ausgangsvorlage** „Ausgangsvorlage erzeugen (Ansage und Test-Push)“ – `VQ_ferien_aktionen.xml`,
+  Behälter „Ferien und Feiertage Aktionen“ mit „Ansage jetzt sprechen“ (`?say=1`) und „Test-Push auslösen“
+  (`?ptest=1`), Aktionstoken eingetragen (nach „Neues Token erzeugen“ neu herunterladen).
+* **Vorlage der virtuellen Eingänge:** Kommentare und Hinweistexte aus der Sprachdatei (deutsch mit Umlauten,
+  englisch übersetzt; Titel und Suchtexte bleiben), Einheit `<v.0>` statt `<v.1>` (zeigt „12 Tage“ statt
+  „12.0 Tage“), dazu `FERIEN_ZAEHLER` – 48 Befehle. Wer die alte Vorlage eingelesen hat, muss nichts tun; für
+  das Lebenszeichen den einen Befehl `FERIEN_ZAEHLER` (Suchtext `\i;ZAEHLER=\i\v`) von Hand anlegen.
+* Schritt 3 nennt als Kacheln die Status der drei Seiten; die Praxis-Erfahrungen zur Benachrichtigung nennen den
+  Impuls-Befund. Reiter MQTT und Selbstprüfung zählen `ZAEHLER` nicht als fehlendes Thema.
+* Gerendert unter PHP 7.4, 8.4 und 8.5, nicht am Gerät angesehen.
+
 ## Neu in 1.2.25
 
 Gemeinsame Sprachausgabe 1.1.2.
@@ -366,7 +402,9 @@ Nicht am Gerät gemessen.
 - **Termine aus einem Kalender**: ICS-Abonnement von Google, Nextcloud oder
   iCloud statt der sechs handgepflegten Zeilen. Übernommen werden
   Ganztagstermine; Termine mit Uhrzeit und Wiederholungen bleiben außen vor
-- **Vorabend-Ansage** (TTS) „Morgen ist schulfrei" und Push-Auslöser für Loxone
+- **Vorabend-Ansage** (TTS) „Morgen ist schulfrei" und Push-Auslöser für Loxone –
+  beide nur für die Anlässe, die unter Benachrichtigungen angehakt sind (das
+  Meldefenster `ANN` seit 1.2.26 ebenso)
 - **Ansage über Alexa-NG** (Ausgabeart „Alexa-NG“, ab Werk nicht gewählt):
   Echo-Geräte sprechen die Vorabend-Ansage über das Plugin
   [LoxBerry-Plugin-Alexa-NG](https://github.com/timanders22/LoxBerry-Plugin-Alexa-NG).
@@ -393,14 +431,18 @@ Nicht am Gerät gemessen.
   fehlt oder ist zu alt)
 - **MQTT** über das LoxBerry MQTT Gateway, **JSON** für Drittsoftware. Beide
   Wege tragen dieselben Werte, weil sie aus einer einzigen Feldliste entstehen
+- **Lebenszeichen `ZAEHLER`** in der Loxone-Zeile: steigt mit jedem Minutenlauf;
+  steht er, steht der LoxBerry oder sein Minutenlauf (über MQTT: `status/ts`)
 - **Selbstprüfung** im Reiter Test: beantwortet ohne Loxone, ob die Einrichtung
   trägt — ruft dazu den eigenen Endpunkt wirklich auf und prüft nach, dass in
   der Ausgabezeile kein Feld ein anderes verdeckt
 - Daten für 18 Monate im Voraus, lokal gespeichert (läuft auch ohne Internet
   weiter), automatisches Nachladen vor dem Auslaufen — kein Jahreswechsel-Problem
-- Reiter: Einstellungen, MQTT, Einbindung in Loxone (Schritt-für-Schritt inkl.
-  kompletter Baustein-Liste), Brückentage, Kommende Ferien, Kommende Feiertage,
-  Test, Logdateien
+- Reiter: Einstellungen, MQTT, Einbindung in Loxone (Schritt für Schritt mit den
+  drei Seiten des
+  [LoxBerry-Plugins Musterprojekts](https://github.com/timanders22/LoxBerry-Plugins-Musterprojekt)
+  samt Bildern, Vorlagen für die Eingänge und für Ansage und Test-Push),
+  Brückentage, Kommende Ferien, Kommende Feiertage, Test, Logdateien
 
 ## Endpunkte
 

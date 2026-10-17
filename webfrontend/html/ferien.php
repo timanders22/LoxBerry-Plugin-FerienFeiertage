@@ -134,7 +134,10 @@ if (isset($_GET['json'])) {
         echo json_encode(array('ok' => 0, 'grund' => 'KEINE_DATEN'), JSON_PRETTY_PRINT) . "\n";
         exit;
     }
-    $st['ann'] = fer_ann_active($st);
+    /* 1.2.26 (Entwurf Welle 18 ff, Entscheidung 15): ann aus fer_meldeflags() - dieselbe Quelle wie die Zeile
+     * und MQTT, also auch hier nur fuer die angehakten Anlaesse. */
+    $fer_fl = fer_meldeflags($st);
+    $st['ann'] = $fer_fl['ann'];
     $st['ptest'] = fer_ptest_active();
     echo json_encode($st, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_PRETTY_PRINT);
     exit;

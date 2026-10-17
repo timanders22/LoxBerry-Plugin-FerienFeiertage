@@ -57,6 +57,11 @@ if ($fer_lock === false) {
     exit(0);
 }
 
+/* Das Lebenszeichen ZAEHLER (1.2.26; Entwurf Welle 18 ff, Entscheidung 3): EINMAL je Lauf hochzaehlen, gleich
+ * nach der Sperre und vor dem Abruf - ein haengender Abruf soll das Lebenszeichen nicht aufhalten, ein stehender
+ * Minutenlauf es aber anhalten. Wie AWM-Abfuhr. */
+fer_zaehler(true);
+
 /* Abruf (C4, C7; 1.2.16): fer_fetch() entscheidet selbst, ob er faellig ist -
  * woechentlich, frueher wenn die Daten bald auslaufen, ein Teil fehlte oder
  * die Region nicht passt, und nach einem Fehlschlag gebremst (1 h, 6 h, 24 h).
