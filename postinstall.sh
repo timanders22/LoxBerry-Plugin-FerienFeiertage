@@ -167,7 +167,22 @@ if [ "$UPGRADE" = 1 ] && [ -d "$SICHER" ]; then
     fi
 fi
 
-# --- 4. Ergebnis -----------------------------------------------------------------
+# --- 4. Befehlsbruecke (Gruppe 1, 1.2.27) ------------------------------------------
+# Erst die Marke weg (die Bruecke startet nicht, solange eine frische Marke liegt), dann starten - befehlsbruecke.sh
+# startet nur mit dem Haken "Befehle ueber MQTT annehmen" (ab Werk aus) und misst danach, ob der Dienst laeuft.
+# Ein Sollmerker ist nicht noetig: ob sie laufen soll, sagt allein die Konfiguration.
+rm -f "$MARKE" 2>/dev/null
+BBSH="$BASE/bin/plugins/$PFOLDER/befehlsbruecke.sh"
+if [ -f "$BBSH" ]; then
+    BB_AUS=$(timeout 40 bash "$BBSH" start 2>&1 | head -n 1)
+    case "$BB_AUS" in
+        *gestartet*|*laeuft*) echo "<OK> Befehlsbruecke: $BB_AUS" ;;
+        "Haken aus - kein Start.") echo "<INFO> Befehlsbruecke: aus (Reiter MQTT, Haken 'Befehle ueber MQTT annehmen')." ;;
+        *) echo "<WARNING> Befehlsbruecke: $BB_AUS - der Minutentakt versucht es erneut." ;;
+    esac
+fi
+
+# --- 5. Ergebnis -----------------------------------------------------------------
 # I10/I11 (1.2.16): bis 1.2.15 stand hier bei einer Neuinstallation "holt
 # postupgrade.sh gleich aus der Update-Sicherung zurueck" - postupgrade laeuft
 # bei einer Neuinstallation nie. Und eine unlesbare Konfiguration nach einem

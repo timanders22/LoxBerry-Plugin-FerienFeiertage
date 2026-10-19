@@ -251,7 +251,8 @@ function fe_x2_felder($form)
         return array($f, $h, array('tts_alexa_token', 'tts_google_token'));
     }
     if ($form === 'mqtt_save') {
-        return array(array('mqtt_topic'), array('mqtt_enabled'));
+        /* Gruppe 1 (1.2.27): dazu der Haken "Befehle ueber MQTT annehmen" (Befehlsbruecke). */
+        return array(array('mqtt_topic'), array('mqtt_enabled', 'befehle_mqtt_ein'));
     }
     return array(array(), array());
 }
@@ -394,6 +395,22 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['vorlage_vo']) && func
     echo $fe_vinhalt;
     exit;
 }
+/* Gruppe 1 / MQTT (1.2.27): die Vorlage der MQTT-Befehle (Befehlsbruecke, eigener Ausgang "Ferien und Feiertage
+   MQTT-Befehle" an den UDP-Eingang des Gateways). Fuer die WERTE gibt es keine Importvorlage (Hausherr 19.10.2026:
+   einfacher Virtueller Eingang je Gateway-Name, siehe Namenstabelle im Reiter). Laesst sich die Befehlsvorlage nicht
+   bauen, steht der Grund oben als Fehler. */
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['vorlage_befehle']) && function_exists('fer_vorlage_befehle')) {
+    $fe_vb = fer_vorlage_befehle();
+    if ($fe_vb !== null) {
+        header('Content-Type: application/x-download');
+        header('Content-Disposition: attachment; filename="' . $fe_vb[0] . '"');
+        echo $fe_vb[1];
+        exit;
+    }
+    list(, $fe_vb_grund) = fer_bruecke_liste();
+    $fe_err = sprintf(fer_t('BEFEHL.NICHT_LADBAR'), $fe_vb_grund);
+    $fe_tab = 'tab-loxone';
+}
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['vorlage']) && function_exists('fer_vorlage')) {
     list($fe_vname, $fe_vinhalt) = fer_vorlage();
     header('Content-Type: application/x-download');
@@ -496,6 +513,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['mqtt_save'])) {
     $fe_new = function_exists('fer_config') ? fer_config() : array();
     if (!is_array($fe_new)) { $fe_new = array(); }
     $fe_new['mqtt_enabled'] = isset($_POST['mqtt_enabled']) ? 1 : 0;
+    /* Gruppe 1 (1.2.27, Befehlsbruecke; Entwurf gemeinsam 2.11): der Haken "Befehle ueber MQTT annehmen" wohnt im
+     * MQTT-Formular (Regeln/07 Abschnitt 7). Die Bruecke startet bzw. endet sofort beim Speichern
+     * (fer_bruecke_schalten() weiter unten), sonst ueber den Waechter in bin/cron.php; eine laufende Bruecke liest die Einstellungen spaetestens alle 30 s. */
+    $fe_new['befehle_mqtt_ein'] = isset($_POST['befehle_mqtt_ein']) ? 1 : 0;
     /* O2 (1.2.16): abweisen statt verbiegen. Bis 1.2.15 wurde "ferien/kueche"
      * still zu "ferien/kche", "ferien test" zu "ferientest" und "haus/ferien/#"
      * zu "haus/ferien/" - und alle Themen wanderten ohne ein Wort. Ein leeres
@@ -525,6 +546,23 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['mqtt_save'])) {
          * 30-min-Merker abgelaufen ist. */
         @unlink(fer_tmpdir() . '/mqtt_sig.txt');
         @unlink(fer_tmpdir() . '/mqtt_beat');
+        /* Gruppe 1 (1.2.27; Entwurf ff E7): die Abo-Datei des Gateways V1 auf das neue Praefix bringen. */
+        if (function_exists('fer_abo_datei')) { fer_abo_datei(fer_mqtt_praefix($fe_new), true); }
+        /* Gruppe 1 (1.2.27, Befehlsbruecke): sofort schalten - starten, wenn Haken und MQTT an sind, sonst anhalten
+         * (fer_bruecke_schalten()). Der Waechter im Minutenlauf startet nach einem Start hoechstens alle 600 s neu;
+         * ohne den Direktstart liefe die Bruecke nach dem Einschalten bis zu 10 Minuten nicht. */
+        if (function_exists('fer_bruecke_schalten')) {
+            list($fe_brc, $fe_bart, $fe_baus) = fer_bruecke_schalten($fe_new);
+            if ($fe_bart === 'start' && $fe_brc === 0) {
+                $fe_hinweise[] = fer_t('BEFEHL.M_EIN') . ' ' . $fe_baus;
+            } elseif ($fe_bart === 'start') {
+                $fe_fehler[] = sprintf(fer_t('BEFEHL.M_START_FEHL'), $fe_baus);
+            } elseif ($fe_bart === 'stop' && $fe_brc === 0) {
+                $fe_hinweise[] = fer_t('BEFEHL.M_AUS');
+            } elseif ($fe_bart === 'stop') {
+                $fe_fehler[] = sprintf(fer_t('BEFEHL.M_STOP_FEHL'), $fe_baus);
+            }
+        }
     } else {
         $fe_err = sprintf(fer_t('MELD.SPEICHERN_FEHL'), $fe_cfgfile);
     }
@@ -614,6 +652,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['save'])) {
     // aus dem Bestand uebernehmen, sonst loescht 'Speichern' die Werte.
     $fe_new['mqtt_enabled'] = isset($fe_vorher['mqtt_enabled']) ? (int) $fe_vorher['mqtt_enabled'] : 0;
     $fe_new['mqtt_topic'] = isset($fe_vorher['mqtt_topic']) && $fe_vorher['mqtt_topic'] !== '' ? $fe_vorher['mqtt_topic'] : 'ferien';
+    /* Gruppe 1 (1.2.27): ebenso der Haken der Befehlsbruecke - sonst schaltete "Speichern" sie still ab. */
+    $fe_new['befehle_mqtt_ein'] = isset($fe_vorher['befehle_mqtt_ein']) ? (int) $fe_vorher['befehle_mqtt_ein'] : 0;
     // Dasselbe gilt fuer das Aktionstoken (ab 1.1.7). $fe_new wird hier von
     // Grund auf neu gebaut - genau daran gingen am 13.08.2026 in drei anderen
     // Linien die Token verloren, und mit ihnen alle Adressen in Loxone.
@@ -778,7 +818,8 @@ if (!is_array($fe_cfg)) { $fe_cfg = array(); }
  * zweite Stelle, an der sie stehen - sie greift, wenn fer_config() nicht
  * geladen werden konnte, und muss deshalb dasselbe sagen. */
 $fe_cfg += array('country' => 'DE', 'subdivision' => 'DE-BY', 'lang' => 'DE', 'school' => 1, 'public' => 1,
-    'locality' => '', 'local_holidays' => 0, 'bridge' => 1, 'own' => array(), 'mqtt_enabled' => 0, 'mqtt_topic' => 'ferien',
+    'locality' => '', 'local_holidays' => 0, 'bridge' => 1, 'own' => array(), 'mqtt_enabled' => 1, 'mqtt_topic' => 'ferien',
+    'befehle_mqtt_ein' => 0,      // Gruppe 1 (1.2.27): wie fer_vorgaben() - MQTT ab Werk ein (E4), Befehle aus
     'notify' => array(), 'tts' => array(), 'aktionstoken' => '',
     'subdivision2' => '', 'group' => '', 'bridge_mode' => 'klassisch', 'bridge_luecke' => 4,
     'typ_streng' => 0, 'halbtag_frei' => 1, 'ics_url' => '', 'ics_typ' => 'urlaub',
@@ -1005,6 +1046,7 @@ if (is_array($fe_x2)) {
     } elseif ($fe_x2['form'] === 'mqtt_save') {
         if (isset($fe_xw['mqtt_topic'])) { $fe_anz['mqtt_topic'] = $fe_xw['mqtt_topic']; }
         if (isset($fe_xw['mqtt_enabled'])) { $fe_anz['mqtt_enabled'] = (int) $fe_xw['mqtt_enabled']; }
+        if (isset($fe_xw['befehle_mqtt_ein'])) { $fe_anz['befehle_mqtt_ein'] = (int) $fe_xw['befehle_mqtt_ein']; }
     }
 }
 
@@ -1112,6 +1154,9 @@ if ($fe_frame) { LBWeb::lbheader('Ferien und Feiertage', 'https://wiki.loxberry.
     padding-top: 10px; border-top: 1px solid #e0e0e0; }
 .sm-schritte { margin: 6px 0 0 18px; padding: 0; }
 .sm-schritte li { margin: 3px 0; }
+/* Gruppe 1 (1.2.27): Kopierknopf der Namenstabelle (Reiter Einbindung). */
+.sm-wrap button.sm-kopier { font-size: 0.8em; padding: 1px 6px; margin-left: 4px; border: 1px solid #ccc; border-radius: 4px;
+    background: #f5f5f5; color: #333; cursor: pointer; text-shadow: none !important; box-shadow: none !important; }
 
 </style>
 <div class="sm-wrap">
@@ -1530,6 +1575,11 @@ echo ansage_formular_html($fe_tts, array(
         <div class="sm-small"><?php echo fer_t('TEXT.NUTZT_DAS'); ?> <b><?php echo fer_t('TEXT.LOXBERRY_MQTT_GATEWAY'); ?></b>.</div>
     </div>
 </div>
+<?php /* Gruppe 1 (1.2.27, Befehlsbruecke; Entwurf gemeinsam 2.11): ab Werk aus, mit dem Satz zum offenen UDP-Eingang. */ ?>
+<label style="display:inline-flex;align-items:center;gap:6px;margin-top:12px;">
+    <input data-role="none" type="checkbox" name="befehle_mqtt_ein" <?= !empty($fe_anz['befehle_mqtt_ein']) ? 'checked' : '' ?>> <?php echo fe_e(fer_t('T12.MQ_BEFEHLE_HAKEN')); ?>
+</label>
+<div class="sm-small"><?php echo fe_e(fer_t('T12.MQ_BEFEHLE_H')); ?></div>
 
 <button data-role="none" class="sm-btn sm-b-aktion" type="submit"><?php echo fer_t('TEXT.SPEICHERN'); ?></button>
 </form>
@@ -1588,7 +1638,7 @@ $fe_mit_thema = array_filter(fer_felder(), function ($f) { return $f[5] !== ''; 
 <?php foreach (fer_mqtt_lebenszeichen($fe_st) as $fe_tt => $fe_tw) { ?>
 <tr><td><span class="sm-mono"><?= fe_e($fe_praefix . '/' . $fe_tt) ?></span></td>
 <td><span class="sm-small"><?php echo fer_t('T12.MQ_NUR_MQTT'); ?></span></td>
-<td><?php echo fer_t($fe_tt === 'datum' ? 'MELD.MQ_DATUM' : 'MELD.MQ_TS'); ?></td><td><?php echo fer_t('MELD.NEIN'); ?></td></tr>
+<td><?php echo fer_t($fe_tt === 'datum' ? 'MELD.MQ_DATUM' : ($fe_tt === 'status/zaehler' ? 'MELD.MQ_ZAEHLER' : 'MELD.MQ_TS')); ?></td><td><?php echo fer_t('MELD.NEIN'); ?></td></tr>
 <?php } ?>
 </table>
 </div>
@@ -1597,38 +1647,124 @@ $fe_mit_thema = array_filter(fer_felder(), function ($f) { return $f[5] !== ''; 
 <h2><?php echo fer_t('TEXT.EINBINDUNG_IN_LOXONE_SCHRITT_FR_SC'); ?></h2>
 <p><?php echo fer_t('TEXT.DER_MINISERVER_BEKOMMT_FERTIG_AUSG'); ?> <b><?php echo fer_t('TEXT.IST_HEUTE_SCHULFREI_IST_MORGEN_SCH'); ?></b>
 <?php echo fer_t('TEXT.DAMIT_LASSEN_SICH_WECKER_MORGEN_BR'); ?></p>
+<?php
+/* Gruppe 1 / MQTT (1.2.27; Entwurf ff 2.5, E4-E7, E11; Hausherr 18.10.2026: Musterprojekt, Vorlagen und Haus nur noch
+   MQTT, der HTTP-Weg bleibt fuer bestehende Anlagen). Der MQTT-Weg ist der Hauptweg (Schritt 1-9); die bisherigen
+   Schritte 1-2 stehen unter "Bisherige Anlagen (HTTP)". Alle Namen kommen aus derselben Rechnung wie der Sender
+   (fer_mqtt_praefix(), fer_mqtt_gateway_name()); die Hakenliste fuer Gateway V2 aus fer_mqtt_hakenliste() - die Themen
+   der MQTT-Vorlage und die Texte der Musterseiten, verdrahtet = steht in der Baustein-Liste. */
+$fe_eb_pf = fer_mqtt_praefix($fe_cfg);
+$fe_eb_gw = fer_gateway_fassung();
+list(, $fe_eb_abo_da) = fer_abo_datei($fe_eb_pf);
+$fe_eb_haken = fer_mqtt_hakenliste($fe_cfg);
+$fe_eb_seite = 0;
+foreach ($fe_eb_haken as $fe_h) {
+    if ($fe_h[2]) { $fe_eb_seite++; }
+}
+list($fe_eb_bl, $fe_eb_bl_fehl) = fer_bruecke_liste(); ?>
+<h3 class="sm-h3"><?php echo fe_e(fer_t('T12.EB_MQTT_TITEL')); ?></h3>
+<div class="sm-hilfe"><?php echo fe_e(fer_t('T12.EB_MQTT_TEXT')); ?></div>
 
-<div class="sm-step"><b><?php echo fer_t('TEXT.SCHRITT_1_VIRTUELLER_HTTP_EINGANG_'); ?></b> <?php echo fer_t('TEXT.ABFRAGE_ALLE_300_S'); ?>
-<table class="sm-tbl">
-<tr><th><?php echo fer_t('TEXT.EIGENSCHAFT'); ?></th><th><?php echo fer_t('TEXT.WERT'); ?></th></tr>
-<tr><td>URL</td><td><span class="sm-mono">http://<?= $fe_host ?><?php echo fer_t('TEXT.PLUGINS'); ?><?= fe_e($fe_plugin) ?><?php echo fer_t('TEXT.FERIEN_PHP'); ?></span></td></tr>
-<tr><td><?php echo fer_t('TEXT.ABFRAGEZYKLUS'); ?></td><td><?php echo fer_t('TEXT.300_SEKUNDEN'); ?></td></tr>
-</table>
+<div class="sm-step"><b><?php echo fe_e(fer_t('T12.EB_S1_TITEL')); ?></b><br>
+<?php echo fe_e(fer_t('T12.EB_S1_TEXT')); ?>
+<?php if (!empty($fe_cfg['mqtt_enabled'])) { ?>
+<div class="sm-small" id="eb-mqtt-ein"><?php echo fe_e(fer_t('T12.EB_S1_EIN')); ?></div>
+<?php } else { ?>
+<div class="sm-alert sm-err" id="eb-mqtt-aus"><b><?php echo fe_e(fer_t('T12.EB_S1_AUS')); ?></b></div>
+<?php } ?>
 </div>
 
-<div class="sm-step"><b><?php echo fer_t('TEXT.SCHRITT_2_BEFEHLSERKENNUNGEN'); ?></b> (<span class="sm-mono">\i...\i</span> <?php echo fer_t('TEXT.SUCHTEXT'); ?> <span class="sm-mono">\v</span> <?php echo fer_t('TEXT.ZAHL_DAHINTER'); ?>
-<?php
-/* Die Tabelle entsteht aus fer_felder() - derselben Quelle wie die
-   Textzeile, die MQTT-Themen und die Importdatei.
-
-   Bis 1.1.7 stand sie von Hand da, mit einem Sprachschluessel je Zeile. Das
-   hat zwei Nachteile, und beide sind in diesem Plugin eingetreten: die
-   Anleitung veraltet still, sobald ein Feld dazukommt, und die englische
-   Sprachdatei kann etwas anderes behaupten als der Code tut - genau so sind
-   im Reiter MQTT acht falsche Themennamen entstanden.
-
-   Uebersetzt werden jetzt die SPALTENUEBERSCHRIFTEN. Die Befehlserkennung
-   ist Technik und in jeder Sprache dieselbe. */
-?>
-<table class="sm-tbl" style="width:100%;">
-<tr><th><?php echo fer_t('TEXT.BEFEHLSERKENNUNG'); ?></th><th><?php echo fer_t('T12.LX_EINHEIT'); ?></th><th><?php echo fer_t('TEXT.BEDEUTUNG'); ?></th></tr>
-<?php foreach (fer_felder() as $fe_fn => $fe_fd) { ?>
-<tr><td><span class="sm-mono"><?= fe_e(fer_check($fe_fn)) ?></span></td>
-<td class="sm-small"><?= $fe_fd[3] !== '' ? fe_e($fe_fd[3]) : ($fe_fd[0] ? '' : '0/1') ?></td>
-<td><?= fe_e($fe_fd[4]) ?><?= ($fe_fd[1] < 0) ? ' <span class="sm-small">' . fe_e(fer_t('T12.LX_MINUS1')) . '</span>' : '' ?></td></tr>
+<div class="sm-step" id="eb-gateway"><b><?php echo fe_e(fer_t('T12.EB_S2_TITEL')); ?></b>
+<?php if ($fe_eb_gw > 0) { ?> <span class="sm-small sm-mono"><?php echo sprintf(fer_t('T12.ABO_GEMESSEN'), (int) $fe_eb_gw); ?></span><?php } ?><br>
+<?php if ($fe_eb_gw <= 0) { ?><div class="sm-small"><?php echo fe_e(fer_t('T12.EB_S2_UNBEKANNT')); ?></div><?php } ?>
+<?php if ($fe_eb_gw <= 1) { ?>
+<div id="eb-v1"><?php echo fe_e(sprintf(fer_t($fe_eb_abo_da ? 'T12.EB_S2_V1' : 'T12.EB_S2_V1_FEHLT'), $fe_eb_pf . '/#')); ?></div>
 <?php } ?>
-</table>
-<div class="sm-small" style="margin-top:6px;"><?= sprintf(fe_e(fer_t('T12.LX_ANZAHL')), count(fer_felder())) ?></div>
+<?php if ($fe_eb_gw <= 0 || $fe_eb_gw >= 2) { ?>
+<div id="eb-v2" style="margin-top:6px;"><?php echo fe_e(sprintf(fer_t('T12.EB_S2_V2'), $fe_eb_pf)); ?></div>
+<div class="sm-breit"><table class="sm-tbl" id="eb-hakenliste">
+<tr><th>#</th><th><?php echo fe_e(fer_t('T12.EB_HAKEN_SP_THEMA')); ?></th><th><?php echo fe_e(fer_t('T12.EB_HAKEN_SP_NAME')); ?></th><th><?php echo fe_e(fer_t('T12.EB_HAKEN_SP_SEITE')); ?></th></tr>
+<?php foreach ($fe_eb_haken as $fe_hi => $fe_h) { ?>
+<tr><td><?php echo (int) $fe_hi + 1; ?></td><td><span class="sm-mono"><?php echo fe_e($fe_h[0]); ?></span></td><td><span class="sm-mono"><?php echo fe_e($fe_h[1]); ?></span></td><td><?php echo $fe_h[2] ? fe_e(fer_t('T12.EB_HAKEN_JA')) : '&ndash;'; ?></td></tr>
+<?php } ?>
+</table></div>
+<div class="sm-small"><?php echo fe_e(sprintf(fer_t('T12.EB_HAKEN_ZAHL'), count($fe_eb_haken), $fe_eb_seite)); ?> <?php echo fe_e(fer_t('T12.EB_HAKEN_RESET')); ?></div>
+<div class="sm-small" id="eb-reconnect" style="margin-top:4px;"><?php echo fe_e(sprintf(fer_t('T12.EB_RECONNECT'), fer_mqtt_gateway_name($fe_eb_pf, 'ok'))); ?></div>
+<?php } ?>
+</div>
+
+<?php /* Gruppe 1 (1.2.27; Entscheidung des Hausherrn 19.10.2026): keine Importvorlage fuer die Werte, sondern die
+   Namenstabelle - je Zahl ein Virtueller Eingang, je Text ein Virtueller Texteingang, Name exakt (Kopierknopf).
+   Der Kopierknopf braucht kein navigator.clipboard (LoxBerry laeuft ueber http, dort fehlt es): er markiert den Namen
+   in einem Hilfsfeld und kopiert mit execCommand; geht beides nicht, bleibt der Name markiert. */
+$fe_eb_nt = fer_mqtt_namenstabelle($fe_cfg); ?>
+<div class="sm-step" id="eb-eingaenge"><b><?php echo fe_e(fer_t('T12.EB_S3_TITEL')); ?></b><br>
+<?php echo fe_e(fer_t('T12.EB_S3_TEXT')); ?>
+<ul class="sm-schritte">
+<li><?php echo fe_e(fer_t('T12.EB_S3_RECHTE')); ?></li>
+<li><?php echo fe_e(fer_t('T12.EB_S3_MUSTER')); ?></li>
+</ul>
+<div class="sm-breit"><table class="sm-tbl" id="eb-namen">
+<tr><th><?php echo fe_e(fer_t('T12.EB_NT_NAME')); ?></th><th><?php echo fe_e(fer_t('T12.EB_NT_BEDEUTUNG')); ?></th><th><?php echo fe_e(fer_t('T12.EB_NT_BEREICH')); ?></th><th><?php echo fe_e(fer_t('T12.EB_NT_ART')); ?></th></tr>
+<?php foreach ($fe_eb_nt as $fe_ne) { ?>
+<tr><td style="white-space:nowrap;"><span class="sm-mono"><?php echo fe_e($fe_ne[0]); ?></span> <button data-role="none" type="button" class="sm-kopier" data-name="<?php echo fe_e($fe_ne[0]); ?>" title="<?php echo fe_e(fer_t('T12.EB_NT_KOPIEREN')); ?>"><?php echo fe_e(fer_t('T12.EB_NT_KOPIEREN')); ?></button></td>
+<td><?php echo fe_e($fe_ne[1]); ?><?php if ($fe_ne[4]) { ?> <span class="sm-small">(<?php echo fe_e(fer_t('T12.EB_NT_SEITE')); ?>)</span><?php } ?></td>
+<td class="sm-small"><?php echo fe_e($fe_ne[2]); ?></td>
+<td><?php echo fe_e(fer_t($fe_ne[3] === 'text' ? 'T12.EB_NT_TEXT' : 'T12.EB_NT_ZAHL')); ?></td></tr>
+<?php } ?>
+</table></div>
+<script>
+(function () {
+  var knoepfe = document.querySelectorAll('#eb-namen button.sm-kopier');
+  for (var i = 0; i < knoepfe.length; i++) {
+    knoepfe[i].addEventListener('click', function () {
+      var f = document.createElement('textarea');
+      f.value = this.getAttribute('data-name');
+      f.setAttribute('readonly', '');
+      f.style.position = 'absolute'; f.style.left = '-9999px';
+      document.body.appendChild(f);
+      f.select();
+      var ok = false;
+      try { ok = document.execCommand('copy'); } catch (e) { ok = false; }
+      document.body.removeChild(f);
+      this.textContent = ok ? '\u2713' : this.getAttribute('data-name');
+    });
+  }
+})();
+</script>
+</div>
+
+<div class="sm-step"><b><?php echo fe_e(fer_t('T12.EB_S5_TITEL')); ?></b><br>
+<?php echo fe_e(sprintf(fer_t('T12.EB_S5_TEXT'), fer_mqtt_gateway_name($fe_eb_pf, 'status/zaehler'))); ?>
+</div>
+
+<div class="sm-step" id="eb-befehle"><b><?php echo fe_e(fer_t('BEFEHL.TITEL')); ?></b><br>
+<?php if ($fe_eb_bl === null) { ?>
+<div class="sm-alert sm-err"><?php echo fe_e(sprintf(fer_t('BEFEHL.NICHT_LADBAR'), $fe_eb_bl_fehl)); ?></div>
+<?php } else {
+    $fe_eb_bp = function_exists('bb_pfade') ? bb_pfade() : array();
+    $fe_eb_port = $fe_eb_bp ? bb_broker($fe_eb_bp)['udpin'] : 11884; ?>
+<?php echo fe_e(sprintf(fer_t('BEFEHL.TEXT'), (int) $fe_eb_port)); ?>
+<div class="<?= !empty($fe_cfg['befehle_mqtt_ein']) ? 'sm-small' : 'sm-alert sm-warn' ?>" id="eb-befehle-haken"><?php echo fe_e(fer_t(!empty($fe_cfg['befehle_mqtt_ein']) ? 'BEFEHL.HAKEN_AN' : 'BEFEHL.HAKEN_AUS')); ?></div>
+<div class="sm-breit"><table class="sm-tbl" id="eb-befehlsliste">
+<tr><th><?php echo fe_e(fer_t('BEFEHL.SP_TITEL')); ?></th><th><?php echo fe_e(fer_t('BEFEHL.SP_THEMA')); ?></th><th><?php echo fe_e(fer_t('BEFEHL.SP_BEFEHL')); ?></th><th><?php echo fe_e(fer_t('BEFEHL.SP_SPERRE')); ?></th><th><?php echo fe_e(fer_t('BEFEHL.SP_QUITTUNG')); ?></th></tr>
+<?php foreach ($fe_eb_bl['befehle'] as $fe_bb) { ?>
+<tr><td><?php echo fe_e($fe_bb['titel']); ?><div class="sm-small"><?php echo fe_e(fer_t($fe_bb['kachel'])); ?></div></td>
+<td><span class="sm-mono"><?php echo fe_e($fe_bb['thema']); ?></span></td>
+<td><span class="sm-mono"><?php echo fe_e(isset($fe_bb['loxone']['ein']) ? $fe_bb['loxone']['ein'] : ''); ?></span></td>
+<td class="sm-small"><?php echo fe_e(sprintf(fer_t('BEFEHL.SPERRE'), (int) $fe_bb['sperre_s'])); ?></td>
+<td><?php echo fe_e(fer_t($fe_bb['quittung'] === 'uebergeben' ? 'BEFEHL.QUITTUNG_UEBERGEBEN' : 'BEFEHL.QUITTUNG_AUSGEFUEHRT')); ?></td></tr>
+<?php } ?>
+</table></div>
+<div class="sm-small"><?php echo fe_e(sprintf(fer_t('BEFEHL.QUITTUNG_H'), $fe_eb_bl['lebenszeichen'])); ?></div>
+<form action="index.php" method="post" style="margin:8px 0 6px;">
+  <?php echo fer_fmt(); ?>
+  <input data-role="none" type="hidden" name="activetab" value="tab-loxone">
+  <input data-role="none" type="hidden" name="vorlage_befehle" value="1">
+  <button data-role="none" class="sm-btn sm-b-technik" type="submit"><?php echo fe_e(fer_t('BEFEHL.K_VORLAGE')); ?></button>
+</form>
+<div class="sm-hilfe"><?php echo fe_e(fer_t('BEFEHL.VORLAGE_H')); ?></div>
+<?php } ?>
 </div>
 
 <div class="sm-step"><b><?php echo fer_t('TEXT.SCHRITT_3_KACHELN_FR_DIE_APP'); ?></b><br>
@@ -1636,32 +1772,13 @@ $fe_mit_thema = array_filter(fer_felder(), function ($f) { return $f[5] !== ''; 
 <?php echo fe_e(fer_t('BAUSTEIN.KACHELN')); ?>
 </div>
 
-<h2><?php echo fer_t('TEXT.H_VORLAGE'); ?></h2>
-<div class="sm-hinweis"><?php echo fer_t('TEXT.H_VORLAGE_TEXT'); ?></div>
-<div class="sm-legende">
-<span><i class="sm-punkt sm-b-technik"></i> <?php echo fer_t('LEGENDE.TECHNIK'); ?></span>
-</div>
-<form action="index.php" method="post" style="margin-bottom:14px;">
-  <?php echo fer_fmt(); ?>
-  <input data-role="none" type="hidden" name="activetab" value="tab-loxone">
-  <input data-role="none" type="hidden" name="vorlage" value="1">
-  <button data-role="none" class="sm-btn sm-b-technik" type="submit"><?php echo fer_t('TEXT.K_VORLAGE'); ?></button>
-</form>
-<?php /* 1.2.26 (Entwurf Welle 18 ff, Entscheidung 8): Ausgangsvorlage fuer Ansage und Test-Push. */ ?>
-<form action="index.php" method="post" style="margin-bottom:6px;">
-  <?php echo fer_fmt(); ?>
-  <input data-role="none" type="hidden" name="activetab" value="tab-loxone">
-  <input data-role="none" type="hidden" name="vorlage_vo" value="1">
-  <button data-role="none" class="sm-btn sm-b-technik" type="submit"><?php echo fer_t('TEXT.K_VORLAGE_VO'); ?></button>
-</form>
-<div class="sm-hilfe" style="margin-bottom:14px;"><?php echo fe_e(fer_t('TEXT.H_VORLAGE_VO')); ?></div>
-
 <div class="sm-step"><b><?php echo fer_t('TEXT.SCHRITT_4_KOMPLETTE_BAUSTEIN_LISTE'); ?></b><br>
 <?php /* Welle Bild 18 (1.2.26; Hausherr 11.10.2026: Vollausstattung, laientauglich; Entwurf Welle 18 ff,
    Entscheidungen 1, 4, 14, 16): drei Seiten aus dem LoxBerry-Plugins Musterprojekt (fer_bausteinliste()). Je Seite:
    Ueberschrift, Kasten "So uebernehmen Sie diese Seite", Tabelle, Hinweise, Bild, Link - alle immer sichtbar. Jede
    Zelle und jeder Satz ist reiner Text und wird maskiert; nur MUSTERPROJEKT traegt den Link. Bis 1.2.25 stand hier
-   eine Tabelle mit 80 Zeilen samt zwoelf Schwellwertschaltern an 0/1-Feldern ($fe_bs). */
+   eine Tabelle mit 80 Zeilen samt zwoelf Schwellwertschaltern an 0/1-Feldern ($fe_bs). Seit 1.2.27 (Gruppe 1) tragen
+   die Tabellen die Namen des MQTT-Gateways. */
 $fe_bl = fer_bausteinliste();
 $fe_bl_thema = trim((string) $fe_cfg['mqtt_topic']) !== '' ? trim((string) $fe_cfg['mqtt_topic']) : 'ferien'; ?>
 <div class="sm-hilfe"><?php echo fe_e(sprintf(fer_t('BAUSTEIN.VORTEXT'), $fe_bl_thema)); ?></div>
@@ -1700,6 +1817,62 @@ $fe_bl_thema = trim((string) $fe_cfg['mqtt_topic']) !== '' ? trim((string) $fe_c
 <div class="sm-step"><b><?php echo fer_t('TEXT.SCHRITT_5_MQTT_ALTERNATIVE_JSON'); ?></b><br>
 <?php echo fer_t('TEXT.ALLE_WERTE_GIBT_ES_AUCH_BER_DAS_LO'); ?> <span class="sm-mono">http://<?= $fe_host ?>/plugins/<?= fe_e($fe_plugin) ?><?php echo fer_t('TEXT.FERIEN_PHP_JSON_1'); ?></span>
 </div>
+
+<h3 class="sm-h3" id="eb-http"><?php echo fe_e(fer_t('T12.EB_HTTP_TITEL')); ?></h3>
+<div class="sm-hilfe"><?php echo fe_e(fer_t('T12.EB_HTTP_TEXT')); ?></div>
+
+<div class="sm-step"><b><?php echo fer_t('TEXT.SCHRITT_1_VIRTUELLER_HTTP_EINGANG_'); ?></b> <?php echo fer_t('TEXT.ABFRAGE_ALLE_300_S'); ?>
+<table class="sm-tbl">
+<tr><th><?php echo fer_t('TEXT.EIGENSCHAFT'); ?></th><th><?php echo fer_t('TEXT.WERT'); ?></th></tr>
+<tr><td>URL</td><td><span class="sm-mono">http://<?= $fe_host ?><?php echo fer_t('TEXT.PLUGINS'); ?><?= fe_e($fe_plugin) ?><?php echo fer_t('TEXT.FERIEN_PHP'); ?></span></td></tr>
+<tr><td><?php echo fer_t('TEXT.ABFRAGEZYKLUS'); ?></td><td><?php echo fer_t('TEXT.300_SEKUNDEN'); ?></td></tr>
+</table>
+</div>
+
+<div class="sm-step"><b><?php echo fer_t('TEXT.SCHRITT_2_BEFEHLSERKENNUNGEN'); ?></b> (<span class="sm-mono">\i...\i</span> <?php echo fer_t('TEXT.SUCHTEXT'); ?> <span class="sm-mono">\v</span> <?php echo fer_t('TEXT.ZAHL_DAHINTER'); ?>
+<?php
+/* Die Tabelle entsteht aus fer_felder() - derselben Quelle wie die
+   Textzeile, die MQTT-Themen und die Importdatei.
+
+   Bis 1.1.7 stand sie von Hand da, mit einem Sprachschluessel je Zeile. Das
+   hat zwei Nachteile, und beide sind in diesem Plugin eingetreten: die
+   Anleitung veraltet still, sobald ein Feld dazukommt, und die englische
+   Sprachdatei kann etwas anderes behaupten als der Code tut - genau so sind
+   im Reiter MQTT acht falsche Themennamen entstanden.
+
+   Uebersetzt werden jetzt die SPALTENUEBERSCHRIFTEN. Die Befehlserkennung
+   ist Technik und in jeder Sprache dieselbe. */
+?>
+<table class="sm-tbl" style="width:100%;">
+<tr><th><?php echo fer_t('TEXT.BEFEHLSERKENNUNG'); ?></th><th><?php echo fer_t('T12.LX_EINHEIT'); ?></th><th><?php echo fer_t('TEXT.BEDEUTUNG'); ?></th></tr>
+<?php foreach (fer_felder() as $fe_fn => $fe_fd) { ?>
+<tr><td><span class="sm-mono"><?= fe_e(fer_check($fe_fn)) ?></span></td>
+<td class="sm-small"><?= $fe_fd[3] !== '' ? fe_e($fe_fd[3]) : ($fe_fd[0] ? '' : '0/1') ?></td>
+<td><?= fe_e($fe_fd[4]) ?><?= ($fe_fd[1] < 0) ? ' <span class="sm-small">' . fe_e(fer_t('T12.LX_MINUS1')) . '</span>' : '' ?></td></tr>
+<?php } ?>
+</table>
+<div class="sm-small" style="margin-top:6px;"><?= sprintf(fe_e(fer_t('T12.LX_ANZAHL')), count(fer_felder())) ?></div>
+</div>
+
+<h2><?php echo fer_t('TEXT.H_VORLAGE'); ?></h2>
+<div class="sm-hinweis"><?php echo fer_t('TEXT.H_VORLAGE_TEXT'); ?></div>
+<div class="sm-legende">
+<span><i class="sm-punkt sm-b-technik"></i> <?php echo fer_t('LEGENDE.TECHNIK'); ?></span>
+</div>
+<form action="index.php" method="post" style="margin-bottom:14px;">
+  <?php echo fer_fmt(); ?>
+  <input data-role="none" type="hidden" name="activetab" value="tab-loxone">
+  <input data-role="none" type="hidden" name="vorlage" value="1">
+  <button data-role="none" class="sm-btn sm-b-technik" type="submit"><?php echo fer_t('TEXT.K_VORLAGE'); ?></button>
+</form>
+<?php /* 1.2.26 (Entwurf Welle 18 ff, Entscheidung 8): Ausgangsvorlage fuer Ansage und Test-Push. */ ?>
+<form action="index.php" method="post" style="margin-bottom:6px;">
+  <?php echo fer_fmt(); ?>
+  <input data-role="none" type="hidden" name="activetab" value="tab-loxone">
+  <input data-role="none" type="hidden" name="vorlage_vo" value="1">
+  <button data-role="none" class="sm-btn sm-b-technik" type="submit"><?php echo fer_t('TEXT.K_VORLAGE_VO'); ?></button>
+</form>
+<div class="sm-hilfe" style="margin-bottom:14px;"><?php echo fe_e(fer_t('TEXT.H_VORLAGE_VO')); ?></div>
 
 <div class="sm-step"><b><?php echo fer_t('TEXT.AKTIONSTOKEN'); ?></b><br>
 <?php echo fer_t('TEXT.TOKEN_ERKLAERUNG'); ?>
@@ -1771,6 +1944,13 @@ if ($fe_tab === 'tab-test' && function_exists('fer_selbsttest')) {
 <div class="sm-alert sm-info"><?php echo fer_t('T12.ST_NICHT_GELAUFEN'); ?>
 <a href="index.php?form=test"><?php echo fer_t('T12.ST_JETZT'); ?></a></div>
 <?php } ?>
+
+<?php /* Gruppe 1 (1.2.27, Befehlsbruecke; Entwurf gemeinsam 2.11): laeuft sie, was hat sie angenommen und abgelehnt,
+   der letzte Befehl. Gemessen wie der Waechter (Dienst, zustand.json, Abo); dieselbe Lage steht als Zeile in der
+   Selbstpruefung oben. */
+$fe_bbl = function_exists('fer_bruecke_lage') ? fer_bruecke_lage() : array(null, ''); ?>
+<h3 class="sm-h3" id="befehlsbruecke"><?php echo fe_e(fer_t('BEFEHL.T_H')); ?></h3>
+<div class="sm-small" id="befehlsbruecke-lage"><?php echo fe_e($fe_bbl[1]); ?></div>
 
 <?php /* Ferien-b1/Ferien-1 (Verbesserungsbau 01.10.2026): wer liest dieses
    Plugin, auf welchem Weg, wann zuletzt, mit welchem Ergebnis. Eine Auskunft,

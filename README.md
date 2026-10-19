@@ -10,6 +10,44 @@ Bundesländern/Kantonen.
 
 Kompatibel mit LoxBerry 3.x und **LoxBerry 4** (reines PHP, PHP 7.4 und 8.x).
 
+## Neu in 1.2.27
+
+Umstellung auf MQTT (Gruppe 1): Werte **und** Befehle zwischen Plugin und Loxone gehen über das MQTT-Gateway des
+LoxBerry – Gateway V1 und V2. Der HTTP-Weg (Zeile, Vorlage, Aktionen mit Token) bleibt für bestehende Anlagen.
+
+* **Musterseiten auf MQTT:** Die drei Seiten des
+  [LoxBerry-Plugins Musterprojekts](https://github.com/timanders22/LoxBerry-Plugins-Musterprojekt) tragen jetzt die
+  Namen des MQTT-Gateways (`ferien_ok`, `ferien_status_zaehler` …) statt `FERIEN_…`. Wer sie nach 1.2.26 gebaut hat
+  und dabei bleiben will, muss nichts tun (HTTP-Weg unverändert); wer umsteigt, legt die Eingänge nach der
+  Namenstabelle an (oder kopiert die Seiten) und verbindet die Bausteine neu. Drei neue Bilder.
+* **Neu: Namenstabelle** (Reiter „Einbindung in Loxone“, Schritt 3): alle 54 Namen, die das MQTT-Gateway vergibt
+  (48 Zahlen, 6 Texte), mit Kopierknopf, Bedeutung und Bereich. Je Zahl ein „Virtueller Eingang“, je Text ein
+  „Virtueller Texteingang“, Name genau so, „Als Digitaleingang verwenden“ nicht aktivieren; der LoxBerry-Benutzer am
+  Miniserver braucht Rechte darauf. Eine Importvorlage für die MQTT-Werte gibt es bewusst nicht (LoxBerry-Anleitung:
+  einfacher Virtueller Eingang). Wer die Seiten aus dem Musterprojekt kopiert, bekommt die Eingänge mit. Die
+  HTTP-Vorlage bleibt unverändert.
+* **Neu: Befehle über MQTT** (Befehlsbrücke, gemeinsames Modul): `ferien/befehl/ansage` und
+  `ferien/befehl/testpush` (Wert 1) – dieselbe Verarbeitung wie `?say=1` und `?ptest=1`, Antwort auf
+  `…/quittung`. Haken „Befehle über MQTT annehmen“ im Reiter MQTT, **ab Werk aus**; Vorlage „Vorlage
+  MQTT-Befehle erzeugen“ (eigener Ausgang „Ferien und Feiertage MQTT-Befehle“). Im Musterprojekt stehen die
+  Befehle am gemeinsamen Ausgang „LoxBerry MQTT-Gateway“; der Behälter „Ferien und Feiertage Aktionen“ entfällt dort.
+* **Neu: Lebenszeichen `status/zaehler`** über MQTT (derselbe Laufzähler wie `ZAEHLER` der Loxone-Zeile, jede
+  Minute, nie zurückbehalten); daran hängt die Ausfallerkennung der Musterseite.
+* **Verhalten geändert (nur MQTT):** Ohne Daten der Quelle gehen nur noch `ok = 0` und das Lebenszeichen hinaus –
+  keine geratenen Werte mehr (bis 1.2.26: `schultag` aus dem Wochentag, `feiertag`/`ferien` = 0). Gleich wie der
+  HTTP-Weg mit 503.
+* **Verhalten geändert (nur neue Installationen):** „Zustand per MQTT veröffentlichen“ ist ab Werk an. Bestehende
+  Konfigurationen bleiben, wie sie sind.
+* **Abo für Gateway V1:** Das Plugin bringt `config/plugins/ferien/mqtt_subscriptions.cfg` mit `ferien/#` mit und
+  führt sie beim Speichern und im Minutenlauf auf ein anderes Präfix nach. Unter Gateway V2 nennt der Reiter die
+  51 Datenpunkte zum Anhaken (43 davon auf den Musterseiten verdrahtet).
+* Reiter „Einbindung in Loxone“ neu geordnet: MQTT-Weg Schritt 1–8, darunter „Bisherige Anlagen (HTTP)“. Reiter
+  Test: Zeilen „Passt die Namenstabelle zu den gesendeten Themen?“ und „Befehlsbrücke“. Die Gateway-Fassung wird
+  jetzt über dieselbe Wurzel gelesen wie die Autostart-Prüfung.
+* Deinstallation: hält die Befehlsbrücke an und entfernt ihre Zugangsdaten; ein Lauf für ein fremdes Plugin, dessen
+  Name mit „fer“ beginnt, tut nichts mehr.
+* Gerendert unter PHP 7.4, 8.4 und 8.5, nicht am Gerät angesehen.
+
 ## Neu in 1.2.26
 
 Einbindung in Loxone in Vollausstattung: drei Seiten aus dem gemeinsamen Musterprojekt mit drei Bildern und
@@ -429,10 +467,13 @@ Nicht am Gerät gemessen.
   Protokoll, Reiter Test, der Knopf „Testansage über Google-Lautsprecher“ und
   `?say=1` nennen HTTP-Code und `GRUND` (404 ohne GRUND: Chromecast 4 Lox NG
   fehlt oder ist zu alt)
-- **MQTT** über das LoxBerry MQTT Gateway, **JSON** für Drittsoftware. Beide
-  Wege tragen dieselben Werte, weil sie aus einer einzigen Feldliste entstehen
-- **Lebenszeichen `ZAEHLER`** in der Loxone-Zeile: steigt mit jedem Minutenlauf;
-  steht er, steht der LoxBerry oder sein Minutenlauf (über MQTT: `status/ts`)
+- **MQTT** über das LoxBerry MQTT Gateway (seit 1.2.27 der Hauptweg, Vorlage für
+  Loxone Config, Befehle aus Loxone über die Befehlsbrücke), **JSON** für
+  Drittsoftware. HTTP und MQTT tragen dieselben Werte, weil sie aus einer
+  einzigen Feldliste entstehen
+- **Lebenszeichen `ZAEHLER`** in der Loxone-Zeile bzw. `status/zaehler` über
+  MQTT: steigt mit jedem Minutenlauf; steht er, steht der LoxBerry oder sein
+  Minutenlauf
 - **Selbstprüfung** im Reiter Test: beantwortet ohne Loxone, ob die Einrichtung
   trägt — ruft dazu den eigenen Endpunkt wirklich auf und prüft nach, dass in
   der Ausgabezeile kein Feld ein anderes verdeckt

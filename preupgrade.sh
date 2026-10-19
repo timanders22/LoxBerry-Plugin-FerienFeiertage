@@ -34,8 +34,17 @@ esac
 # vergessene Marke gilt (Entscheidung 8, Frage 17). postinstall.sh raeumt sie
 # ueber einen trap ab.
 MARKE="$BASE/data/plugins/$PFOLDER.upgrade_laeuft"
-if ! : > "$MARKE" 2>/dev/null; then
+# Seit 1.2.27 traegt die Marke die Zeit (Unix-Sekunden): die Befehlsbruecke (bin/befehlsbruecke.sh, gemeinsame
+# Stammfassung) startet nur, wenn keine Marke juenger als 3600 s liegt - eine leere Marke galt ihr nicht.
+if ! date +%s > "$MARKE" 2>/dev/null; then
     echo "<WARNING> Die Marke fuer das Update liess sich nicht anlegen: $MARKE - postinstall.sh wird nichts zurueckspielen."
+fi
+
+# Gruppe 1 (1.2.27): die Befehlsbruecke vor dem Austausch der Dateien anhalten. Die Marke liegt schon - der Waechter
+# im Minutentakt startet sie bis postinstall.sh nicht neu. Bis 1.2.26 gab es keine Bruecke (dann fehlt die Datei).
+BBSH="$BASE/bin/plugins/$PFOLDER/befehlsbruecke.sh"
+if [ -f "$BBSH" ]; then
+    echo "<INFO> Befehlsbruecke: $(timeout 40 bash "$BBSH" stop 2>&1 | head -n 1)"
 fi
 
 SICHER="$BASE/data/plugins/$PFOLDER.upgrade_sicherung"

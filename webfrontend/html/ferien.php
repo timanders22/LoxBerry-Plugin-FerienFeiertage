@@ -177,16 +177,15 @@ if (isset($_GET['say'])) {
         echo "SAY;OK=0;ERR=TOKEN\n";
         exit;
     }
-    $st = fer_state();
-    $text = fer_announce_text($st);
-    if ($text === '') {
-        $text = 'Hallo! Dies ist eine Testansage des Ferien-Plugins. Morgen ist ein ganz normaler Tag.';
-    }
+    /* Gruppe 1 / MQTT (1.2.27; Entwurf ff E8): die Verarbeitung steht in fer_befehl_ansage() - derselben Funktion,
+     * die die Befehlsbruecke fuer ferien/befehl/ansage ruft. Antwort unveraendert. */
+    $fer_b = fer_befehl_ansage('http');
+    $text = $fer_b['text'];
     /* Nr. 36 b, Stufe 2: gesprochen ueber die gemeinsame Sprachausgabe; die Antwort
      * bleibt in der Form bis 1.2.22 (fer_say_zusatz()). Vom Ansagetext nur seine Laenge;
      * beim Original-Audioserver ist der Text die Antwort (Loxone Config spricht ihn ueber
      * den Textgenerator). */
-    $r = fer_say($text);
+    $r = $fer_b['r'];
     $ok = $r['stand'] === 1;
     $zus = fer_say_zusatz($r);
     if ($r['art'] === 'audioserver') {
@@ -208,13 +207,12 @@ if (isset($_GET['ptest'])) {
         echo "PTEST;OK=0;ERR=TOKEN\n";
         exit;
     }
-    @file_put_contents(fer_tmpdir() . '/ptest', '1');
-    fer_log('Test-Pushnachricht angefordert (PTEST=1 fuer 5 Minuten)');
-    /* Sofort melden, statt bis zu einer Minute auf den Cron zu warten.
-     * Ueber HTTP holt sich der Miniserver den Merker beim naechsten Abruf;
-     * ueber MQTT muss ihn das Plugin schicken - und ein Test, der erst eine
-     * Minute spaeter wirkt, sieht aus wie ein Test, der nicht wirkt. */
-    fer_mqtt_publish();
+    /* Merker, Protokollzeile und sofortige MQTT-Meldung stehen seit 1.2.27 in fer_befehl_testpush() - derselben
+     * Funktion, die die Befehlsbruecke fuer ferien/befehl/testpush ruft (Gruppe 1, Entwurf ff E8). Sofort melden,
+     * statt bis zu einer Minute auf den Cron zu warten: ueber HTTP holt sich der Miniserver den Merker beim naechsten
+     * Abruf; ueber MQTT muss ihn das Plugin schicken - und ein Test, der erst eine Minute spaeter wirkt, sieht aus wie
+     * ein Test, der nicht wirkt. Antwort unveraendert. */
+    fer_befehl_testpush('http');
     echo "PTEST;OK=1;DAUER=300\nHinweis: Loxone pollt alle 300 s - die Push-Nachricht kommt innerhalb von 5 Minuten,\nsofern der Test-Benachrichtigungsbaustein laut Anleitung (Schritt 4) verdrahtet ist.\n";
     exit;
 }

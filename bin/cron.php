@@ -109,6 +109,23 @@ if (empty($fer_cfg['mqtt_enabled'])) {
     }
 }
 
+/* Gruppe 1 / MQTT (1.2.27; Entwurf ff E7): die Abo-Datei des Gateways V1 auf das eingestellte Praefix bringen -
+ * geschrieben wird nur, wenn sie abweicht (fer_abo_datei()). */
+fer_abo_datei(fer_mqtt_praefix($fer_cfg), true);
+
+/* Gruppe 1 (1.2.27; Nachtrag 19.10.2026: Befehlsbruecke): der Waechter laeuft in diesem PHP-Minutentakt (bb_waechter()
+ * der gemeinsamen Stammfassung). Er misst das Erzeugnis (zustand.json hoechstens 180 s alt), startet hoechstens alle
+ * 600 s, nie waehrend eines Updates (Marke), haelt die Bruecke bei Haken aus an und sendet <praefix>/status/befehle
+ * (1/0/-1, nie retained). Die Cron-Sperre dieses Laufs erbt der Dienst nicht: befehlsbruecke.sh schliesst geerbte
+ * Deskriptoren (Bruecke, Fall F12J). Ein Fehler hier haelt den Lauf nicht an. */
+if (fer_bruecke_laden()) {
+    try {
+        bb_waechter();
+    } catch (Throwable $fer_bt) {
+        fer_log_if_changed('bruecke', 'Waechter der Befehlsbruecke: ' . get_class($fer_bt) . ': ' . $fer_bt->getMessage());
+    }
+}
+
 foreach (glob(fer_tmpdir() . '/renew_*') ?: array() as $f) {
     if (basename($f) !== 'renew_' . date('Ymd')) { @unlink($f); }
 }

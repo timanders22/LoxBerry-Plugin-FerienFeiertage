@@ -155,7 +155,12 @@ function fer_vorgaben()
     'local_holidays' => 0,       // alle oertlichen Feiertage der Region mitzaehlen
     'bridge' => 1,               // Brueckentage erkennen
     'own' => array(),            // eigene Zeitraeume: [{name, von, bis, typ}]
-    'mqtt_enabled' => 0,
+    /* Gruppe 1 / MQTT (1.2.27; Entwurf ff E4, Hausherr 18.10.2026 "MQTT ab Werk ein, nur fuer neue Installationen"):
+     * ab Werk 1. Eine bestehende Konfiguration traegt den Schluessel schon und bleibt, wie sie ist - das += in
+     * fer_config() greift nur, wo er fehlt. Das Musterprojekt haengt ganz am MQTT-Weg; aus = keine Werte und nach
+     * etwa 25 Minuten die Stoermeldung. Ohne Gateway kostet es nichts (eine Protokollzeile "kein brauchbarer
+     * UDP-Eingangsport"). Bis 1.2.26: 0. */
+    'mqtt_enabled' => 1,
     'mqtt_topic' => 'ferien',
     'notify' => array(),
     'tts' => array(),
@@ -203,6 +208,11 @@ function fer_vorgaben()
     'ics_typ' => 'urlaub',       // wie die Kalendereintraege gewertet werden
     'ics_filter' => '',          // nur Termine, deren Titel dies enthaelt (leer = alle)
     'urlaub_vorlauf' => 1,       // Tage vor der Rueckkehr, an denen URLAUBHEIM=1 wird
+
+    /* --- neu in 1.2.27 (Gruppe 1, Befehlsbruecke; Entwurf gemeinsam 2.3/2.11) ----------------------------
+     * "Befehle ueber MQTT annehmen" (Reiter MQTT). Ab Werk aus: jeder im Heimnetz kann ueber den UDP-Eingang des
+     * MQTT-Gateways Befehle senden. Erst mit dem Haken laeuft bin/befehlsbruecke.php (Waechter in bin/cron.php). */
+    'befehle_mqtt_ein' => 0,
 );
 }
 
@@ -1782,23 +1792,11 @@ function fer_mqtt_publish($st = null, $nur_lebenszeichen = false) {
     }
     $prefix = trim((string) $cfg['mqtt_topic']) !== '' ? trim((string) $cfg['mqtt_topic']) : 'ferien';
 
-    /* Die Themenliste entsteht aus fer_felder() - siehe den langen Kommentar
-     * dort. Bis 1.1.7 stand hier eine zweite, von Hand gepflegte Liste; sie
-     * war um vier Werte kuerzer als die des HTTP-Weges, und weil beide auf
-     * 27 Eintraege kamen, ist es niemandem aufgefallen. */
-    $m = array();
-    if (!$nur_lebenszeichen) {
-        $felder = fer_felder();
-        foreach (fer_werte($st) as $name => $wert) {
-            if (isset($felder[$name][5]) && $felder[$name][5] !== '') {
-                $m[$felder[$name][5]] = $wert;
-            }
-        }
-        // Dazu die Textwerte, die ein virtueller HTTP-Eingang nicht lesen kann.
-        $m = array_merge($m, fer_mqtt_texte($st));
-    }
-    // M2: das Lebenszeichen - bei JEDEM Lauf, fluechtig.
-    $m = array_merge($m, fer_mqtt_lebenszeichen($st));
+    /* Die Nachrichten entstehen seit 1.2.27 in fer_mqtt_nachrichten() (Gruppe 1: dieselbe Menge prueft die
+     * Selbstpruefung gegen die MQTT-Vorlage). Die Themenliste kommt dort aus fer_felder() - siehe den langen
+     * Kommentar dort. Bis 1.1.7 stand hier eine zweite, von Hand gepflegte Liste; sie war um vier Werte kuerzer
+     * als die des HTTP-Weges, und weil beide auf 27 Eintraege kamen, ist es niemandem aufgefallen. */
+    $m = fer_mqtt_nachrichten($st, $nur_lebenszeichen);
 
     /* function_exists() vor socket_create().
      *
@@ -1832,9 +1830,41 @@ function fer_mqtt_publish($st = null, $nur_lebenszeichen = false) {
     }
     socket_close($s);
     if (!$nur_lebenszeichen) {
-        fer_log_if_changed('mqtt', $gesendet . ' von ' . count($m) . ' Werten gesendet (Port ' . $udpport . ')');
+        fer_log_if_changed('mqtt', $gesendet . ' von ' . count($m) . ' Werten gesendet (Port ' . $udpport . ')'
+            . (empty($st['quelle_da']) ? ' - ohne Quelldaten nur ok = 0 und das Lebenszeichen' : ''));
     }
     return $gesendet;
+}
+
+/**
+ * Die MQTT-Nachrichten eines Laufs, Thema (ohne Praefix) => Wert. EINE Stelle fuer den Sender (fer_mqtt_publish())
+ * und die Selbstpruefung "Passt die MQTT-Vorlage zu den gesendeten Themen?" (Gruppe 1, 1.2.27).
+ *
+ * Gruppe 1 / MQTT (Entwurf ff 2.3 und E3, VERHALTEN nur auf dem MQTT-Weg): OHNE Daten der Quelle (quelle_da = 0) gehen
+ * nur ok = 0 und das Lebenszeichen hinaus, keine geratenen Werte. Bis 1.2.26 schickte MQTT in diesem Fall ALLE Werte -
+ * feiertag = 0, ferien = 0 und schultag aus dem Wochentag geraten -, waehrend der HTTP-Weg seit 1.2.16 nur
+ * "FERIEN;OK=0;GRUND=KEINE_DATEN" mit 503 antwortet (ferien.php). Folge war: "Wecker an Schultagen" weckte bei
+ * fehlenden Daten auch an einem Feiertag. Regeln/07: "Ueber MQTT geht bei einer Stoerung nur das Signal hinaus, nicht
+ * die Werte." Die uebrigen Eingaenge in Loxone behalten ihren Wert; die Sperre "Stoerung bestaetigt" greift nach 600 s.
+ */
+function fer_mqtt_nachrichten($st, $nur_lebenszeichen = false) {
+    $m = array();
+    if (!$nur_lebenszeichen) {
+        $felder = fer_felder();
+        if (empty($st['quelle_da'])) {
+            $m[$felder['OK'][5]] = 0;
+        } else {
+            foreach (fer_werte($st) as $name => $wert) {
+                if (isset($felder[$name][5]) && $felder[$name][5] !== '') {
+                    $m[$felder[$name][5]] = $wert;
+                }
+            }
+            // Dazu die Textwerte, die ein virtueller HTTP-Eingang nicht lesen kann.
+            $m = array_merge($m, fer_mqtt_texte($st));
+        }
+    }
+    // M2: das Lebenszeichen - bei JEDEM Lauf, fluechtig.
+    return array_merge($m, fer_mqtt_lebenszeichen($st));
 }
 
 /**
@@ -1848,9 +1878,16 @@ function fer_mqtt_publish($st = null, $nur_lebenszeichen = false) {
  * Beide gehen mit 'publish' hinaus, nie zurueckbehalten (Entscheidung 3/8).
  */
 function fer_mqtt_lebenszeichen($st) {
+    /* Gruppe 1 / MQTT (1.2.27; Entwurf ff 2.2 und E1): dazu status/zaehler - derselbe Laufzaehler wie ZAEHLER der
+     * Loxone-Zeile (fer_zaehler(false), 0..999, -1 = noch kein Lauf; hochgezaehlt einmal je Lauf in bin/cron.php). Er
+     * geht bei jedem Lauf hinaus, auch bei unveraenderter Signatur, nie zurueckbehalten, und steht NICHT in der
+     * Signatur (Regeln/07: ein jede Minute wechselnder Wert gehoert nicht hinein). ZAEHLER behaelt in fer_felder() sein
+     * leeres Thema - sonst ginge er zweimal hinaus. In Loxone haengt die Analogwertvalidierung der Musterseite daran
+     * (ferien_status_zaehler); status/ts allein haette Loxone in Ortszeit verrechnen muessen. */
     return array(
         'datum' => str_replace('-', '', (string) (isset($st['heute']['datum']) ? $st['heute']['datum'] : date('Y-m-d'))),
         'status/ts' => time(),
+        'status/zaehler' => fer_zaehler(false),
     );
 }
 
@@ -2716,13 +2753,15 @@ function fer_selbsttest($basis = '', $vorher = null) {
 
     // Deckt der MQTT-Weg alles ab, was der HTTP-Weg fuehrt?
     /* Welle Bild 18 (1.2.26): das Lebenszeichen ZAEHLER traegt bewusst kein Thema (Entwurf Welle 18 ff,
-     * Entscheidung 3, wie AWM) - ueber MQTT gibt es dafuer status/ts. Jedes andere Feld ohne Thema bleibt ein
-     * Befund. */
+     * Entscheidung 3, wie AWM). Gruppe 1 (1.2.27; Entwurf ff 2.2): die gewollte Zuordnung ist ZAEHLER <-> status/zaehler
+     * - erlaubt ist das leere Thema nur, solange das Lebenszeichen status/zaehler wirklich gesendet wird
+     * (fer_mqtt_lebenszeichen()). Jedes andere Feld ohne Thema bleibt ein Befund. */
     $ohne_t = array();
     $mit_t = 0;
+    $lz_themen = array_keys(fer_mqtt_lebenszeichen($st));
     foreach (fer_felder() as $name => $fd) {
         if (!isset($fd[5]) || $fd[5] === '') {
-            if ($name !== 'ZAEHLER') { $ohne_t[] = $name; }
+            if (!($name === 'ZAEHLER' && in_array('status/zaehler', $lz_themen, true))) { $ohne_t[] = $name; }
         } else {
             $mit_t++;
         }
@@ -2778,6 +2817,24 @@ function fer_selbsttest($basis = '', $vorher = null) {
         }
     }
 
+    /* Gruppe 1 / MQTT (1.2.27): passt die Namenstabelle des Reiters "Einbindung in Loxone" zu den gesendeten Themen?
+     * Zwei Quellen: die Namen der Tabelle (fer_mqtt_namenstabelle(), aus fer_felder() Spalte 6, der Zuordnung ZAEHLER ->
+     * status/zaehler und fer_mqtt_texte()) gegen die Nachrichten des Senders (fer_mqtt_nachrichten(), aus fer_werte()
+     * und dem Lebenszeichen) mit Quelldaten. Ein Name, der nie gesendet wird, ergaebe in Loxone einen toten Eingang. */
+    $nt = fer_mqtt_namenstabelle($cfg);
+    $gesendet = array();
+    $pf_v = fer_mqtt_praefix($cfg);
+    foreach (array_keys(fer_mqtt_nachrichten(array_merge($st, array('quelle_da' => 1)))) as $th) {
+        $gesendet[fer_mqtt_gateway_name($pf_v, $th)] = true;
+    }
+    $fremd_t = array();
+    foreach ($nt as $ne) {
+        if (!isset($gesendet[$ne[0]])) { $fremd_t[] = $ne[0]; }
+    }
+    $add(fer_t('PRUEF.F_NAMEN_MQTT'), count($nt) > 0 && count($fremd_t) === 0,
+        count($fremd_t) === 0 ? sprintf(fer_t('PRUEF.H_NAMEN_MQTT_OK'), count($nt))
+                              : sprintf(fer_t('PRUEF.H_NAMEN_MQTT_FEHL'), implode(', ', $fremd_t)));
+
     /* --- 4. MQTT ------------------------------------------------------- */
     if (!empty($cfg['mqtt_enabled'])) {
         $add(fer_t('PRUEF.F_SOCKETS'), function_exists('socket_create'),
@@ -2812,6 +2869,10 @@ function fer_selbsttest($basis = '', $vorher = null) {
         $add(fer_t('PRUEF.F_REGION2'), $n2 > 0,
             sprintf(fer_t('PRUEF.H_REGION2'), $n2, $cfg['subdivision2']));
     }
+
+    /* Gruppe 1 (1.2.27, Befehlsbruecke): nimmt sie Befehle an? "aus" (Haken, ab Werk) ist ein Hinweis, kein Kreuz. */
+    $bl = fer_bruecke_lage();
+    $add(fer_t('PRUEF.F_BRUECKE'), $bl[0], $bl[1]);
 
     /* --- 6. Ansage ------------------------------------------------------ */
     /* Nr. 36 b, Stufe 2: eine Zeile fuer alle Ausgabearten (fer_pruefe_ansage()). */
@@ -2974,10 +3035,12 @@ function fer_kurztext($name) {
 function fer_bausteinliste()
 {
     $cfg = fer_config();
-    $thema = trim((string) $cfg['mqtt_topic']);
-    if ($thema === '') { $thema = 'ferien'; }
-    $flach = str_replace('/', '_', fer_mqtt_thema($thema));
-    $map = array('ferien/#' => $thema . '/#');
+    /* Gruppe 1 / MQTT (1.2.27): seit die Tabellen MQTT-Namen tragen (ferien_ok, ferien/befehl/ansage ...), folgt
+     * jedes "ferien/" und "ferien_" der Zellen, Kaesten und Hinweise dem eingestellten Praefix - nicht nur das Abo
+     * "ferien/#". Ausgenommen sind Stellen hinter "/" oder einem Buchstaben (Adressen /plugins/ferien/...). Ab Werk
+     * bleibt alles wortgleich mit der Liste. Praefix aus fer_mqtt_praefix() (derselben Rechnung wie der Sender). */
+    $pf = fer_mqtt_praefix($cfg);
+    $flach = str_replace('/', '_', $pf);
     $seiten = array(
         array('kopf' => fer_t('BAUSTEIN.BS1_KOPF'), 'seite' => 'Ferien und Feiertage', 'bild' => 'einbindung_loxone.png', 'z' => 1, 'n' => 36,
               'schritte' => array(
@@ -3026,7 +3089,11 @@ function fer_bausteinliste()
                 fer_t('BAUSTEIN.BS3_H5'))),
     );
     $aus = array();
-    $ersetzen = function ($x) use ($map) { return strtr($x, $map); };
+    $ersetzen = function ($x) use ($pf, $flach) {
+        if ($pf === 'ferien') { return $x; }
+        $x = preg_replace('#(?<![A-Za-z0-9_/])ferien/#', $pf . '/', $x);
+        return preg_replace('#(?<![A-Za-z0-9_/])ferien_#', $flach . '_', $x);
+    };
     foreach ($seiten as $s) {
         $zeilen = array();
         for ($i = 1; $i <= $s['n']; $i++) {
@@ -3126,6 +3193,298 @@ function fer_vorlage() {
     ), fer_eingangsbefehle()));
 }
 
+/* ---------------- Gruppe 1 / MQTT: Vorlage, Hakenliste, Abo, Befehle (1.2.27) ----------------
+ *
+ * Hausherr 18.10.2026: Werte UND Befehle zwischen Plugin und Loxone gehen ueber MQTT; Musterprojekt, Vorlagen und Haus
+ * nutzen nur MQTT, der HTTP-Weg bleibt fuer bestehende Anlagen. Gateway V1 und V2 werden beide unterstuetzt. Entwurf
+ * Musterprojekt/entwurf_gruppe1_ff.txt (E1-E16 wie empfohlen) und entwurf_gruppe1_gemeinsam.txt (Befehlsbruecke).
+ */
+
+/**
+ * Das Praefix der MQTT-Themen - EINE Rechnung fuer Sender (fer_mqtt_publish() rechnet fer_mqtt_thema(<topic> . '/' .
+ * <thema>), was dasselbe ergibt), Vorlage, Hakenliste, Abo-Datei, Baustein-Liste und Befehlsbruecke (Regeln/07
+ * "Themennamen aus EINER Funktion"). Leer = 'ferien'.
+ */
+function fer_mqtt_praefix($cfg = null) {
+    if ($cfg === null) { $cfg = fer_config(); }
+    $t = trim((string) (isset($cfg['mqtt_topic']) && is_scalar($cfg['mqtt_topic']) ? $cfg['mqtt_topic'] : ''));
+    $p = fer_mqtt_thema($t !== '' ? $t : 'ferien');
+    return $p !== '' ? $p : 'ferien';
+}
+
+/** Der Name, den das MQTT-Gateway (V1 und V2) dem Thema gibt: "/" und "%" werden "_" (Regeln/07, mqtt_gateway.py
+ *  build_vi_name). Das Thema baut dieselbe Funktion wie der Sender (fer_mqtt_thema()). */
+function fer_mqtt_gateway_name($praefix, $thema) {
+    return str_replace(array('/', '%'), '_', fer_mqtt_thema($praefix . '/' . $thema));
+}
+
+/**
+ * Die Zahlenthemen fuer Loxone, Thema => Feld, in der Reihenfolge von fer_felder() (Entwurf ff 2.1): jedes Feld mit
+ * Thema (Spalte 6) und ZAEHLER mit dem Lebenszeichen status/zaehler (2.2) - 48 Werte, genau die 48 Zahleneingaenge
+ * der drei Musterseiten-Behaelter. Eine Importvorlage entsteht daraus nicht (Hausherr 19.10.2026); sie speisen
+ * Namenstabelle und Hakenliste. Nicht dabei: die Textthemen (fer_mqtt_textthemen()), datum und status/ts.
+ */
+function fer_mqtt_vorlage_themen() {
+    $aus = array();
+    foreach (fer_felder() as $name => $f) {
+        if (isset($f[5]) && $f[5] !== '') {
+            $aus[$f[5]] = $name;
+        } elseif ($name === 'ZAEHLER') {
+            $aus['status/zaehler'] = $name;
+        }
+    }
+    return $aus;
+}
+
+/** Die Textthemen (ohne Praefix) in der Reihenfolge von fer_mqtt_texte() - aus derselben Funktion gelesen, mit einem
+ *  leeren Zustand (nur die Namen werden gebraucht). */
+function fer_mqtt_textthemen() {
+    $leer = array('heute' => array('feiertag_name' => '', 'ferien_name' => '', 'hinweis' => ''),
+                  'naechste' => array('name' => ''), 'urlaub' => array('name' => ''),
+                  'feiertag_naechster' => array('name' => ''), 'naechste2' => array('name' => ''));
+    return array_keys(fer_mqtt_texte($leer));
+}
+
+/**
+ * Die Hakenliste fuer Gateway V2 (Entwurf ff 2.5 und E6): die 48 Zahlenthemen und die Textthemen, die die
+ * Musterseiten als Virtuellen Texteingang tragen (heute drei: name, feiertag_name, ferien_name). Welche das sind und
+ * welche Datenpunkte auf den Musterseiten verdrahtet sind, wird an den Namen der Baustein-Liste abgelesen
+ * (fer_bausteinliste()), nicht von Hand gefuehrt. Je Eintrag array(Thema mit Praefix, Gateway-Name, auf den
+ * Musterseiten, Textthema). Kein Datenpunkt braucht "Zuruecksetzen nach Senden": ptest steht 300 s auf 1 und faellt,
+ * ann ist ein 10-Minuten-Fenster - echte Wechsel, kein wiederholter gleicher Wert.
+ */
+function fer_mqtt_hakenliste($cfg = null) {
+    if ($cfg === null) { $cfg = fer_config(); }
+    $pf = fer_mqtt_praefix($cfg);
+    $seiten = array();
+    foreach (fer_bausteinliste() as $s) {
+        foreach ($s['zeilen'] as $z) { $seiten[$z[2]] = true; }
+    }
+    $aus = array();
+    foreach (array_keys(fer_mqtt_vorlage_themen()) as $t) {
+        $n = fer_mqtt_gateway_name($pf, $t);
+        $aus[] = array(fer_mqtt_thema($pf . '/' . $t), $n, isset($seiten[$n]), false);
+    }
+    /* Die Texte in der Reihenfolge, in der die Musterseiten sie fuehren (Seite "... Meldungen" Nr. 31-33). */
+    $texte = array();
+    foreach (fer_mqtt_textthemen() as $t) { $texte[fer_mqtt_gateway_name($pf, $t)] = $t; }
+    foreach (array_keys($seiten) as $n) {
+        if (isset($texte[$n])) { $aus[] = array(fer_mqtt_thema($pf . '/' . $texte[$n]), $n, true, true); }
+    }
+    return $aus;
+}
+
+/**
+ * Die Namenstabelle fuer den Reiter "Einbindung in Loxone" (Gruppe 1, 1.2.27; Entscheidung des Hausherrn 19.10.2026).
+ *
+ * Fuer Werte ueber das MQTT-Gateway gibt es KEINE Importvorlage (kein VirtualHttpIn mit http://localhost): die
+ * LoxBerry-Anleitung (wiki.loxberry.de, widget_mqtt) und Regeln/07 verlangen einen einfachen "Virtuellen Eingang" je
+ * Wert, Name = Name, den das Gateway vergibt. Diese Tabelle nennt jeden Namen zum Kopieren, mit Bedeutung,
+ * Einheit/Bereich und Art (Zahl -> Virtueller Eingang, Text -> Virtueller Texteingang). Quelle der Zahlen:
+ * fer_mqtt_vorlage_themen() (fer_felder() Spalte 6 und status/zaehler fuer ZAEHLER), Bedeutung und Einheit wie der
+ * HTTP-Befehl desselben Feldes (Sprachdatei [T12] VL_H_<Feld>); dazu alle Textthemen (fer_mqtt_textthemen()).
+ * Je Eintrag array(Gateway-Name, Bedeutung, Einheit/Bereich, 'zahl'|'text', auf den Musterseiten).
+ */
+function fer_mqtt_namenstabelle($cfg = null) {
+    if ($cfg === null) { $cfg = fer_config(); }
+    $pf = fer_mqtt_praefix($cfg);
+    $seiten = array();
+    foreach (fer_bausteinliste() as $s) {
+        foreach ($s['zeilen'] as $z) { $seiten[$z[2]] = true; }
+    }
+    $felder = fer_felder();
+    $aus = array();
+    foreach (fer_mqtt_vorlage_themen() as $thema => $feld) {
+        $f = $felder[$feld];
+        $n = fer_mqtt_gateway_name($pf, $thema);
+        $text = fer_t('T12.VL_H_' . $feld);
+        if ($feld === 'ZAEHLER') { $text .= ' - ' . fer_t('T12.VL_MQTT_ZAEHLER'); }
+        $bereich = $f[1] . ' … ' . $f[2] . ($f[3] !== '' ? ' ' . $f[3] : '');
+        if (!$f[0] && $f[1] === 0 && $f[2] === 1) { $bereich = '0/1'; }
+        $aus[] = array($n, $text, $bereich, 'zahl', isset($seiten[$n]));
+    }
+    foreach (fer_mqtt_textthemen() as $t) {
+        $n = fer_mqtt_gateway_name($pf, $t);
+        $aus[] = array($n, fer_t('T12.EB_TXT_' . strtoupper($t)), fer_t('T12.EB_TXT_STRICH'), 'text', isset($seiten[$n]));
+    }
+    return $aus;
+}
+
+/**
+ * Die Abo-Datei des MQTT-Gateways V1: config/plugins/<ordner>/mqtt_subscriptions.cfg (Entwurf ff E7; Bauform
+ * Einspeisebremse 0.9.20 eb_abo_datei(), Regeln/07). Das Gateway V1 liest sie selbst und abonniert jede Zeile; das
+ * Archiv bringt sie mit "ferien/#" mit. Weicht das Praefix ab, wird sie nachgeschrieben - nur wenn sie abweicht, mit
+ * Protokollzeile (Speichern im Reiter MQTT und Minutenlauf). Rueckgabe array(Pfad, traegt das Abo).
+ */
+function fer_abo_datei($praefix, $schreiben = false) {
+    $p = fer_paths();
+    $ordner = dirname($p['config']);
+    $pfad = $ordner . '/mqtt_subscriptions.cfg';
+    $soll = trim((string) $praefix, '/') . '/#';
+    $roh = is_readable($pfad) ? (string) @file_get_contents($pfad) : '';
+    $da = in_array($soll, array_map('trim', preg_split('/\r?\n/', $roh)), true);
+    if ($schreiben && $roh !== $soll . "\n" && is_dir($ordner)) {
+        if (fer_datei_schreiben($pfad, $soll . "\n", 0644)) {
+            fer_log('Gateway-Abo gesetzt: ' . $soll . ' (' . basename($pfad) . ')');
+            $da = true;
+        }
+    }
+    return array($pfad, $da);
+}
+
+/**
+ * Ansage jetzt sprechen - die Verarbeitung von ?say=1 (ferien.php) als Funktion, EINE fuer den HTTP-Weg und die
+ * Befehlsbruecke (Entwurf ff Abschnitt 3 und E8: "dieselbe Pruefung, keine zweite Logik"). Das Token prueft nur der
+ * HTTP-Weg, den MQTT-Weg der Haken "Befehle ueber MQTT annehmen". Spricht die Vorabend-Ansage, ohne Anlass einen
+ * Testsatz. Rueckgabe array('ok', 'grund', 'r' => Ergebnis von fer_say(), 'text'); ferien.php baut daraus dieselbe
+ * Antwort wie bis 1.2.26. 'grund' (ASCII, fuer die Quittung "abgelehnt: <grund>") nur ohne Erfolg: die Kennung der
+ * gemeinsamen Sprachausgabe (z. B. AUS), nie Text oder Token. Rechnet in Europe/Berlin und stellt die Zone danach
+ * zurueck (die Befehlsbruecke ist ein eigener Prozess).
+ */
+function fer_befehl_ansage($quelle = 'http') {
+    $fer_z = fer_zone_an();
+    try {
+        $st = fer_state();
+        $text = fer_announce_text($st);
+        if ($text === '') {
+            $text = 'Hallo! Dies ist eine Testansage des Ferien-Plugins. Morgen ist ein ganz normaler Tag.';
+        }
+        if ($quelle === 'mqtt') { fer_log('Ansage angefordert ueber MQTT (Befehlsbruecke).'); }
+        $r = fer_say($text);
+        $ok = $r['stand'] === 1;
+        $grund = '';
+        if (!$ok) {
+            $k = explode('|', (string) $r['kennung']);
+            $grund = substr(strtoupper(preg_replace('/[^A-Za-z0-9_]/', '_', (string) $k[0])), 0, 40);
+            if ($grund === '') { $grund = $r['stand'] === -1 ? 'NICHT_GESENDET' : 'NICHT_GESPROCHEN'; }
+        }
+        return array('ok' => $ok, 'grund' => $grund, 'r' => $r, 'text' => $text);
+    } finally {
+        fer_zone_aus($fer_z);
+    }
+}
+
+/**
+ * Test-Push ausloesen - die Verarbeitung von ?ptest=1 (ferien.php) als Funktion fuer beide Wege (wie
+ * fer_befehl_ansage()). Setzt PTEST fuer fuenf Minuten und meldet sofort ueber MQTT, statt bis zu einer Minute auf den
+ * Cron zu warten. Die Protokollzeile des HTTP-Wegs bleibt wortgleich; ueber MQTT kommt " - ueber MQTT" dazu.
+ * Rueckgabe array('ok', 'grund'); ok = der Merker liess sich schreiben (der HTTP-Weg antwortet wie bisher OK=1).
+ */
+function fer_befehl_testpush($quelle = 'http') {
+    $fer_z = fer_zone_an();
+    try {
+        $ok = @file_put_contents(fer_tmpdir() . '/ptest', '1') !== false;
+        fer_log('Test-Pushnachricht angefordert (PTEST=1 fuer 5 Minuten)'
+            . ($quelle === 'mqtt' ? ' - ueber MQTT (Befehlsbruecke)' : ''));
+        fer_mqtt_publish();
+        return array('ok' => $ok, 'grund' => $ok ? '' : 'MERKER_NICHT_GESCHRIEBEN');
+    } finally {
+        fer_zone_aus($fer_z);
+    }
+}
+
+/**
+ * Die Befehlsbruecke als Bibliothek laden (BB_NUR_LADEN; Stammfassung Werkzeuge/gemeinsam/befehlsbruecke.php, byte-gleich
+ * unter bin/). Installiert liegt sie unter bin/plugins/<ordner>/, in einem Arbeitsordner unter bin/ neben
+ * webfrontend/. Rueckgabe true, wenn bb_waechter() danach da ist.
+ */
+function fer_bruecke_laden() {
+    if (function_exists('bb_waechter')) { return true; }
+    $p = fer_paths();
+    $kand = array();
+    if ($p['lbhome'] !== '') {
+        $kand[] = $p['lbhome'] . '/bin/plugins/' . basename(dirname($p['config'])) . '/befehlsbruecke.php';
+    }
+    $kand[] = dirname(dirname(__DIR__)) . '/bin/befehlsbruecke.php';
+    foreach ($kand as $k) {
+        if (is_file($k)) {
+            if (!defined('BB_NUR_LADEN')) { define('BB_NUR_LADEN', true); }
+            require_once $k;
+            return function_exists('bb_waechter');
+        }
+    }
+    return false;
+}
+
+/** Die Befehlsliste der Bruecke (bb_liste(): EINE Quelle fuer Reiter, Vorlage und Musterprojekt). Rueckgabe
+ *  array(Liste oder null, Fehlertext). */
+function fer_bruecke_liste() {
+    if (!fer_bruecke_laden()) { return array(null, fer_t('BEFEHL.T_NICHT_DA')); }
+    list($z, $fehler) = bb_zuordnung_laden();
+    if ($z === null) { return array(null, $fehler); }
+    $GLOBALS['bb_zuordnung'] = $z;
+    list($fehl) = bb_zuordnung_pruefen($z);
+    if ($fehl) { return array(null, $fehl[0]); }
+    return array(bb_liste($z, bb_einstellungen($z)), '');
+}
+
+/**
+ * Die Bruecke sofort schalten (Reiter MQTT, nach dem Speichern; wie Abfuhrkalender awm_bruecke_starten()). Soll sie laufen
+ * (Haken "Befehle ueber MQTT annehmen" und MQTT an): befehlsbruecke.sh start - startet nur nach --soll, nie als root, nie
+ * waehrend eines Updates, nie zweimal (Sperre und argumentweise Probe im Startskript). Soll sie nicht laufen und laeuft
+ * sie: befehlsbruecke.sh stop. Warum hier und nicht nur im Waechter: der Waechter startet nach einem Start hoechstens alle
+ * 600 s neu (Stammfassung, Neustart-Bremse) - wer den Haken aus- und wieder einschaltet, haette sonst bis zu 10 Minuten
+ * keine Bruecke. Rueckgabe array(rc oder null = nichts zu tun, 'start'|'stop'|'', Ausgabe).
+ */
+function fer_bruecke_schalten($cfg = null) {
+    if ($cfg === null) { $cfg = fer_config(); }
+    if (!fer_bruecke_laden()) { return array(1, '', fer_t('BEFEHL.T_NICHT_DA')); }
+    $p = bb_pfade();
+    if (!$p) { return array(1, '', 'keine LoxBerry-Installation erkannt'); }
+    $soll = !empty($cfg['befehle_mqtt_ein']) && !empty($cfg['mqtt_enabled']);
+    if ($soll) {
+        list($rc, $aus) = bb_sh($p, 'start');
+        return array($rc, 'start', $aus);
+    }
+    if (!bb_dienste()) { return array(null, '', ''); }
+    list($rc, $aus) = bb_sh($p, 'stop');
+    return array($rc, 'stop', $aus);
+}
+
+/** Die Vorlage der MQTT-Befehle (bb_vorlage(): eigener Ausgang "Ferien und Feiertage MQTT-Befehle" an
+ *  /dev/udp/<LoxBerry>/<Udpinport>, Pulse mit fester 1). Rueckgabe array(name, inhalt) oder null. */
+function fer_vorlage_befehle() {
+    list($l) = fer_bruecke_liste();
+    if ($l === null) { return null; }
+    $kopf = fer_vorlage_kopf();
+    $bp = bb_pfade();
+    $port = $bp ? bb_broker($bp)['udpin'] : 11884;
+    return array('VQ_ferien_mqtt.xml', bb_vorlage($l, $kopf['host'], $port));
+}
+
+/**
+ * Lage der Befehlsbruecke fuer den Reiter Test und die Selbstpruefung (Entwurf gemeinsam 2.11). Gemessen wird das
+ * Erzeugnis wie im Waechter: Dienst laeuft (argumentweise), zustand.json juenger als 180 s, Abo steht. Rueckgabe
+ * array(ok true/false/null, Text) - null heisst "aus" (Haken) bzw. nicht feststellbar, und zaehlt nicht als bestanden.
+ */
+function fer_bruecke_lage() {
+    if (!fer_bruecke_laden()) { return array(false, fer_t('BEFEHL.T_NICHT_DA')); }
+    list($soll, $grund) = bb_soll_ermitteln();
+    if ($soll === 1) { return array(null, fer_t('BEFEHL.T_AUS')); }
+    if ($soll !== 0) { return array(false, sprintf(fer_t('BEFEHL.T_DEFEKT'), $grund)); }
+    $zu = bb_zustand_lesen();
+    $pids = bb_dienste();
+    $alter = (is_array($zu) && isset($zu['ts'])) ? time() - (int) $zu['ts'] : null;
+    if ($pids && $alter !== null && $alter <= BB_WACHE_GRENZE && !empty($zu['abo'])) {
+        $zl = (isset($zu['zaehler']) && is_array($zu['zaehler'])) ? $zu['zaehler'] : array();
+        $txt = sprintf(fer_t('BEFEHL.T_LAEUFT'), implode(' ', $pids),
+            is_string($zu['abo']) ? $zu['abo'] : fer_mqtt_praefix() . '/befehl/#',
+            isset($zl['angenommen']) ? (int) $zl['angenommen'] : 0, isset($zl['abgelehnt']) ? (int) $zl['abgelehnt'] : 0);
+        $lz = isset($zu['letzter']) && is_array($zu['letzter']) ? $zu['letzter'] : null;
+        if ($lz !== null && isset($lz['name'])) {
+            $txt .= ' ' . sprintf(fer_t('BEFEHL.T_LETZTER'), (string) $lz['name'],
+                isset($lz['ergebnis']) ? (string) $lz['ergebnis'] : '-',
+                isset($lz['zeit']) ? max(0, time() - (int) $lz['zeit']) : 0);
+        } else {
+            $txt .= ' ' . fer_t('BEFEHL.T_KEINER');
+        }
+        return array(true, $txt);
+    }
+    $wie = !$pids ? 'kein Dienst' : ($alter === null ? 'kein Zustand' : ($alter > BB_WACHE_GRENZE
+        ? 'Zustand ' . $alter . ' s alt' : 'ohne Abo' . (is_array($zu) && !empty($zu['fehler']) ? ': ' . $zu['fehler'] : '')));
+    return array(false, sprintf(fer_t('BEFEHL.T_STEHT'), $wie));
+}
+
 /**
  * Virtueller Ausgang (Welle Bild 18, 1.2.26; Entwurf Welle 18 ff, Entscheidung 8). Form wie die Ausfuhr aus Loxone
  * Config und wie Musterprojekt/vorlagen_w18/VQ_ferien_aktionen.xml: Wurzel VirtualOut mit HintText, Title, Comment,
@@ -3190,8 +3549,13 @@ function fer_vorlage_vo() {
  */
 function fer_gateway_fassung()
 {
-    $home = getenv('LBHOMEDIR');
-    if (!$home && defined('LBHOMEDIR')) {
+    /* Gruppe 1 / MQTT (1.2.27; Entwurf ff E15, Regeln/07 Z. 58): die Wurzel kommt aus fer_paths() - derselben Quelle
+     * wie fer_mqtt_gateway_autostart() (LBHOMEDIR, sonst aufwaerts gesucht). Bis 1.2.26 las diese Funktion nur
+     * getenv('LBHOMEDIR'); ohne die Umgebung (Cron, Kommandozeile) nannte der Reiter dann beide Faelle, waehrend die
+     * Autostart-Pruefung dieselbe general.json fand. */
+    $p = fer_paths();
+    $home = $p['lbhome'];
+    if ($home === '' && defined('LBHOMEDIR')) {
         $home = LBHOMEDIR;
     }
     if (!$home || !is_dir($home)) {
@@ -3521,7 +3885,7 @@ function fer_wert_pruefen($k, $w)
         case 'lang':
             return $auswahl($w, array('DE', 'EN', 'FR', 'IT', 'NL', 'PL', 'CS'));
         case 'school': case 'public': case 'local_holidays': case 'bridge':
-        case 'typ_streng': case 'halbtag_frei': case 'mqtt_enabled':
+        case 'typ_streng': case 'halbtag_frei': case 'mqtt_enabled': case 'befehle_mqtt_ein':
         case 'notify.audio': case 'notify.push': case 'notify.freetag':
         case 'notify.ferienstart': case 'notify.bridge_month':
             return $zahl($w, 0, 1);
