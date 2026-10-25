@@ -1,0 +1,7 @@
+# Diese Pakete installiert LoxBerry mit "apt-get -y install" - als root, waehrend der Plugin-Installation
+# (postinstall.sh laeuft als loxberry und koennte es nicht).
+#
+# Gruppe 19 (1.2.28; E8/BB2, Entscheidung 1): mosquitto_sub/_pub fuer die Befehlsbruecke (im LoxBerry-Grundabbild
+# ohnehin vorhanden; Hausform, Bauart Pumpenwacht 1.0.15 / Abfuhrkalender 1.4.26). Die Haus-Themen haus/kalender/*
+# brauchen es nicht - sie gehen ueber eine kurze PHP-Sitzung direkt an den Broker.
+mosquitto-clients

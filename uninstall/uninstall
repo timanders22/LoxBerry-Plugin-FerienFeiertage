@@ -86,6 +86,14 @@ else
     echo "<OK> Befehlsbruecke angehalten, ihre Zugangsdaten entfernt."
 fi
 
+# Gruppe 19 (1.2.28, Entwurf 2.6, E-E13): die zwoelf zurueckbehaltenen Themen haus/kalender/* abraeumen (mit
+# Ruecklesen am Broker) - nur, wenn diese Installation Anbieter ist oder war; eine Zweitinstallation raeumt die Themen
+# der ersten nie ab. cron.php gibt <OK>/<INFO>/<WARNING> aus und endet immer mit 0; die Deinstallation laeuft weiter.
+UN_CRON="$UN_BASE/bin/plugins/$UN_FOLDER/cron.php"
+if [ -f "$UN_CRON" ] && command -v php >/dev/null 2>&1; then
+    timeout -k 5 60 php "$UN_CRON" --haus-leeren 2>&1 | head -n 5
+fi
+
 UID_LB=$(id -u loxberry 2>/dev/null || id -u)
 ZIELE="$UN_BASE/config/plugins/$UN_FOLDER.backup.json
 $UN_BASE/config/plugins/$UN_FOLDER.backup.json.alt

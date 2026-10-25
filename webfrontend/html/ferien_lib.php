@@ -58,9 +58,11 @@ function fer_zone_aus($alt)
  * fer_config()), ruft deshalb nur Modulfunktionen, die es schon in 1.0.2 gab. */
 require_once __DIR__ . '/sprachausgabe.php';
 
-/** Die Ausgabearten, die dieses Plugin anbietet: wie bis 1.2.22 und dazu "aus" (ohne Sonos4Lox). */
+/** Die Ausgabearten, die dieses Plugin anbietet: wie bis 1.2.22, dazu "aus" und seit 1.2.28 Sonos4Lox und SonoX
+ *  (Pflegewelle 22, Modul 1.1.4; ungemessen, kein Sonos im Haus - das Modul prueft Installation und Zone). Keine
+ *  Fassungspruefung noetig: in fremden Prozessen ruft diese Bibliothek das Modul nur zum Vervollstaendigen. */
 function fer_ansage_modi() {
-    return array('aus', 'musicserver', 'ms4h', 'audioserver', 'custom', 'alexang', 'cc4lox');
+    return array('aus', 'musicserver', 'ms4h', 'audioserver', 'custom', 'alexang', 'cc4lox', 'sonos4lox', 'sonox');
 }
 
 /**
@@ -73,7 +75,10 @@ function fer_ansage_modi() {
  * 1.2.25 gestrichen (X-10).
  */
 function fer_ansage_k() {
-    return array('port' => fer_webport(), 'kopf' => array('User-Agent: LoxBerry Ferien-Plugin'),
+    /* Gruppe 19 (1.2.28, FE4 "nur sslport"): der HTTPS-Port aus general.json fuer die Umleitung auf https (ohne Wurzel
+     * ist 'general' leer und ansage_sslport('') = 0 - wie bis 1.2.27). */
+    return array('port' => fer_webport(), 'sslport' => ansage_sslport(fer_paths()['general']),
+                 'kopf' => array('User-Agent: LoxBerry Ferien-Plugin'),
                  'ordner' => fer_tmpdir(),
                  't' => function ($s) { return fer_t($s); },
                  'werk' => 'musicserver',
@@ -84,11 +89,13 @@ function fer_ansage_k() {
 /* Den LoxBerry-Wurzelordner ohne festen Systempfad bestimmen.
  *
  * Vom eigenen Ablageort aufwaerts, bis ein Verzeichnis gefunden ist, das
- * config/plugins UND webfrontend enthaelt. Das trifft die uebliche
- * Installation genauso wie eine an einem anderen Ort - und es trifft auch
- * den Fall, dass das Plugin noch als entpacktes Archiv daliegt (dann findet
- * es nichts und gibt einen Leerstring zurueck, was der Aufrufer ohnehin
- * abfangen muss).
+ * config/plugins UND data/plugins enthaelt UND config/system/general.json
+ * traegt (Regeln/06; Gruppe 19, 1.2.28, FE2 - bis 1.2.27 genuegten
+ * config/plugins und webfrontend, und ein fremder Baum mit diesen beiden
+ * Ordnern galt als LoxBerry). Das trifft die uebliche Installation genauso
+ * wie eine an einem anderen Ort; liegt das Plugin als entpacktes Archiv da,
+ * findet es nichts und gibt einen Leerstring zurueck (fer_paths() nimmt
+ * dann die Ersatzpfade unter <temp>/ferien-archiv).
  *
  * Der Name traegt kein Plugin-Kuerzel und ist deshalb abgesichert: zwei
  * Bibliotheken landen nie im selben Prozess, aber die Pruefung kostet nichts.
@@ -98,7 +105,8 @@ if (!function_exists('lb_wurzel_ermitteln')) {
     {
         $d = __DIR__;
         for ($i = 0; $i < 8; $i++) {
-            if (is_dir($d . '/config/plugins') && is_dir($d . '/webfrontend')) {
+            if (is_dir($d . '/config/plugins') && is_dir($d . '/data/plugins')
+                && is_file($d . '/config/system/general.json')) {
                 return $d;
             }
             $eltern = dirname($d);
@@ -110,28 +118,64 @@ if (!function_exists('lb_wurzel_ermitteln')) {
 }
 
 function fer_paths() {
-    $lbhomedir = getenv('LBHOMEDIR') ?: lb_wurzel_ermitteln();
-    $plugindir = getenv('LBPPLUGINDIR') ?: basename(__DIR__);
-    if ($lbhomedir && is_dir($lbhomedir . '/config/plugins/' . $plugindir) === false) {
-        $plugindir = 'ferien';
+    /* Gruppe 19 (1.2.28; FE2, Entwurf 3.5 c, E-E15; Bauart abfahrt_lbhome()/abfahrt_paths() des Abfahrts-Assistenten):
+     *  - Wurzel = LBHOMEDIR (mit config/plugins und data/plugins), sonst lb_wurzel_ermitteln() (streng, mit general.json);
+     *  - Archivschutz: Pfade der Anlage nur, wenn diese Datei wirklich unter <wurzel>/webfrontend/html/plugins/<ordner>/
+     *    liegt (installiert) ODER LBHOMEDIR und ein gueltiges LBPPLUGINDIR ausdruecklich gesetzt sind (Pruefstaende,
+     *    Freigabetor: beide Variablen noetig). Sonst Ersatzpfade unter <temp>/ferien-archiv - bis 1.2.27 zeigte der
+     *    Archivfall auf config/ im Archiv selbst und auf <temp>/ferien (unter Linux der Zwischenordner der Anlage);
+     *  - ABWEICHUNG zu Abfahrt (begruendet): installiert gilt der eigene Ordner, NICHT LBPPLUGINDIR. Diese Bibliothek
+     *    laeuft auch in fremden Prozessen (Abfahrts-Assistent und AWM-Abfuhr setzen LBPPLUGINDIR nur um das Einbinden
+     *    herum auf 'ferien'); stuende dort einmal der fremde Ordner, zeigte fer_paths() auf dessen Konfiguration;
+     *  - 'tmp' = /tmp/<ordner> (eine Zweitinstallation ferien_01 bekommt /tmp/ferien_01 - wie die Hakenskripte),
+     *    'plugin' = Ordnername, 'general' = <wurzel>/config/system/general.json bzw. ''.
+     * Ergebnis je Prozess gemerkt, Schluessel = LBHOMEDIR und LBPPLUGINDIR (Abfahrt schaltet die Umgebung um). Am Geraet
+     * aendert sich kein Pfad (Ordner ferien, /tmp/ferien). */
+    static $merk = array();
+    $env_home = (string) getenv('LBHOMEDIR');
+    $env_ordner = (string) getenv('LBPPLUGINDIR');
+    $schluessel = $env_home . "\n" . $env_ordner;
+    if (isset($merk[$schluessel])) { return $merk[$schluessel]; }
+    $nie = array('', '.', '..', '/', 'html', 'htmlauth', 'bin', 'plugins', 'webfrontend');
+    $env_home = rtrim($env_home, '/');
+    $home_ok = ($env_home !== '' && is_dir($env_home . '/config/plugins') && is_dir($env_home . '/data/plugins'));
+    $wurzel = $home_ok ? $env_home : lb_wurzel_ermitteln();
+    $self = basename(__DIR__);
+    $ausdruecklich = basename(rtrim($env_ordner, '/'));
+    $ordner = '';
+    if ($wurzel !== '') {
+        $inst = @realpath($wurzel . '/webfrontend/html/plugins/' . $self);
+        $hier = @realpath(__DIR__);
+        if (!in_array($self, $nie, true) && $inst !== false && $hier !== false && $inst === $hier) {
+            $ordner = $self;
+        } elseif ($home_ok && !in_array($ausdruecklich, $nie, true)
+                  && preg_match('/^[A-Za-z0-9_\-]{1,64}\z/', $ausdruecklich)) {
+            $ordner = $ausdruecklich;
+        }
     }
-    if ($lbhomedir) {
-        return array(
-            'config' => $lbhomedir . '/config/plugins/' . $plugindir . '/ferien.json',
-            'backup' => $lbhomedir . '/config/plugins/' . $plugindir . '.backup.json',
-            'log' => $lbhomedir . '/log/plugins/' . $plugindir . '/ferien.log',
-            'datadir' => $lbhomedir . '/data/plugins/' . $plugindir,
-            'tmp' => '/tmp/ferien',
-            'lbhome' => $lbhomedir,
+    if ($ordner !== '') {
+        $t = preg_replace('/[^A-Za-z0-9_\-]/', '', $ordner);
+        return $merk[$schluessel] = array(
+            'config' => $wurzel . '/config/plugins/' . $ordner . '/ferien.json',
+            'backup' => $wurzel . '/config/plugins/' . $ordner . '.backup.json',
+            'log' => $wurzel . '/log/plugins/' . $ordner . '/ferien.log',
+            'datadir' => $wurzel . '/data/plugins/' . $ordner,
+            'tmp' => '/tmp/' . ($t !== '' ? $t : 'ferien'),
+            'lbhome' => $wurzel,
+            'plugin' => $ordner,
+            'general' => $wurzel . '/config/system/general.json',
         );
     }
-    return array(
-        'config' => dirname(dirname(__DIR__)) . '/config/ferien.json',
-        'backup' => dirname(dirname(__DIR__)) . '/config/ferien.backup.json',
-        'log' => sys_get_temp_dir() . '/ferien/ferien.log',
-        'datadir' => sys_get_temp_dir() . '/ferien/data',
-        'tmp' => sys_get_temp_dir() . '/ferien',
+    $a = sys_get_temp_dir() . '/ferien-archiv';
+    return $merk[$schluessel] = array(
+        'config' => $a . '/config/ferien.json',
+        'backup' => $a . '/config/ferien.backup.json',
+        'log' => $a . '/log/ferien.log',
+        'datadir' => $a . '/data',
+        'tmp' => $a . '/tmp',
         'lbhome' => '',
+        'plugin' => in_array($self, $nie, true) ? 'ferien' : $self,
+        'general' => '',
     );
 }
 
@@ -213,6 +257,16 @@ function fer_vorgaben()
      * "Befehle ueber MQTT annehmen" (Reiter MQTT). Ab Werk aus: jeder im Heimnetz kann ueber den UDP-Eingang des
      * MQTT-Gateways Befehle senden. Erst mit dem Haken laeuft bin/befehlsbruecke.php (Waechter in bin/cron.php). */
     'befehle_mqtt_ein' => 0,
+
+    /* --- neu in 1.2.28 (Gruppe 19; Entwurf 2.8) - alle ab Werk 0 ------------------------------------------------------
+     * endpunkt_ein: "HTTP-Weg fuer Loxone annehmen" (Reiter Einbindung). Eine Neuinstallation antwortet auf ferien.php mit
+     *   403; eine bestehende Anlage behaelt den Weg (Lese-Regel in fer_config() und postupgrade.sh: Datei mit Inhalt ohne
+     *   den Schluessel -> 1). Abfahrts-Assistent und AWM-Abfuhr lesen ohne ihn die Bibliothek.
+     * haus_kalender_ein: "Kalendertage an andere Plugins geben (haus/kalender/...)" (Reiter MQTT, V1).
+     * ics_jaehrlich: "Jaehrlich wiederkehrende Ganztagstermine uebernehmen (nur mit Filterwort)" (V4 Option E). */
+    'endpunkt_ein' => 0,
+    'haus_kalender_ein' => 0,
+    'ics_jaehrlich' => 0,
 );
 }
 
@@ -392,6 +446,11 @@ function fer_config() {
     if (!is_array($cfg)) {
         $cfg = array();
     }
+    /* Gruppe 19 (1.2.28, Entscheidung 2, E-E16): eine Konfiguration MIT Inhalt ohne endpunkt_ein stammt aus einer
+     * frueheren Fassung - der HTTP-Weg bleibt dort an (Uebergang; postupgrade.sh schreibt den Wert zusaetzlich fest).
+     * Keine Datei oder der postinstall-Rohling "{}" -> Vorgabe 0. EINE Stelle fuer Oberflaeche, Cron, ferien.php und
+     * Befehlsbruecke; eine aus der Zweitschrift geheilte Bestandsdatei bekommt ebenfalls 1. */
+    if ($cfg && !array_key_exists('endpunkt_ein', $cfg)) { $cfg['endpunkt_ein'] = 1; }
     $cfg += fer_vorgaben();
     if (!is_array($cfg['own'])) { $cfg['own'] = array(); }
     if (!is_array($cfg['notify'])) { $cfg['notify'] = array(); }
@@ -987,10 +1046,14 @@ function fer_fetch($force = false) {
  *
  *  - Wiederholungen (RRULE) werden uebersprungen. Ein Urlaub wiederholt sich
  *    nicht, und eine halbe Wiederholungsrechnung waere schlimmer als keine:
- *    sie erzeugte Termine, die es nicht gibt.
- *  - Termine mit Uhrzeit werden uebersprungen. Dieses Plugin rechnet in
- *    ganzen Tagen; ein Zahnarzttermin um 14 Uhr ist kein Urlaubstag. Genommen
- *    werden nur Ganztagstermine (DTSTART;VALUE=DATE).
+ *    sie erzeugte Termine, die es nicht gibt. Seit 1.2.28 (V4 Option E) mit
+ *    einer Ausnahme: der Haken ics_jaehrlich UND ein Filterwort uebernehmen
+ *    einfache FREQ=YEARLY-Ganztagstermine (fer_ics_jaehrlich()).
+ *  - Termine mit Uhrzeit werden uebersprungen, auch VALUE=DATE-TIME. Dieses
+ *    Plugin rechnet in ganzen Tagen; ein Zahnarzttermin um 14 Uhr ist kein
+ *    Urlaubstag. Genommen werden nur Ganztagstermine (DTSTART;VALUE=DATE oder
+ *    DTSTART mit genau 8 Ziffern). Abgesagte Termine (STATUS:CANCELLED)
+ *    zaehlen nicht, Erinnerungen (VALARM) ebenso wenig.
  *  - Zeitzonen spielen damit keine Rolle.
  *
  * DTEND ist bei Ganztagsterminen EXKLUSIV - ein eintaegiger Termin am 3.8.
@@ -1000,33 +1063,64 @@ function fer_fetch($force = false) {
  *
  * Rueckgabe: Liste im selben Aufbau wie cfg['own'], oder leer.
  */
-function fer_ics_lesen($text, $filter = '') {
+function fer_ics_lesen($text, $filter = '', $jaehrlich = false, $heute = null, &$zahl = null) {
+    /* Gruppe 19 (1.2.28; FE11, E2, E3, Entscheidung 1, Entwurf 3.5/7.3, E-E3/E-E4):
+     *  - Bloecke werden nur an einer Zeile "BEGIN:VEVENT" geteilt, Eigenschaften nur am Zeilenanfang gelesen ("(rrule)"
+     *    im Beschreibungstext ist keine Wiederholung mehr);
+     *  - Erinnerungen (VALARM) tragen eigene SUMMARY/DESCRIPTION und werden vor der Auswertung entfernt;
+     *  - abgesagte Termine (STATUS:CANCELLED) zaehlen nicht;
+     *  - Ganztag nur mit genau 8 Ziffern: VALUE=DATE-TIME und ...T140000 fallen weg (E2); DTSTART ohne VALUE=DATE mit
+     *    genau 8 Ziffern gilt als Ganztag ("lax", E-E4 - 8 Ziffern ohne T sind nur als Datum lesbar);
+     *  - DURATION:P<n>D bzw. P<n>W statt DTEND (E3);
+     *  - RRULE:FREQ=YEARLY nur mit dem Haken ics_jaehrlich UND einem Filterwort (V4 Option E: Geburtstage und Jahrestage
+     *    sind ebenfalls jaehrliche Ganztagstermine - unterscheiden lassen sie sich nur ueber den Titel), sonst wie bisher
+     *    uebersprungen. $zahl bekommt array('jaehrlich' => uebernommene, 'jaehrlich_weg' => uebersprungene
+     *    Serientermine) fuer den Reiter Test. */
     $aus = array();
+    $zahl = array('jaehrlich' => 0, 'jaehrlich_weg' => 0);
+    if ($heute === null) { $heute = date('Y-m-d'); }
     // Fortsetzungszeilen aufloesen: ICS bricht lange Zeilen um und ruecket die
     // Fortsetzung mit einem Leerzeichen oder Tabulator ein.
     $text = str_replace(array("\r\n", "\r"), "\n", (string) $text);
     $text = preg_replace('/\n[ \t]/', '', $text);
-    $bloecke = preg_split('/BEGIN:VEVENT/', $text);
+    $bloecke = preg_split('/^BEGIN:VEVENT[ \t]*$/m', $text);
     array_shift($bloecke);
     foreach ($bloecke as $b) {
-        $b = substr($b, 0, strpos($b, 'END:VEVENT') === false ? strlen($b) : strpos($b, 'END:VEVENT'));
-        if (stripos($b, 'RRULE') !== false) { continue; }
-        if (!preg_match('/DTSTART[^:\n]*;VALUE=DATE[^:\n]*:(\d{8})/i', $b, $ms)) { continue; }
-        $von = substr($ms[1], 0, 4) . '-' . substr($ms[1], 4, 2) . '-' . substr($ms[1], 6, 2);
-        $bis = $von;
-        if (preg_match('/DTEND[^:\n]*;VALUE=DATE[^:\n]*:(\d{8})/i', $b, $me)) {
-            $roh = substr($me[1], 0, 4) . '-' . substr($me[1], 4, 2) . '-' . substr($me[1], 6, 2);
+        $e = strpos($b, "\nEND:VEVENT");
+        if ($e !== false) { $b = substr($b, 0, $e); }
+        $b = "\n" . preg_replace('/^BEGIN:VALARM[ \t]*$.*?^END:VALARM[ \t]*$/ms', '', $b) . "\n";
+        if (preg_match('/\nSTATUS(?:;[^:\n]*)?:[ \t]*CANCELLED[ \t]*\n/i', $b)) { continue; }
+        if (!preg_match('/\nDTSTART((?:;[^:\n]*)?):(\d{8})([^\n]*)\n/i', $b, $ms)) { continue; }
+        if (trim($ms[3]) !== '') { continue; }                       // ...T140000 -> Uhrzeit
+        $par = strtoupper($ms[1]);
+        $hat_date = (bool) preg_match('/;VALUE=DATE(?:;|$)/', $par);
+        if (!$hat_date && strpos($par, ';VALUE=') !== false) { continue; }   // VALUE=DATE-TIME o. a.
+        if (!checkdate((int) substr($ms[2], 4, 2), (int) substr($ms[2], 6, 2), (int) substr($ms[2], 0, 4))) { continue; }
+        $von = substr($ms[2], 0, 4) . '-' . substr($ms[2], 4, 2) . '-' . substr($ms[2], 6, 2);
+        $tage = 1;
+        if (preg_match('/\nDTEND((?:;[^:\n]*)?):(\d{8})[ \t]*\n/i', $b, $me)) {
+            $roh = substr($me[2], 0, 4) . '-' . substr($me[2], 4, 2) . '-' . substr($me[2], 6, 2);
             // DTEND ist exklusiv - siehe Kommentar oben.
-            $bis = date('Y-m-d', strtotime($roh . ' -1 day'));
-            if ($bis < $von) { $bis = $von; }
+            $tage = max(1, (int) round((strtotime($roh) - strtotime($von)) / 86400));
+        } elseif (preg_match('/\nDURATION(?:;[^:\n]*)?:[ \t]*P(\d{1,3})([DW])[ \t]*\n/i', $b, $md)) {
+            $tage = max(1, (int) $md[1] * (strtoupper($md[2]) === 'W' ? 7 : 1));
         }
+        $tage = min($tage, 366);
         $name = '';
-        if (preg_match('/\nSUMMARY[^:\n]*:(.*)/', "\n" . $b, $mn)) {
+        if (preg_match('/\nSUMMARY[^:\n]*:(.*)/', $b, $mn)) {
             $name = trim(str_replace(array('\\,', '\\;', '\\n', '\\N'), array(',', ';', ' ', ' '), $mn[1]));
         }
         if ($name === '') { $name = 'Kalendertermin'; }
         if ($filter !== '' && stripos($name, $filter) === false) { continue; }
-        $aus[] = array('von' => $von, 'bis' => $bis, 'name' => $name);
+        $starts = array($von);
+        if (preg_match('/\nRRULE[;:]([^\n]*)\n/i', $b, $mr)) {
+            $starts = ($jaehrlich && $filter !== '') ? fer_ics_jaehrlich($mr[1], $von, $b, $heute) : null;
+            if ($starts === null) { $zahl['jaehrlich_weg']++; continue; }
+            $zahl['jaehrlich']++;
+        }
+        foreach ($starts as $s) {
+            $aus[] = array('von' => $s, 'bis' => date('Y-m-d', strtotime($s . ' +' . ($tage - 1) . ' day')), 'name' => $name);
+        }
     }
     usort($aus, function ($a, $b) { return strcmp($a['von'], $b['von']); });
     return $aus;
@@ -1061,7 +1155,10 @@ function fer_ics_datei() { return fer_datadir() . '/kalender.json'; }
 /** Kennung der eingestellten Kalenderquelle (Adresse und Filter). */
 function fer_ics_quelle($cfg) {
     $url = is_string($cfg['ics_url']) ? trim($cfg['ics_url']) : '';
-    return $url === '' ? '' : md5($url . "\n" . (is_string($cfg['ics_filter']) ? trim($cfg['ics_filter']) : ''));
+    /* Gruppe 19 (1.2.28, V4): nur mit ics_jaehrlich = 1 kommt "\nJ" dazu - die Kennung bestehender Anlagen bleibt gleich,
+     * und ein Umschalten holt den Kalender beim naechsten Lauf neu. */
+    return $url === '' ? '' : md5($url . "\n" . (is_string($cfg['ics_filter']) ? trim($cfg['ics_filter']) : '')
+        . (!empty($cfg['ics_jaehrlich']) ? "\nJ" : ''));
 }
 
 /** Der gespeicherte Kalenderstand - ohne Netz. $force ist nur noch der
@@ -1111,10 +1208,13 @@ function fer_ics_abrufen($force = false) {
             . (!empty($c['termine']) ? ', der gespeicherte Stand gilt weiter' : ''));
         return 'fehler';
     }
-    $termine = fer_ics_lesen($roh, is_string($cfg['ics_filter']) ? trim($cfg['ics_filter']) : '');
+    $fer_iz = array();
+    $termine = fer_ics_lesen($roh, is_string($cfg['ics_filter']) ? trim($cfg['ics_filter']) : '',
+        !empty($cfg['ics_jaehrlich']), date('Y-m-d'), $fer_iz);
     $vorher = isset($c['termine']) ? $c['termine'] : null;
     fer_json_schreiben($f, array('stand' => date('c'), 'ok_ts' => time(), 'quelle' => $quelle,
-        'versuch_quelle' => $quelle, 'versuch_ts' => time(), 'fehler' => '', 'termine' => $termine));
+        'versuch_quelle' => $quelle, 'versuch_ts' => time(), 'fehler' => '', 'termine' => $termine,
+        'jaehrlich' => (int) $fer_iz['jaehrlich'], 'jaehrlich_weg' => (int) $fer_iz['jaehrlich_weg']));
     if ($vorher !== $termine) { @unlink(fer_tmpdir() . '/state.json'); }
     fer_log_if_changed('ics', count($termine) . ' Termine aus dem Kalender uebernommen');
     return 'frisch';
@@ -1798,37 +1898,33 @@ function fer_mqtt_publish($st = null, $nur_lebenszeichen = false) {
      * als die des HTTP-Weges, und weil beide auf 27 Eintraege kamen, ist es niemandem aufgefallen. */
     $m = fer_mqtt_nachrichten($st, $nur_lebenszeichen);
 
-    /* function_exists() vor socket_create().
-     *
-     * Ein vorangestelltes @ unterdrueckt Meldungen, aber es faengt keinen
-     * "Call to undefined function" - das ist ein toedlicher Fehler, und der
-     * Cron-Lauf waere an dieser Zeile ohne Eintrag im Protokoll gestorben.
-     * Auf einem LoxBerry ohne php-sockets ist das kein Sonderfall. */
-    if (!function_exists('socket_create')) {
-        fer_log_if_changed('mqtt', 'Die PHP-Erweiterung sockets fehlt - ohne sie'
-            . ' laesst sich das MQTT-Gateway nicht ueber UDP ansprechen.'
-            . ' Der HTTP-Weg (ferien.php) ist davon nicht betroffen.');
-        return 0;
-    }
-    $s = @socket_create(AF_INET, SOCK_DGRAM, SOL_UDP);
-    if (!$s) {
-        fer_log_if_changed('mqtt', 'UDP-Socket liess sich nicht anlegen -'
-            . ' fehlt die PHP-Erweiterung sockets?');
+    /* Gruppe 19 (1.2.28; E4/E-E9, Regeln/03): stream_socket_client('udp://...') statt socket_create() - die
+     * PHP-Erweiterung sockets wird nicht mehr gebraucht (bis 1.2.27 durch function_exists() abgesichert). */
+    $s = @stream_socket_client('udp://127.0.0.1:' . $udpport, $fer_en, $fer_es, 1);
+    if ($s === false) {
+        fer_log_if_changed('mqtt', 'UDP-Ausgang zum MQTT-Gateway liess sich nicht oeffnen (Port ' . $udpport . ').');
         return 0;
     }
     $gesendet = 0;
+    $fer_n = count($m);
+    $fer_i = 0;
+    /* 5 ms Pause (FE9, Entscheidung 1): der UDP-Eingang des Gateways V1 verwarf bei vollen Stoessen Datagramme
+     * (Regeln/07, Kandidatenliste); unter V2 ohne Belang, schadet nicht. Nur beim Vollsatz, nicht nach dem letzten
+     * Datagramm - das Lebenszeichen (vier Datagramme) geht ohne Pause. Bauart BatterieBMS 0.9.21 / Marstek 1.1.17. */
     foreach ($m as $k => $v) {
+        $fer_i++;
         /* M3: erst saeubern, dann auf leer pruefen - ein Name, der nur aus
          * einem Zeilenumbruch bestand, ging bis 1.2.15 als LEERE Nutzlast
          * hinaus. Nie eine leere Nutzlast; ohne Aussage steht '-'. */
         $nl = fer_mqtt_nutzlast($v);
         if ($nl === '') { $nl = '-'; }
         $msg = 'publish ' . fer_mqtt_thema($prefix . '/' . $k) . ' ' . $nl;
-        if (@socket_sendto($s, $msg, strlen($msg), 0, '127.0.0.1', $udpport) !== false) {
+        if (@fwrite($s, $msg) === strlen($msg)) {
             $gesendet++;
         }
+        if (!$nur_lebenszeichen && $fer_i < $fer_n) { usleep(5000); }
     }
-    socket_close($s);
+    fclose($s);
     if (!$nur_lebenszeichen) {
         fer_log_if_changed('mqtt', $gesendet . ' von ' . count($m) . ' Werten gesendet (Port ' . $udpport . ')'
             . (empty($st['quelle_da']) ? ' - ohne Quelldaten nur ok = 0 und das Lebenszeichen' : ''));
@@ -1884,7 +1980,12 @@ function fer_mqtt_lebenszeichen($st) {
      * Signatur (Regeln/07: ein jede Minute wechselnder Wert gehoert nicht hinein). ZAEHLER behaelt in fer_felder() sein
      * leeres Thema - sonst ginge er zweimal hinaus. In Loxone haengt die Analogwertvalidierung der Musterseite daran
      * (ferien_status_zaehler); status/ts allein haette Loxone in Ortszeit verrechnen muessen. */
+    /* Gruppe 19 (1.2.28, E6, Hausform G15-G18): ok laeuft mit dem Lebenszeichen, damit "Noncached" im Gateway V2 greift
+     * und ein verlorenes ok heilt. Ohne Quelldaten bleibt ok = 0 (fer_state()). fer_mqtt_nachrichten() haengt das
+     * Lebenszeichen per array_merge an - ok steht danach einmal in der Liste. Die Signatur (bin/cron.php) nimmt nur die
+     * drei fluechtigen Themen datum, status/ts und status/zaehler heraus; ok bleibt darin. */
     return array(
+        'ok' => (int) (isset($st['ok']) ? $st['ok'] : 0),
         'datum' => str_replace('-', '', (string) (isset($st['heute']['datum']) ? $st['heute']['datum'] : date('Y-m-d'))),
         'status/ts' => time(),
         'status/zaehler' => fer_zaehler(false),
@@ -2322,17 +2423,12 @@ function fer_t($schluessel)
     static $texte = null;
     if ($texte === null) {
         // Installiert liegen die Dateien unter
-        // <home>/templates/plugins/<ordner>/lang/ - der Ordnername ergibt
-        // sich aus dem Ablageort dieser Datei.
-        $home = getenv('LBHOMEDIR');
-        if (!$home || !is_dir($home)) {
-            foreach (array(lb_wurzel_ermitteln(), '/home/loxberry/loxberry') as $k) {
-                if (is_dir($k)) { $home = $k; break; }
-            }
-        }
-        $ordner = basename(dirname(__FILE__));
-        $pfad = $home . '/templates/plugins/' . $ordner . '/lang';
-        if (!is_dir($pfad)) {
+        // <home>/templates/plugins/<ordner>/lang/. Gruppe 19 (1.2.28, FE2 d):
+        // Wurzel und Ordner aus fer_paths() - bis 1.2.27 stand hier als
+        // Rueckfall ein fester Systempfad.
+        $fp = fer_paths();
+        $pfad = $fp['lbhome'] !== '' ? $fp['lbhome'] . '/templates/plugins/' . $fp['plugin'] . '/lang' : '';
+        if ($pfad === '' || !is_dir($pfad)) {
             // Nicht installiert (Entwicklung): neben dem Plugin nachsehen.
             $pfad = dirname(dirname(dirname(__FILE__))) . '/templates/lang';
         }
@@ -2800,7 +2896,11 @@ function fer_selbsttest($basis = '', $vorher = null) {
     $add(fer_t('PRUEF.F_TOKEN'), $soll !== '',
         fer_t($soll !== '' ? 'PRUEF.H_TOKEN_JA' : 'PRUEF.H_TOKEN_NEIN'));
 
-    if ($basis !== '' && $soll !== '') {
+    /* Gruppe 19 (1.2.28, Entwurf 3.2): bei abgeschaltetem HTTP-Weg (endpunkt_ein <> 1) eine graue Zeile ohne Aufruf -
+     * ferien.php antwortet dann mit 403 ENDPUNKT_AUS, und das ist gewollt. */
+    if ((int) $cfg['endpunkt_ein'] !== 1) {
+        $add(fer_t('PRUEF.F_ENDPUNKT'), null, fer_t('PRUEF.H_ENDPUNKT_AUS'));
+    } elseif ($basis !== '' && $soll !== '') {
         /* Drei Sekunden, nicht acht: diese Pruefung laeuft bei jedem
          * Seitenaufbau des Reiters, und im Fehlerfall wartet der Anwender
          * sonst vor einer leeren Seite. Beurteilt wird der HTTP-STATUS (O4):
@@ -2837,8 +2937,6 @@ function fer_selbsttest($basis = '', $vorher = null) {
 
     /* --- 4. MQTT ------------------------------------------------------- */
     if (!empty($cfg['mqtt_enabled'])) {
-        $add(fer_t('PRUEF.F_SOCKETS'), function_exists('socket_create'),
-            fer_t(function_exists('socket_create') ? 'PRUEF.JA' : 'PRUEF.H_SOCKETS_NEIN'));
         $auto = fer_mqtt_gateway_autostart();
         $add(fer_t('PRUEF.F_AUTOSTART'), $auto === null ? null : $auto,
             fer_t($auto === null ? 'PRUEF.H_GEN_UNLESBAR' : ($auto ? 'PRUEF.JA' : 'PRUEF.H_AUTOSTART_NEIN')));
@@ -2862,8 +2960,16 @@ function fer_selbsttest($basis = '', $vorher = null) {
         $fehler = isset($kd['fehler']) ? (string) $kd['fehler'] : '';
         $add(fer_t('PRUEF.F_ICS'), count($k) > 0 && $fehler === '',
             sprintf(fer_t('PRUEF.H_ICS'), count($k), isset($kd['stand']) && $kd['stand'] !== '' ? substr((string) $kd['stand'], 0, 16) : '-')
+            . ((isset($kd['jaehrlich']) || isset($kd['jaehrlich_weg']))
+               ? ' ' . sprintf(fer_t('PRUEF.H_ICS_JAEHRLICH'), (int) (isset($kd['jaehrlich']) ? $kd['jaehrlich'] : 0),
+                               (int) (isset($kd['jaehrlich_weg']) ? $kd['jaehrlich_weg'] : 0)) : '')
             . ($fehler !== '' ? ' ' . sprintf(fer_t('PRUEF.H_ICS_FEHLER'), $fehler) : ''));
     }
+    /* Gruppe 19 (1.2.28; FE11, E2, E3, V4): der Kalenderleser gegen feste Faelle (beidseitig geeicht wie AWM A12). */
+    $fer_icsf = fer_ics_selbstpruefung();
+    $add(fer_t('PRUEF.F_ICS_REGELN'), count($fer_icsf) === 0,
+        count($fer_icsf) === 0 ? sprintf(fer_t('PRUEF.H_ICS_REGELN_OK'), count(fer_ics_selbstfaelle()))
+                               : sprintf(fer_t('PRUEF.H_ICS_REGELN_FEHL'), implode(', ', $fer_icsf)));
     if (is_string($cfg['subdivision2']) && trim($cfg['subdivision2']) !== '') {
         $n2 = count((array) (isset($d['ferien2']) ? $d['ferien2'] : array()));
         $add(fer_t('PRUEF.F_REGION2'), $n2 > 0,
@@ -2873,6 +2979,31 @@ function fer_selbsttest($basis = '', $vorher = null) {
     /* Gruppe 1 (1.2.27, Befehlsbruecke): nimmt sie Befehle an? "aus" (Haken, ab Werk) ist ein Hinweis, kein Kreuz. */
     $bl = fer_bruecke_lage();
     $add(fer_t('PRUEF.F_BRUECKE'), $bl[0], $bl[1]);
+
+    /* Gruppe 19 (1.2.28): Noncached genau fuer ok (Hausform G15-G18), und die Haus-Themen haus/kalender: Themenliste
+     * gegen die Werte in beide Richtungen (Regeln/07), kein Wert '', nur ganze Zahlen; bei Haken an "Broker erreichbar"
+     * (eine Sitzung ohne Senden - ohne Kennwort, ohne Wert in der Zeile). */
+    $fer_nc = array();
+    foreach (fer_mqtt_hakenliste($cfg) as $fer_h) {
+        if (isset($fer_h[4]) && $fer_h[4] === 'N') { $fer_nc[] = $fer_h[1]; }
+    }
+    $fer_nc_soll = array(fer_mqtt_gateway_name(fer_mqtt_praefix($cfg), 'ok'));
+    $add(fer_t('PRUEF.F_NONCACHED'), $fer_nc === $fer_nc_soll,
+        sprintf(fer_t($fer_nc === $fer_nc_soll ? 'PRUEF.H_NONCACHED_OK' : 'PRUEF.H_NONCACHED_FEHL'), implode(', ', $fer_nc)));
+    $fer_hw = fer_haus_werte($st, $cfg, fer_zaehler(false));
+    $fer_ht = fer_haus_themen();
+    $fer_hf = array_merge(array_keys(array_diff_key($fer_ht, $fer_hw)), array_keys(array_diff_key($fer_hw, $fer_ht)));
+    foreach ($fer_hw as $fer_hk => $fer_v) {
+        if (!is_int($fer_v) || (string) $fer_v === '') { $fer_hf[] = $fer_hk; }
+    }
+    $add(fer_t('PRUEF.F_HAUS'), count($fer_hf) === 0,
+        count($fer_hf) === 0 ? sprintf(fer_t('PRUEF.H_HAUS_OK'), count($fer_ht))
+                             : sprintf(fer_t('PRUEF.H_HAUS_FEHL'), implode(', ', array_unique($fer_hf))));
+    if (!empty($cfg['haus_kalender_ein']) && !empty($cfg['mqtt_enabled'])) {
+        $fer_hs = fer_haus_sitzung(array());
+        $add(fer_t('PRUEF.F_HAUS_BROKER'), $fer_hs['lage'] === 'ok',
+            $fer_hs['lage'] === 'ok' ? fer_t('PRUEF.JA') : sprintf(fer_t('PRUEF.H_HAUS_BROKER_NEIN'), $fer_hs['lage']));
+    }
 
     /* --- 6. Ansage ------------------------------------------------------ */
     /* Nr. 36 b, Stufe 2: eine Zeile fuer alle Ausgabearten (fer_pruefe_ansage()). */
@@ -3137,7 +3268,9 @@ function fer_vorlage_kopf() {
     $host = isset($_SERVER['HTTP_HOST']) && $_SERVER['HTTP_HOST'] !== ''
         ? preg_replace('/[^A-Za-z0-9\.\-:]/', '', (string) $_SERVER['HTTP_HOST'])
         : (gethostname() ?: 'loxberry');
-    $ordner = getenv('LBPPLUGINDIR') ?: 'ferien';
+    /* Gruppe 19 (1.2.28, FE5): der Ordner aus fer_paths() - LBPPLUGINDIR ist am Geraet nie eine Umgebungsvariable,
+     * eine Zweitinstallation (ferien_01) bekam bis 1.2.27 die Adresse der ersten. */
+    $ordner = fer_paths()['plugin'];
     /* Welle Bild 18 (1.2.26): der Hinweistext aus der Sprachdatei (Entscheidung 12); 'host' und 'ordner' dazu fuer die
      * Ausgangsvorlage (fer_vorlage_vo()) - die Importdatei schreibt sie nicht. */
     return array(
@@ -3250,8 +3383,10 @@ function fer_mqtt_textthemen() {
  * Musterseiten als Virtuellen Texteingang tragen (heute drei: name, feiertag_name, ferien_name). Welche das sind und
  * welche Datenpunkte auf den Musterseiten verdrahtet sind, wird an den Namen der Baustein-Liste abgelesen
  * (fer_bausteinliste()), nicht von Hand gefuehrt. Je Eintrag array(Thema mit Praefix, Gateway-Name, auf den
- * Musterseiten, Textthema). Kein Datenpunkt braucht "Zuruecksetzen nach Senden": ptest steht 300 s auf 1 und faellt,
- * ann ist ein 10-Minuten-Fenster - echte Wechsel, kein wiederholter gleicher Wert.
+ * Musterseiten, Textthema, Kennzeichen). Kein Datenpunkt braucht "Zuruecksetzen nach Senden": ptest steht 300 s auf 1
+ * und faellt, ann ist ein 10-Minuten-Fenster - echte Wechsel, kein wiederholter gleicher Wert. Kennzeichen (Gruppe 19,
+ * 1.2.28): 'N' = "Noncached" im Gateway, nur fuer ok (Hausform G15-G18: ok traegt fast immer 1; ohne Noncached kaeme
+ * nach einem Neustart des Miniservers keine neue 1 an), sonst ''.
  */
 function fer_mqtt_hakenliste($cfg = null) {
     if ($cfg === null) { $cfg = fer_config(); }
@@ -3263,13 +3398,13 @@ function fer_mqtt_hakenliste($cfg = null) {
     $aus = array();
     foreach (array_keys(fer_mqtt_vorlage_themen()) as $t) {
         $n = fer_mqtt_gateway_name($pf, $t);
-        $aus[] = array(fer_mqtt_thema($pf . '/' . $t), $n, isset($seiten[$n]), false);
+        $aus[] = array(fer_mqtt_thema($pf . '/' . $t), $n, isset($seiten[$n]), false, $t === 'ok' ? 'N' : '');
     }
     /* Die Texte in der Reihenfolge, in der die Musterseiten sie fuehren (Seite "... Meldungen" Nr. 31-33). */
     $texte = array();
     foreach (fer_mqtt_textthemen() as $t) { $texte[fer_mqtt_gateway_name($pf, $t)] = $t; }
     foreach (array_keys($seiten) as $n) {
-        if (isset($texte[$n])) { $aus[] = array(fer_mqtt_thema($pf . '/' . $texte[$n]), $n, true, true); }
+        if (isset($texte[$n])) { $aus[] = array(fer_mqtt_thema($pf . '/' . $texte[$n]), $n, true, true, ''); }
     }
     return $aus;
 }
@@ -3760,12 +3895,25 @@ function fer_sicherung_lesen($roh, $geltend = null, &$namen = null)
      * Bestand ausgerollt (30 Linien).
      *
      * Der Hausstandard sagt: eine halb gueltige Datei aendert gar nichts. */
+    /* Gruppe 19 (1.2.28, N1/E-E14): Schluessel, die die Fassung der Sicherung noch nicht kannte
+     * (fer_spaet_schluessel()), sind keine Beanstandung - es gilt der GELTENDE Wert (sonst die Vorgabe), und der
+     * Hinweis nennt sie. Bis 1.2.27 liess sich deshalb schon keine 1.2.26-Sicherung zurueckspielen (befehle_mqtt_ein). */
     $fehlend = array();
+    $spaet = array();
     foreach (array_keys(fer_vorgaben()) as $fk) {
         if (!array_key_exists($fk, $daten)) {
+            if (in_array($fk, fer_spaet_schluessel(), true)) {
+                if (is_array($geltend) && array_key_exists($fk, $geltend)) {
+                    list($gok, $gw) = fer_wert_pruefen($fk, $geltend[$fk]);
+                    if ($gok) { $neu[$fk] = $gw; }
+                }
+                $spaet[] = $fk;
+                continue;
+            }
             $fehlend[] = $fk;
         }
     }
+    if ($spaet) { $hinweise[] = sprintf(fer_t('TEXT.SICH_SPAET'), implode(', ', $spaet)); }
     if ($fehlend) {
         $mangel[] = sprintf(fer_t('TEXT.SICH_FEHLEND'), count($fehlend), implode(', ', $fehlend));
         $namen = array_merge($namen, $fehlend);
@@ -3886,6 +4034,7 @@ function fer_wert_pruefen($k, $w)
             return $auswahl($w, array('DE', 'EN', 'FR', 'IT', 'NL', 'PL', 'CS'));
         case 'school': case 'public': case 'local_holidays': case 'bridge':
         case 'typ_streng': case 'halbtag_frei': case 'mqtt_enabled': case 'befehle_mqtt_ein':
+        case 'endpunkt_ein': case 'haus_kalender_ein': case 'ics_jaehrlich':
         case 'notify.audio': case 'notify.push': case 'notify.freetag':
         case 'notify.ferienstart': case 'notify.bridge_month':
             return $zahl($w, 0, 1);
@@ -3921,6 +4070,7 @@ function fer_wert_pruefen($k, $w)
         case 'tts.mode': case 'tts.ip': case 'tts.port': case 'tts.zones': case 'tts.volume':
         case 'tts.lang': case 'tts.template': case 'tts.alexa_geraet': case 'tts.alexa_laut':
         case 'tts.google_geraet': case 'tts.google_laut': case 'tts.sonos_zone': case 'tts.sonos_laut':
+        case 'tts.sonox_raum': case 'tts.sonox_laut': case 'tts.sonox_sprache':
             /* Nr. 36 b, Stufe 2: dieselbe Pruefung wie beim Speichern und vor dem Senden
              * (ansage_wert_pruefen(): Ausgabeart aus fer_ansage_modi(), Adresse und Vorlage
              * im Heimnetz, Zonen, Lautstaerke 1-100). Der Grund nennt nie den Wert. Die
@@ -4464,4 +4614,664 @@ function fer_quellprobe()
     fer_log('Probe gegen die Quelle (DE-BY, Reiter Test): ' . implode(', ', $zeile)
         . ' - die Termindatei bleibt unveraendert.');
     return array($gut === 2 ? 'ok' : ($gut === 1 ? 'teilweise' : 'fehl'), fer_quellprobe_lesen());
+}
+
+/* ==================================================================
+ * Gruppe 19 (1.2.28): Sicherung mit Spaetschluesseln (N1), Ansichten (N2), jaehrliche Kalendertermine (V4),
+ * Anbieter haus/kalender/* (V1) - Entwurf entwurf_gruppe19_fe.txt, Entscheidungen G19 1-7, E-E1-E-E20.
+ * ================================================================== */
+
+/**
+ * Schluessel, die eine aeltere Sicherung nicht tragen kann (N1, E-E14): befehle_mqtt_ein seit 1.2.27, endpunkt_ein,
+ * haus_kalender_ein und ics_jaehrlich seit 1.2.28. Fehlen sie in einer Sicherung, gilt der GELTENDE Wert (sonst die
+ * Vorgabe), mit Hinweis - eine Sicherung aus 1.2.26/1.2.27 bleibt zurueckspielbar und schaltet nichts still um
+ * (endpunkt_ein einer Bestandsanlage bliebe sonst nicht 1). Bauart awm_spaet_schluessel() (Gruppe 18 N2/N3).
+ */
+function fer_spaet_schluessel()
+{
+    return array('befehle_mqtt_ein', 'endpunkt_ein', 'haus_kalender_ein', 'ics_jaehrlich');
+}
+
+/**
+ * Die lesenden Ansichten Zeile, JSON und Debug (N2, E-E8) - EINE Stelle fuer ferien.php (nach Sperre und Tokenteil)
+ * und die Oberflaeche (index.php?ansicht=..., hinter der LoxBerry-Anmeldung, unabhaengig von endpunkt_ein). Die Ausgabe
+ * ist byte-gleich mit ferien.php bis 1.2.27 (Vorher/Nachher-Probe im Bau). Rueckgabe array(HTTP-Code, Content-Type,
+ * Text). $refresh/$quelle nur fuer ferien.php?refresh=1&debug=1.
+ */
+function fer_ansicht($art, $refresh = false, $quelle = '-')
+{
+    $klar = function ($w) { return is_scalar($w) ? (string) $w : '?'; };
+    if ($art === 'json') {
+        $st = fer_state($refresh);
+        /* 1.2.16: ohne Daten der Quelle kein Zustand mit erfundenen Werten. */
+        if (empty($st['quelle_da'])) {
+            return array(503, 'application/json; charset=utf-8',
+                json_encode(array('ok' => 0, 'grund' => 'KEINE_DATEN'), JSON_PRETTY_PRINT) . "\n");
+        }
+        $fl = fer_meldeflags($st);
+        $st['ann'] = $fl['ann'];
+        $st['ptest'] = fer_ptest_active();
+        return array(200, 'application/json; charset=utf-8',
+            json_encode($st, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_PRETTY_PRINT));
+    }
+    $st = fer_state($refresh);
+    $cfg = fer_config();
+    $flags = fer_meldeflags($st);
+    $ohne = empty($st['quelle_da']);
+    $o = '';
+    if ($art === 'debug') {
+        $d = fer_data();
+        $o .= 'DEBUG  Region: ' . $klar($cfg['country']) . '/' . $klar($cfg['subdivision'])
+           . '  Abruf: ' . $quelle
+           . '  Stand: ' . substr((string) $st['stand'], 0, 19)
+           . '  zuletzt gelungen: ' . ($st['stand_ok'] !== '' ? substr((string) $st['stand_ok'], 0, 19) : '-')
+           . ' (' . (int) $st['alter_tage'] . ' Tage)'
+           . (!empty($st['teilausfall']) ? '  Teilausfall: ' . implode(', ', (array) $st['teilausfall']) : '')
+           . '  Daten bis: ' . $st['reicht_bis'] . "\n";
+        $o .= 'HEUTE  ' . $st['heute']['datum'] . ': schulfrei=' . $st['heute']['schulfrei']
+           . ' Ferien=' . ($st['heute']['ferien_name'] !== '' ? $st['heute']['ferien_name'] : '-')
+           . ' Feiertag=' . ($st['heute']['feiertag_name'] !== '' ? $st['heute']['feiertag_name'] : '-')
+           . ' Brueckentag=' . $st['heute']['bruecke'] . "\n";
+        $o .= 'MORGEN ' . $st['morgen']['datum'] . ': schulfrei=' . $st['morgen']['schulfrei']
+           . ' Ferien=' . ($st['morgen']['ferien_name'] !== '' ? $st['morgen']['ferien_name'] : '-')
+           . ' Feiertag=' . ($st['morgen']['feiertag_name'] !== '' ? $st['morgen']['feiertag_name'] : '-') . "\n\n";
+        $o .= "Kommende Ferien:\n";
+        foreach ((array) $d['ferien'] as $e) {
+            if ($e['bis'] < date('Y-m-d')) { continue; }
+            $o .= sprintf("  %s bis %s  %s%s%s\n", $e['von'], $e['bis'], $e['name'],
+                !empty($e['ics']) ? '  (aus dem Kalender)' : (!empty($e['eigen']) ? '  (eigener Termin)' : ''),
+                (isset($e['art']) && $e['art'] !== '' && $e['art'] !== 'School') ? '  [Art: ' . $e['art'] . ']' : '');
+        }
+        if (!empty($d['ferien2'])) {
+            $o .= "\nKommende Ferien der zweiten Region (" . $cfg['subdivision2'] . "):\n";
+            foreach ((array) $d['ferien2'] as $e) {
+                if ($e['bis'] < date('Y-m-d')) { continue; }
+                $o .= sprintf("  %s bis %s  %s\n", $e['von'], $e['bis'], $e['name']);
+            }
+        }
+        $o .= "\nKommende Feiertage:\n";
+        foreach ((array) $d['feiertage'] as $e) {
+            if ($e['bis'] < date('Y-m-d')) { continue; }
+            $o .= sprintf("  %s  %s%s%s%s\n", $e['von'], $e['name'],
+                !empty($e['eigen']) ? '  (eigener Termin)' : '',
+                (isset($e['art']) && $e['art'] !== '' && $e['art'] !== 'Public') ? '  [Art: ' . $e['art'] . ']' : '',
+                !empty($e['halbtag']) ? ('  [halber Tag' . (!empty($e['hinweis']) ? ': ' . $e['hinweis'] : '') . ']') : '');
+        }
+        $o .= "\nUrlaub (Abwesenheit):\n";
+        if (empty($d['urlaub'])) {
+            $o .= "  keine Urlaubszeitraeume eingetragen\n";
+        } else {
+            foreach ((array) $d['urlaub'] as $e) {
+                if ($e['bis'] < date('Y-m-d')) { continue; }
+                $o .= sprintf("  %s bis %s  %s\n", $e['von'], $e['bis'], $e['name']);
+            }
+            $o .= sprintf("  aktiv=%d in=%d rest=%d letzter Tag=%d\n", $st['urlaub']['aktiv'],
+                $st['urlaub']['in'], $st['urlaub']['rest'], $st['urlaub']['letzter_tag']);
+        }
+        if ($st['brueckentage']) {
+            $o .= "\nBrueckentage der naechsten 12 Monate:\n  " . implode(', ', $st['brueckentage']) . "\n";
+        }
+        $o .= "\n";
+    }
+    /* 1.2.16 (C5): ohne Daten der Quelle 503 und nur die Kennung - keine geratenen Werte. */
+    $o .= $ohne ? "FERIEN;OK=0;GRUND=KEINE_DATEN\n" : fer_zeile($st, $flags);
+    return array($ohne ? 503 : 200, 'text/plain; charset=utf-8', $o);
+}
+
+/**
+ * V4 (Option E, Hausherr 25.10.2026): Beginntage einer jaehrlichen Regel im Fenster [heute - 366 Tage, heute + 400 Tage].
+ * Nur FREQ=YEARLY mit hoechstens INTERVAL=1, UNTIL, COUNT, WKST; jeder andere Teil (BYMONTH, BYDAY, BYSETPOS, INTERVAL
+ * <> 1 ...) und EXDATE ausser in der DATE-Form -> null: der Termin wird wie bisher uebersprungen (keine halbe
+ * Wiederholungsrechnung, Grundsatz aus fer_ics_lesen()). 29.02. nur in Schaltjahren. kalender.json wird alle 6 h neu
+ * gerechnet (FER_ICS_TAKT) - das Fenster reicht.
+ */
+function fer_ics_jaehrlich($regel, $von, $b, $heute)
+{
+    $teile = array();
+    foreach (explode(';', strtoupper(trim((string) $regel))) as $t) {
+        if ($t === '') { continue; }
+        $kv = explode('=', $t, 2);
+        if (count($kv) !== 2) { return null; }
+        $teile[$kv[0]] = $kv[1];
+    }
+    if (!isset($teile['FREQ']) || $teile['FREQ'] !== 'YEARLY') { return null; }
+    foreach (array_keys($teile) as $k) {
+        if (!in_array($k, array('FREQ', 'INTERVAL', 'UNTIL', 'COUNT', 'WKST'), true)) { return null; }
+    }
+    if (isset($teile['INTERVAL']) && $teile['INTERVAL'] !== '1') { return null; }
+    $bis_regel = null;
+    if (isset($teile['UNTIL'])) {
+        if (!preg_match('/^(\d{4})(\d{2})(\d{2})/', $teile['UNTIL'], $mu)) { return null; }
+        $bis_regel = $mu[1] . '-' . $mu[2] . '-' . $mu[3];
+    }
+    $anzahl = 0;
+    if (isset($teile['COUNT'])) {
+        if (!preg_match('/^\d{1,4}$/', $teile['COUNT']) || (int) $teile['COUNT'] < 1) { return null; }
+        $anzahl = (int) $teile['COUNT'];
+    }
+    $ausfall = array();
+    if (preg_match_all('/\nEXDATE((?:;[^:\n]*)?):([^\n]*)\n/i', $b, $mx, PREG_SET_ORDER)) {
+        foreach ($mx as $x) {
+            foreach (explode(',', $x[2]) as $d) {
+                if (!preg_match('/^(\d{4})(\d{2})(\d{2})$/', trim($d), $md)) { return null; }
+                $ausfall[$md[1] . '-' . $md[2] . '-' . $md[3]] = true;
+            }
+        }
+    }
+    $j0 = (int) substr($von, 0, 4);
+    $mt = substr($von, 5);
+    $unten = date('Y-m-d', strtotime($heute . ' -366 day'));
+    $oben = date('Y-m-d', strtotime($heute . ' +400 day'));
+    $aus = array();
+    $n = 0;
+    for ($j = $j0; $j <= (int) substr($oben, 0, 4); $j++) {
+        if (!checkdate((int) substr($mt, 0, 2), (int) substr($mt, 3, 2), $j)) { continue; }
+        $d = sprintf('%04d-%s', $j, $mt);
+        $n++;
+        if ($anzahl && $n > $anzahl) { break; }
+        if ($bis_regel !== null && $d > $bis_regel) { break; }
+        if (isset($ausfall[$d])) { continue; }
+        if ($d < $unten || $d > $oben) { continue; }
+        $aus[] = $d;
+    }
+    return $aus;
+}
+
+/**
+ * Die Faelle der Selbstpruefung fuer den Kalenderleser (FE11, E2, E3, E-E4, V4; Entwurf 3.5 und 7.3): erfundene Termine,
+ * je Fall array(Kennung, ICS-Text, Filter, Haken ics_jaehrlich, Soll). Soll = "von..bis Name" je Termin, mit "|"
+ * getrennt, leer = kein Termin. Beidseitig geeicht: gegen fer_ics_lesen() bis 1.2.27 sind K1-K5, K7 und V4c rot.
+ */
+function fer_ics_selbstfaelle()
+{
+    $v = function ($rumpf) {
+        return "BEGIN:VCALENDAR\r\nBEGIN:VEVENT\r\nUID:probe-g19-1\r\n" . $rumpf . "END:VEVENT\r\nEND:VCALENDAR\r\n";
+    };
+    return array(
+        array('K0', $v("DTSTART;VALUE=DATE:20260803\r\nDTEND;VALUE=DATE:20260806\r\nSUMMARY:Urlaub Probe\r\n"), '', false,
+              '2026-08-03..2026-08-05 Urlaub Probe'),
+        array('K1', $v("DTSTART;VALUE=DATE:20260810\r\nDTEND;VALUE=DATE:20260812\r\nSTATUS:CANCELLED\r\nSUMMARY:Urlaub abgesagt\r\n"),
+              '', false, ''),
+        array('K2', $v("DTSTART;VALUE=DATE:20260817\r\nDTEND;VALUE=DATE:20260819\r\nBEGIN:VALARM\r\nACTION:DISPLAY\r\n"
+              . "SUMMARY:Erinnerung Koffer packen\r\nTRIGGER:-P1D\r\nEND:VALARM\r\nSUMMARY:Urlaub Ostsee\r\n"), '', false,
+              '2026-08-17..2026-08-18 Urlaub Ostsee'),
+        array('K2f', $v("DTSTART;VALUE=DATE:20260817\r\nDTEND;VALUE=DATE:20260819\r\nBEGIN:VALARM\r\nACTION:DISPLAY\r\n"
+              . "SUMMARY:Erinnerung Koffer packen\r\nTRIGGER:-P1D\r\nEND:VALARM\r\nSUMMARY:Urlaub Ostsee\r\n"), 'Urlaub', false,
+              '2026-08-17..2026-08-18 Urlaub Ostsee'),
+        array('K3', $v("DTSTART:20260824\r\nDTEND:20260825\r\nSUMMARY:Brueckentag frei\r\n"), '', false,
+              '2026-08-24..2026-08-24 Brueckentag frei'),
+        array('K4', $v("DTSTART;VALUE=DATE:20260901\r\nDTEND;VALUE=DATE:20260903\r\nSUMMARY:Ausflug\r\n"
+              . "DESCRIPTION:kein Serientermin (rrule) - nur einmal\r\n"), '', false, '2026-09-01..2026-09-02 Ausflug'),
+        array('K5', $v("DTSTART;VALUE=DATE-TIME:20260907T140000\r\nDTEND;VALUE=DATE-TIME:20260907T150000\r\nSUMMARY:Zahnarzt\r\n"),
+              '', false, ''),
+        array('K6', $v("DTSTART;VALUE=DATE:20261224\r\nDTEND;VALUE=DATE:20261225\r\nRRULE:FREQ=YEARLY\r\nSUMMARY:Betriebsruhe\r\n"),
+              '', false, ''),
+        array('K7', $v("DTSTART;VALUE=DATE:20261005\r\nDURATION:P5D\r\nSUMMARY:Herbsturlaub\r\n"), '', false,
+              '2026-10-05..2026-10-09 Herbsturlaub'),
+        array('K7b', $v("DTSTART;VALUE=DATE:20261102\r\nDURATION:P1W\r\nSUMMARY:Kur\r\n"), '', false,
+              '2026-11-02..2026-11-08 Kur'),
+        array('V4a', $v("DTSTART;VALUE=DATE:19600312\r\nDTEND;VALUE=DATE:19600313\r\nRRULE:FREQ=YEARLY\r\nSUMMARY:Geburtstag Oma\r\n"),
+              '', true, ''),
+        array('V4b', $v("DTSTART;VALUE=DATE:19600312\r\nDTEND;VALUE=DATE:19600313\r\nRRULE:FREQ=YEARLY\r\nSUMMARY:Geburtstag Oma\r\n"),
+              'Betriebsruhe', true, ''),
+        array('V4c', $v("DTSTART;VALUE=DATE:20241224\r\nDTEND;VALUE=DATE:20241227\r\nRRULE:FREQ=YEARLY\r\nSUMMARY:Betriebsruhe Weihnachten\r\n"),
+              'Betriebsruhe', true,
+              '2025-12-24..2025-12-26 Betriebsruhe Weihnachten|2026-12-24..2026-12-26 Betriebsruhe Weihnachten'),
+        array('V4d', $v("DTSTART;VALUE=DATE:20201224\r\nDTEND;VALUE=DATE:20201225\r\nRRULE:FREQ=YEARLY;UNTIL=20241231\r\n"
+              . "SUMMARY:Betriebsruhe alt\r\n"), 'Betriebsruhe', true, ''),
+        array('V4e', $v("DTSTART;VALUE=DATE:20260704\r\nDTEND;VALUE=DATE:20260705\r\nRRULE:FREQ=YEARLY;BYMONTH=7;BYDAY=1SA\r\n"
+              . "SUMMARY:Betriebsruhe Sommerfest\r\n"), 'Betriebsruhe', true, ''),
+        array('V4f', $v("DTSTART;VALUE=DATE:20260930\r\nDTEND;VALUE=DATE:20261001\r\nRRULE:FREQ=YEARLY\r\nEXDATE;VALUE=DATE:20270930\r\n"
+              . "SUMMARY:Betriebsruhe Jubilaeum\r\n"), 'Betriebsruhe', true, '2026-09-30..2026-09-30 Betriebsruhe Jubilaeum'),
+    );
+}
+
+/** Rechnet die Faelle aus fer_ics_selbstfaelle() mit dem festen Tag 25.10.2026. Rueckgabe: Kennungen der Abweichungen. */
+function fer_ics_selbstpruefung()
+{
+    $fehl = array();
+    foreach (fer_ics_selbstfaelle() as $f) {
+        $ist = array();
+        foreach (fer_ics_lesen($f[1], $f[2], $f[3], '2026-10-25') as $t) {
+            $ist[] = $t['von'] . '..' . $t['bis'] . ' ' . $t['name'];
+        }
+        if (implode('|', $ist) !== $f[4]) { $fehl[] = $f[0]; }
+    }
+    return $fehl;
+}
+
+/* ---------- Anbieter haus/kalender/* (V1, Entscheidung 3; Entwurf 2.3-2.7) ----------
+ * Ab Werk aus (Haken haus_kalender_ein im Reiter MQTT, wirkt nur mit "Zustand per MQTT veroeffentlichen"). Nur Zahlen,
+ * nie Namen. Gesendet per kurzer TCP-Sitzung direkt an den Broker, nicht ueber den UDP-Eingang des Gateways: ein
+ * verlorenes Datagramm liesse einen retained Tageswert einen Tag falsch stehen, und das Abraeumen braucht das
+ * Ruecklesen ohnehin. Kein mosquitto_pub (kein Kennwort auf einer Befehlszeile), die Befehlsbruecke bleibt unveraendert.
+ * Fremde haus-Themen fasst diese Linie nie an; haus/tag/ bleibt den BLE-Tags vorbehalten. */
+
+/** Die eigenen Haus-Themen, Thema => retained (true) / fluechtig (false). Reihenfolge = Sendereihenfolge. EINE Liste
+ *  fuer Senden, Abraeumen, Reiter Test und Selbstpruefung. */
+function fer_haus_themen()
+{
+    $t = array('haus/kalender/datum' => true);
+    foreach (array('heute', 'morgen') as $tag) {
+        foreach (array('feiertag', 'ruhetag', 'frei', 'urlaub') as $w) {
+            $t['haus/kalender/' . $tag . '/' . $w] = true;
+        }
+    }
+    $t['haus/kalender/ferien_in'] = true;
+    $t['haus/kalender/ferien_rest'] = true;
+    $t['haus/kalender/feiertag_in'] = true;
+    $t['haus/kalender/zaehler'] = false;
+    return $t;
+}
+
+/** Die zwoelf retained Themen (ohne den Zaehler) - abgeraeumt werden nur diese. */
+function fer_haus_retained()
+{
+    return array_keys(array_filter(fer_haus_themen()));
+}
+
+/** Ist dieser Tagessatz ein gesetzlicher Feiertag im Sinne der Plugin-Einstellung? Ein halber nur, wenn er dort als
+ *  frei zaehlt (halbtag_frei); eigene Termine der Art "Feiertag" zaehlen mit. */
+function fer_haus_feiertag($tag, $cfg)
+{
+    if (empty($tag['feiertag'])) { return 0; }
+    if (!empty($tag['halbtag']) && empty($cfg['halbtag_frei'])) { return 0; }
+    return 1;
+}
+
+/**
+ * Die Werte der Haus-Themen aus dem Zustand (fer_state()) - Thema => ganze Zahl. ok = 1 (Daten der Quelle decken heute
+ * und morgen): volle Aussage. Sonst ist jede Zahl, die an der Quelle haengt, -1 ("ohne Aussage", Nr. 15); urlaub kommt
+ * aus eigenen Daten und bleibt 0/1 (E-E6). datum ist immer der Tag der Heute-Werte. ferien_in = FERIENIN (eigene
+ * Termine "Ferien"/"Urlaub" zaehlen mit, E-E7), ferien_rest = FERIENREST nur bei laufenden Ferien, feiertag_in =
+ * FEIERTAGIN.
+ */
+function fer_haus_werte($st, $cfg, $zaehler)
+{
+    $ok = !empty($st['ok']);
+    $w = array();
+    $w['haus/kalender/datum'] = (int) str_replace('-', '',
+        (string) (isset($st['heute']['datum']) ? $st['heute']['datum'] : date('Y-m-d')));
+    foreach (array('heute', 'morgen') as $tag) {
+        $s = (isset($st[$tag]) && is_array($st[$tag])) ? $st[$tag] : array();
+        $f = fer_haus_feiertag($s, $cfg);
+        $w['haus/kalender/' . $tag . '/feiertag'] = $ok ? $f : -1;
+        $w['haus/kalender/' . $tag . '/ruhetag'] = $ok
+            ? (($f || (isset($s['wochentag']) && (int) $s['wochentag'] === 7)) ? 1 : 0) : -1;
+        $w['haus/kalender/' . $tag . '/frei'] = $ok ? (!empty($s['schulfrei']) ? 1 : 0) : -1;
+        $w['haus/kalender/' . $tag . '/urlaub'] = !empty($s['urlaub']) ? 1 : 0;
+    }
+    $in = isset($st['naechste']['in']) ? (int) $st['naechste']['in'] : -1;
+    $w['haus/kalender/ferien_in'] = $ok ? $in : -1;
+    $w['haus/kalender/ferien_rest'] = $ok ? ($in === 0 ? (int) $st['naechste']['rest'] : 0) : -1;
+    $w['haus/kalender/feiertag_in'] = $ok
+        ? (isset($st['feiertag_naechster']['in']) ? (int) $st['feiertag_naechster']['in'] : -1) : -1;
+    $w['haus/kalender/zaehler'] = ((int) $zaehler >= 0 && (int) $zaehler <= 999) ? (int) $zaehler : 0;
+    return $w;
+}
+
+/** Was geht in diesem Lauf hinaus? Vollversand (ohne Merker, nach dem Einschalten, alle 30 min) oder nur Geaendertes;
+ *  zaehler immer. $merker = Thema => zuletzt erfolgreich gesendeter Wert. Rueckgabe Thema => array(Wert, retain). */
+function fer_haus_auswahl($werte, $merker, $voll)
+{
+    $th = fer_haus_themen();
+    $aus = array();
+    foreach ($werte as $t => $v) {
+        if (empty($th[$t])) { $aus[$t] = array((string) $v, false); continue; }
+        if ($voll || !is_array($merker) || !array_key_exists($t, $merker) || (string) $merker[$t] !== (string) $v) {
+            $aus[$t] = array((string) $v, true);
+        }
+    }
+    return $aus;
+}
+
+/**
+ * Eine kurze Sitzung am Broker (Entwurf 2.3, E-E13): Abschrift von awm_haus_sitzung() aus AWM-Abfuhr 1.4.26
+ * (vb_g18_aw_bau) ohne Fensterteil. CONNECT, PUBLISH der eigenen Haus-Themen, SUBSCRIBE der zurueckzulesenden,
+ * zurueckbehaltene Werte bis SUBACK + 1 s, DISCONNECT.
+ *   $senden  Thema => array(Wert, retain) - eine leere Nutzlast nur mit retain (Abraeumen), ein Thema mit # oder + nie
+ *   $rueck   genaue Themen (kein # und kein +), deren zurueckbehaltene Werte gelesen werden
+ * Rueckgabe array('lage' => ok | kein_broker | abgelehnt | zeit, 'werte' => Thema => Wert (nur retained PUBLISH,
+ * Kopfbyte & 1 = 1), 'gesendet' => n). MQTT 3.1.1 von Hand, QoS 0, saubere Sitzung, Client-Kennung 'ferhaus<pid>',
+ * Keepalive 10 s, Verbindungsaufbau und CONNACK je 2 s, SUBACK 3 s mit jedem Rueckgabebyte < 0x80. Zugang aus
+ * general.json (Mqtt.Brokerhost/-port/-user/-pass); das Kennwort steht nur im CONNECT-Paket, nie in einem Protokoll und
+ * nie auf einer Kommandozeile.
+ */
+function fer_haus_sitzung(array $senden, array $rueck = array())
+{
+    $aus = array('lage' => 'kein_broker', 'werte' => array(), 'gesendet' => 0);
+    $p = fer_paths();
+    if ($p['lbhome'] === '' || $p['general'] === '' || !is_file($p['general'])) { return $aus; }
+    $gen = json_decode((string) @file_get_contents($p['general']), true);
+    if (!is_array($gen)) { return $aus; }
+    $m = array();
+    if (isset($gen['Mqtt']) && is_array($gen['Mqtt'])) { $m = $gen['Mqtt']; }
+    elseif (isset($gen['mqtt']) && is_array($gen['mqtt'])) { $m = $gen['mqtt']; }
+    if (!$m) { return $aus; }
+    $hol = function ($gross, $klein) use ($m) {
+        if (isset($m[$gross]) && is_scalar($m[$gross])) { return (string) $m[$gross]; }
+        return (isset($m[$klein]) && is_scalar($m[$klein])) ? (string) $m[$klein] : '';
+    };
+    $host = trim($hol('Brokerhost', 'brokerhost'));
+    if ($host === '' || $host === 'localhost') { $host = '127.0.0.1'; }
+    $port = (int) $hol('Brokerport', 'brokerport');
+    if ($port <= 0 || $port > 65535) { $port = 1883; }
+    $benutzer = $hol('Brokeruser', 'brokeruser');
+    $kennwort = $hol('Brokerpass', 'brokerpass');
+
+    $s = @stream_socket_client('tcp://' . $host . ':' . $port, $errno, $errstr, 2);
+    if (!$s) { return $aus; }
+    stream_set_timeout($s, 2);
+    $aus['lage'] = 'zeit';
+
+    $zk = function ($t) { return pack('n', strlen($t)) . $t; };
+    $laenge = function ($n) {
+        $o = '';
+        do {
+            $b = $n % 128;
+            $n = intdiv($n, 128);
+            if ($n > 0) { $b |= 128; }
+            $o .= chr($b);
+        } while ($n > 0);
+        return $o;
+    };
+    $lies = function ($n) use ($s) {
+        $d = '';
+        while (strlen($d) < $n) {
+            $t = @fread($s, $n - strlen($d));
+            if ($t === false || $t === '') {
+                $meta = stream_get_meta_data($s);
+                if (!empty($meta['timed_out']) || !empty($meta['eof']) || feof($s)) { return null; }
+                continue;
+            }
+            $d .= $t;
+        }
+        return $d;
+    };
+    $paket = function () use ($lies) {
+        $k = $lies(1);
+        if ($k === null) { return null; }
+        $n = 0; $mult = 1;
+        for ($i = 0; $i < 4; $i++) {
+            $b = $lies(1);
+            if ($b === null) { return null; }
+            $n += (ord($b) & 127) * $mult;
+            $mult *= 128;
+            if (!(ord($b) & 128)) { break; }
+        }
+        $r = ($n > 0) ? $lies($n) : '';
+        return ($r === null) ? null : array(ord($k), $r);
+    };
+    /* Wartet, bis etwas zu lesen da ist - hoechstens bis $bis (microtime). Erst dann wird ein Paket gelesen: ein
+     * Zeitablauf mitten in einem Paket brachte den Leser sonst aus dem Tritt (Bauart awm_haus_sitzung()). */
+    $bereit = function ($bis) use ($s) {
+        $rest = $bis - microtime(true);
+        if ($rest <= 0) { return false; }
+        $r = array($s); $w = null; $x = null;
+        $n = @stream_select($r, $w, $x, (int) floor($rest), (int) (($rest - floor($rest)) * 1000000));
+        return $n !== false && $n > 0;
+    };
+    $ende_sitzung = function ($lage) use ($s, &$aus) {
+        $aus['lage'] = $lage;
+        @fwrite($s, chr(0xE0) . chr(0));
+        fclose($s);
+        return $aus;
+    };
+
+    $flags = 0x02;                                  // saubere Sitzung
+    $nutz = $zk('ferhaus' . getmypid());
+    if ($benutzer !== '') {
+        $flags |= 0x80;
+        if ($kennwort !== '') { $flags |= 0x40; }
+    }
+    $kopf = $zk('MQTT') . chr(4) . chr($flags) . pack('n', 10);
+    if ($benutzer !== '') {
+        $nutz .= $zk($benutzer);
+        if ($kennwort !== '') { $nutz .= $zk($kennwort); }
+    }
+    if (@fwrite($s, chr(0x10) . $laenge(strlen($kopf . $nutz)) . $kopf . $nutz) === false) {
+        fclose($s);
+        return $aus;
+    }
+    $ack = $bereit(microtime(true) + 2.0) ? $paket() : null;
+    if ($ack === null || ($ack[0] >> 4) !== 2 || strlen($ack[1]) < 2) { return $ende_sitzung('zeit'); }
+    if (ord($ack[1][1]) !== 0) { return $ende_sitzung('abgelehnt'); }
+
+    foreach ($senden as $t => $e) {
+        $e = array_values((array) $e);
+        $t = (string) $t;
+        $w = isset($e[0]) ? (string) $e[0] : '';
+        $r = !empty($e[1]);
+        if ($t === '' || strpbrk($t, "#+\0") !== false || ($w === '' && !$r)) { continue; }
+        $rumpf = $zk($t) . $w;
+        if (@fwrite($s, chr(0x30 | ($r ? 1 : 0)) . $laenge(strlen($rumpf)) . $rumpf) === false) {
+            return $ende_sitzung('zeit');
+        }
+        $aus['gesendet']++;
+    }
+
+    $soll = array();
+    foreach ($rueck as $t) {
+        $t = (string) $t;
+        if ($t !== '' && strpbrk($t, "#+\0") === false) { $soll[$t] = true; }
+    }
+    if ($soll) {
+        $verarbeiten = function ($pk) use (&$aus, $soll) {
+            if (strlen($pk[1]) < 2 || !($pk[0] & 1)) { return; }
+            $tl = unpack('n', substr($pk[1], 0, 2));
+            $t = substr($pk[1], 2, $tl[1]);
+            if (!isset($soll[$t])) { return; }
+            $versatz = 2 + $tl[1] + ((($pk[0] >> 1) & 3) > 0 ? 2 : 0);
+            $aus['werte'][$t] = (string) substr($pk[1], $versatz);
+        };
+        $sub = pack('n', 1);
+        foreach (array_keys($soll) as $t) { $sub .= $zk($t) . chr(0); }
+        if (@fwrite($s, chr(0x82) . $laenge(strlen($sub)) . $sub) === false) { return $ende_sitzung('zeit'); }
+        $bestaetigt = false;
+        $bis = microtime(true) + 3.0;
+        while (!$bestaetigt && $bereit($bis)) {
+            $pk = $paket();
+            if ($pk === null) { break; }
+            $art = $pk[0] >> 4;
+            if ($art === 9) {
+                /* Je Filter ein Rueckgabebyte; ab 0x80 abgelehnt (etwa durch eine ACL). */
+                $rc = (string) substr($pk[1], 2);
+                $nr = (strlen($pk[1]) >= 2) ? (int) unpack('n', substr($pk[1], 0, 2))[1] : 0;
+                if ($nr !== 1 || strlen($rc) !== count($soll)) { return $ende_sitzung('abgelehnt'); }
+                for ($i = 0; $i < strlen($rc); $i++) {
+                    if (ord($rc[$i]) >= 0x80) { return $ende_sitzung('abgelehnt'); }
+                }
+                $bestaetigt = true;
+            } elseif ($art === 3) {
+                $verarbeiten($pk);
+            }
+        }
+        if (!$bestaetigt) { return $ende_sitzung('zeit'); }
+        $bis = microtime(true) + 1.0;
+        while ($bereit($bis)) {
+            $pk = $paket();
+            if ($pk === null) { break; }
+            if (($pk[0] >> 4) === 3) { $verarbeiten($pk); }
+        }
+    }
+    return $ende_sitzung('ok');
+}
+
+/** Merker des Anbieters (Thema => zuletzt erfolgreich gesendeter Wert, Zeit des letzten Vollversands) und der letzten
+ *  Sitzung - im Zwischenordner (0600 ueber fer_json_schreiben()); postupgrade.sh und postinstall.sh raeumen sie mit. */
+function fer_haus_merker_datei()
+{
+    return fer_tmpdir() . '/haus_letzte.json';
+}
+
+function fer_haus_sitzung_datei()
+{
+    return fer_tmpdir() . '/haus_sitzung.json';
+}
+
+/** Den Merker "war Anbieter" (_haus_frueher) in der Konfiguration setzen oder entfernen - mit Zweitschrift. Unterstrich:
+ *  fer_sicherung_lesen() uebergeht ihn, fer_vorgaben() kennt ihn nicht. Rueckgabe true, wenn geschrieben wurde. */
+function fer_haus_frueher_setzen($ja)
+{
+    $p = fer_paths();
+    $c = fer_config();
+    if ((int) !empty($c['_haus_frueher']) === ($ja ? 1 : 0)) { return false; }
+    if ($ja) { $c['_haus_frueher'] = 1; } else { unset($c['_haus_frueher']); }
+    if (!fer_config_speichern($c)) { return false; }
+    fer_zweitschrift_ziehen($p['config'], $p['backup'], $c, array('aktionstoken'));
+    return true;
+}
+
+/**
+ * Anbieter haus/kalender/* im Minutenlauf (bin/cron.php nach dem MQTT-Block). Nur mit haus_kalender_ein = 1 UND
+ * mqtt_enabled = 1 UND einer erkannten LoxBerry-Wurzel; sonst wird der Merker verworfen (das Einschalten schickt dann
+ * den vollen Satz), und war diese Installation Anbieter (_haus_frueher), raeumt der Lauf hoechstens alle 10 Minuten die
+ * zwoelf retained Themen ab. Gesendet werden die geaenderten Themen, der volle Satz ohne Merker (erster Lauf, Neustart,
+ * Update, nach dem Einschalten) und alle 30 Minuten (heilt einen Broker ohne Persistenz), dazu in JEDER Sitzung
+ * haus/kalender/zaehler (nicht retained, derselbe Zaehler wie status/zaehler). Der Merker wird NUR nach einer Sitzung
+ * mit lage 'ok' fortgeschrieben. Rueckgabe: Ergebnis der Sitzung oder null.
+ */
+function fer_haus_lauf($st, $cfg)
+{
+    $p = fer_paths();
+    $mf = fer_haus_merker_datei();
+    if (empty($cfg['haus_kalender_ein']) || empty($cfg['mqtt_enabled']) || $p['lbhome'] === '') {
+        if (is_file($mf)) { @unlink($mf); }
+        if (!empty($cfg['_haus_frueher']) && $p['lbhome'] !== '') {
+            $vf = fer_tmpdir() . '/haus_leeren_versuch';
+            clearstatcache(true, $vf);
+            $alt = is_file($vf) ? (int) filemtime($vf) : 0;
+            if ($alt <= 0 || $alt > time() || time() - $alt >= 600) {
+                @touch($vf);
+                $e = fer_haus_leeren();
+                fer_log('Haus-Themen haus/kalender: Abraeumen im Minutenlauf - ' . $e['lage']
+                    . ($e['offen'] ? ' (' . implode(', ', $e['offen']) . ')' : '') . '.');
+                if (in_array($e['lage'], array('geleert', 'nichts'), true)) { fer_haus_frueher_setzen(false); }
+            }
+        }
+        return null;
+    }
+    $werte = fer_haus_werte($st, $cfg, fer_zaehler(false));
+    $vorher = null;
+    $voll_zeit = 0;
+    if (is_file($mf)) {
+        $d = json_decode((string) @file_get_contents($mf), true);
+        if (is_array($d) && isset($d['werte'], $d['voll']) && is_array($d['werte'])) {
+            $vorher = $d['werte'];
+            $voll_zeit = (int) $d['voll'];
+        }
+    }
+    $voll = ($vorher === null || $voll_zeit <= 0 || $voll_zeit > time() || time() - $voll_zeit > 1800);
+    $r = fer_haus_sitzung(fer_haus_auswahl($werte, $vorher, $voll));
+    if ($r['lage'] === 'ok') {
+        $merk = $werte;
+        unset($merk['haus/kalender/zaehler']);
+        fer_json_schreiben($mf, array('werte' => $merk, 'voll' => $voll ? time() : $voll_zeit, 'zeit' => time()));
+        if (empty($cfg['_haus_frueher'])) { fer_haus_frueher_setzen(true); }
+    }
+    fer_json_schreiben(fer_haus_sitzung_datei(), array('zeit' => time(), 'lage' => $r['lage'],
+        'gesendet' => (int) $r['gesendet'], 'voll' => $voll ? 1 : 0));
+    fer_log_if_changed('haus', $r['lage'] === 'ok' ? 'Haus-Themen haus/kalender: Sitzung am Broker ok'
+        : 'Haus-Themen haus/kalender: Broker nicht erreichbar (' . $r['lage'] . ') - naechster Versuch in einer Minute');
+    return $r;
+}
+
+/**
+ * Die zwoelf retained Themen abraeumen (Entwurf 2.6, Nr. 15): erst zuruecklesen; ist nichts belegt -> 'nichts'. Sonst
+ * PUBLISH mit Retain-Bit und LEERER Nutzlast fuer die belegten Themen und in derselben Sitzung zuruecklesen, bis zu drei
+ * Runden. Nur die eigenen Namen aus fer_haus_themen(), nie haus/#, nie fremde Themen. Rueckgabe array('lage' =>
+ * geleert | nichts | rest | kein_broker, 'offen' => belegte Themen, 'grund' => Lage der gescheiterten Sitzung).
+ */
+function fer_haus_leeren($runden = 3)
+{
+    $th = fer_haus_retained();
+    $belegt = function ($w) {
+        $o = array();
+        foreach ($w as $t => $v) { if ((string) $v !== '') { $o[] = $t; } }
+        return $o;
+    };
+    $r = fer_haus_sitzung(array(), $th);
+    if ($r['lage'] !== 'ok') { return array('lage' => 'kein_broker', 'offen' => array(), 'grund' => $r['lage']); }
+    $offen = $belegt($r['werte']);
+    if (!$offen) { return array('lage' => 'nichts', 'offen' => array(), 'grund' => ''); }
+    $lage = 'rest';
+    $grund = '';
+    for ($i = 1; $i <= max(1, (int) $runden); $i++) {
+        $senden = array();
+        foreach ($offen as $t) { $senden[$t] = array('', true); }
+        $r = fer_haus_sitzung($senden, $th);
+        if ($r['lage'] !== 'ok') { $lage = 'kein_broker'; $grund = $r['lage']; continue; }
+        $offen = $belegt($r['werte']);
+        if (!$offen) { return array('lage' => 'geleert', 'offen' => array(), 'grund' => ''); }
+        $lage = 'rest';
+    }
+    return array('lage' => $lage, 'offen' => $offen, 'grund' => $grund);
+}
+
+/**
+ * Folgen einer Aenderung von haus_kalender_ein/mqtt_enabled (Reiter MQTT, Zurueckspielen einer Sicherung): wird die
+ * Installation Anbieter, verfaellt der Merker (der naechste Minutenlauf schickt den vollen Satz); hoert sie auf, Anbieter
+ * zu sein, und war sie es (Haken und MQTT an) oder traegt sie _haus_frueher, raeumt sie die zwoelf Themen mit Ruecklesen
+ * ab. Rueckgabe array(Meldung oder '', 'ok'|'warn', neuer Merker _haus_frueher 0/1 oder null = unveraendert).
+ */
+function fer_haus_folgen($alt, $neu)
+{
+    $war = !empty($alt['haus_kalender_ein']) && !empty($alt['mqtt_enabled']);
+    $frueher = !empty($alt['_haus_frueher']);
+    $ist = !empty($neu['haus_kalender_ein']) && !empty($neu['mqtt_enabled']);
+    if ($ist) {
+        @unlink(fer_haus_merker_datei());
+        return array('', 'ok', null);
+    }
+    @unlink(fer_haus_merker_datei());
+    if (!$war && !$frueher) { return array('', 'ok', null); }
+    $e = fer_haus_leeren();
+    fer_log('Haus-Themen haus/kalender: Abraeumen ' . $e['lage']
+        . ($e['offen'] ? ' (' . implode(', ', $e['offen']) . ')' : '') . '.');
+    if ($e['lage'] === 'geleert') { return array(sprintf(fer_t('MQTT.HAUS_M_GELEERT'), count(fer_haus_retained())), 'ok', 0); }
+    if ($e['lage'] === 'nichts') { return array(fer_t('MQTT.HAUS_M_NICHTS'), 'ok', 0); }
+    if ($e['lage'] === 'rest') { return array(sprintf(fer_t('MQTT.HAUS_M_REST'), implode(', ', $e['offen'])), 'warn', 1); }
+    return array(fer_t('MQTT.HAUS_M_KEIN_BROKER'), 'warn', 1);
+}
+
+/** Deinstallation (cron.php --haus-leeren): nur, wenn diese Installation Anbieter ist oder war. Ausgabe fuer das
+ *  Installationsprotokoll; Rueckgabe immer 0 - die Deinstallation laeuft weiter. */
+function fer_haus_leeren_ausgabe()
+{
+    $cfg = fer_config();
+    if (empty($cfg['haus_kalender_ein']) && empty($cfg['_haus_frueher'])) {
+        echo "<INFO> haus/kalender: diese Installation war nie Anbieter - nichts zu leeren.\n";
+        return 0;
+    }
+    $e = fer_haus_leeren();
+    if ($e['lage'] === 'geleert') {
+        echo "<OK> haus/kalender: geleert (vom Broker bestaetigt, " . count(fer_haus_retained()) . " Themen).\n";
+    } elseif ($e['lage'] === 'nichts') {
+        echo "<INFO> haus/kalender: nichts zu leeren (der Broker haelt keines der Themen zurueck).\n";
+    } elseif ($e['lage'] === 'rest') {
+        echo "<WARNING> haus/kalender: noch zurueckbehalten - bitte von Hand leeren: " . implode(', ', $e['offen'])
+           . " (mosquitto_pub -r -n -t <thema>)\n";
+    } else {
+        echo "<WARNING> haus/kalender: der Broker war nicht erreichbar (" . $e['grund'] . ") - bitte von Hand leeren: "
+           . implode(', ', fer_haus_retained()) . "\n";
+    }
+    return 0;
+}
+
+/** Die Zeile "Haus-Themen haus/kalender" fuer den Reiter Test: array(Stand -1 grau/aus, 1 gruen/ok, 0 gelb/gescheitert,
+ *  Text). Aus haus_letzte.json und haus_sitzung.json; ohne Kennwort, ohne Namen. */
+function fer_haus_testzeile($cfg)
+{
+    if (empty($cfg['haus_kalender_ein'])) { return array(-1, fer_t('MQTT.HAUS_T_AUS')); }
+    if (empty($cfg['mqtt_enabled'])) { return array(-1, fer_t('MQTT.HAUS_T_MQTT_AUS')); }
+    $sz = json_decode((string) @file_get_contents(fer_haus_sitzung_datei()), true);
+    $mz = json_decode((string) @file_get_contents(fer_haus_merker_datei()), true);
+    if (!is_array($sz) || !isset($sz['lage'], $sz['zeit'])) { return array(0, fer_t('MQTT.HAUS_T_NIE')); }
+    $w = (is_array($mz) && isset($mz['werte']) && is_array($mz['werte'])) ? $mz['werte'] : array();
+    $g = function ($t) use ($w) { return isset($w[$t]) ? (string) $w[$t] : '-'; };
+    $txt = sprintf(fer_t('MQTT.HAUS_T_AN'),
+        (is_array($mz) && isset($mz['zeit'])) ? date('d.m.Y H:i:s', (int) $mz['zeit']) : '-',
+        $g('haus/kalender/datum'), $g('haus/kalender/heute/frei'), $g('haus/kalender/morgen/frei'),
+        date('H:i:s', (int) $sz['zeit']), (string) $sz['lage']);
+    return array($sz['lage'] === 'ok' && time() - (int) $sz['zeit'] <= 150 ? 1 : 0, $txt);
 }

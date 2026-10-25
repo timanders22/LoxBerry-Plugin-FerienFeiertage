@@ -17,11 +17,18 @@
 # Aenderungszeit auf (ein Anhaengen ohne Inhalt tut das nicht), ab 256 kB
 # bleiben die letzten 300 Zeilen. Der Reiter Logdateien zeigt die Datei,
 # sobald etwas darin steht.
+#
+# Gruppe 19 (1.2.28, FE12; Bauform Dashboard 0.9.38 / Abfahrts-Assistent 1.6.31 F3): scheitert touch -
+# Protokollordner root-eigen, RAM-Scheibe voll -, laeuft cron.php trotzdem, nur ohne cron.err. Bis 1.2.27 scheiterte
+# dann schon die Umlenkung "2>>", und cron.php lief gar nicht.
 ERR="REPLACELBPLOGDIR/cron.err"
 mkdir -p "REPLACELBPLOGDIR" 2>/dev/null
-touch "$ERR" 2>/dev/null
-if [ -f "$ERR" ] && [ "$(wc -c < "$ERR" 2>/dev/null || echo 0)" -gt 262144 ]; then
-    tail -n 300 "$ERR" > "$ERR.neu" 2>/dev/null && mv -f "$ERR.neu" "$ERR"
+if touch "$ERR" 2>/dev/null; then
+    if [ "$(stat -c %s "$ERR" 2>/dev/null || echo 0)" -gt 262144 ]; then
+        tail -n 300 "$ERR" > "$ERR.neu" 2>/dev/null && mv -f "$ERR.neu" "$ERR"
+    fi
+    php "REPLACELBPBINDIR/cron.php" >/dev/null 2>>"$ERR"
+else
+    php "REPLACELBPBINDIR/cron.php" >/dev/null 2>&1
 fi
-php "REPLACELBPBINDIR/cron.php" >/dev/null 2>>"$ERR"
 exit 0

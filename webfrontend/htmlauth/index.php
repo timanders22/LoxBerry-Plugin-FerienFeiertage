@@ -13,74 +13,39 @@
 error_reporting(E_ALL & ~E_DEPRECATED & ~E_NOTICE);
 ini_set('display_errors', '1');
 
-/* Den LoxBerry-Wurzelordner ohne festen Systempfad bestimmen.
- *
- * Vom eigenen Ablageort aufwaerts, bis ein Verzeichnis gefunden ist, das
- * config/plugins UND webfrontend enthaelt. Das trifft die uebliche
- * Installation genauso wie eine an einem anderen Ort - und es trifft auch
- * den Fall, dass das Plugin noch als entpacktes Archiv daliegt (dann findet
- * es nichts und gibt einen Leerstring zurueck, was der Aufrufer ohnehin
- * abfangen muss).
- *
- * DIESER BLOCK STAND BIS 1.1.7 WEIT UNTEN, UND DAS WAR EIN FEHLER.
- *
- * Aufgerufen wurde die Funktion in der Zeile unmittelbar hinter diesem
- * Kommentar, definiert war sie erst zweihundert Zeilen spaeter - und zwar
- * BEDINGT, in einem if. PHP zieht bedingt definierte Funktionen nicht nach
- * vorn. Ohne gesetztes LBHOMEDIR endete die Seite deshalb mit
- * "Call to undefined function lb_wurzel_ermitteln()", und es erschien gar
- * nichts. Betroffen war genau der Fall, den der Kommentar abdecken will.
- * Gemessen am 18.08.2026 mit PHP 7.4.33, mit Kontrollfall: mit LBHOMEDIR
- * laeuft die Seite, ohne stirbt sie in dieser Zeile.
- *
- * Der Name traegt kein Plugin-Kuerzel und ist deshalb abgesichert: zwei
- * Bibliotheken landen nie im selben Prozess, aber die Pruefung kostet nichts.
- */
-if (!function_exists('lb_wurzel_ermitteln')) {
-    function lb_wurzel_ermitteln()
-    {
-        $d = __DIR__;
-        for ($i = 0; $i < 8; $i++) {
-            if (is_dir($d . '/config/plugins') && is_dir($d . '/webfrontend')) {
-                return $d;
-            }
-            $eltern = dirname($d);
-            if ($eltern === $d) { break; }
-            $d = $eltern;
-        }
-        return '';
-    }
+/* Pfade - EINE Quelle fuer Oberflaeche und Bibliothek (Gruppe 19, 1.2.28, FE2 b / N3; Bauart Abfahrts-Assistent seit
+ * 1.6.13). Bis 1.2.27 definierte diese Seite eine eigene lb_wurzel_ermitteln() (ohne data/plugins und general.json)
+ * VOR dem Laden der Bibliothek - wegen function_exists() gewann die schwache Fassung, und die strenge Wurzelpruefung der
+ * Bibliothek wirkte hier nicht. Jetzt: die Bibliothek suchen (installiert unter html/plugins/<ordner>/, im Archiv neben
+ * htmlauth/), laden, dann alle Pfade aus fer_paths(); das SDK (loxberry_system.php, loxberry_web.php) danach mit der
+ * Wurzel aus fer_paths(). Den Fall "Bibliothek fehlt" faengt der Block weiter unten mit einem lesbaren Satz ab. */
+$fe_lib_kand = array(
+    dirname(dirname(dirname(__DIR__))) . '/html/plugins/' . basename(__DIR__) . '/ferien_lib.php',
+    dirname(__DIR__) . '/html/ferien_lib.php',
+);
+foreach ($fe_lib_kand as $fe_cand) {
+    if (is_file($fe_cand)) { require_once $fe_cand; break; }
 }
-
-$fe_lbhome = getenv('LBHOMEDIR') ?: lb_wurzel_ermitteln();
-$fe_plugin = getenv('LBPPLUGINDIR') ?: basename(__DIR__);
-if ($fe_lbhome && is_dir($fe_lbhome . '/config/plugins/' . $fe_plugin) === false) {
-    $fe_plugin = basename(dirname(__DIR__));
-    if (is_dir($fe_lbhome . '/config/plugins/' . $fe_plugin) === false) {
-        $fe_plugin = 'ferien';
-    }
+$fe_lbhome = '';
+$fe_plugin = 'ferien';
+$fe_cfgfile = dirname(dirname(__DIR__)) . '/config/ferien.json';
+$fe_bkfile = dirname(dirname(__DIR__)) . '/config/ferien.backup.json';
+$fe_logfile = sys_get_temp_dir() . '/ferien-archiv/log/ferien.log';
+if (function_exists('fer_paths')) {
+    $fe_p = fer_paths();
+    $fe_lbhome = $fe_p['lbhome'];
+    $fe_plugin = $fe_p['plugin'];
+    $fe_cfgfile = $fe_p['config'];
+    $fe_bkfile = $fe_p['backup'];
+    $fe_logfile = $fe_p['log'];
 }
-if ($fe_lbhome) {
+$fe_cfgdir = dirname($fe_cfgfile);
+if ($fe_lbhome !== '') {
     $fe_sdk = $fe_lbhome . '/libs/phplib/loxberry_system.php';
     if (file_exists($fe_sdk)) {
         require_once $fe_sdk;
         require_once $fe_lbhome . '/libs/phplib/loxberry_web.php';
     }
-    $fe_cfgdir = $fe_lbhome . '/config/plugins/' . $fe_plugin;
-    $fe_bkfile = $fe_lbhome . '/config/plugins/' . $fe_plugin . '.backup.json';
-    $fe_logfile = $fe_lbhome . '/log/plugins/' . $fe_plugin . '/ferien.log';
-} else {
-    $fe_cfgdir = dirname(dirname(__DIR__)) . '/config';
-    $fe_bkfile = $fe_cfgdir . '/ferien.backup.json';
-    $fe_logfile = sys_get_temp_dir() . '/ferien/ferien.log';
-}
-$fe_cfgfile = $fe_cfgdir . '/ferien.json';
-
-foreach (array(
-    dirname(dirname(dirname(__DIR__))) . '/html/plugins/' . $fe_plugin . '/ferien_lib.php',
-    dirname(__DIR__) . '/html/ferien_lib.php',
-) as $fe_cand) {
-    if (is_file($fe_cand)) { require_once $fe_cand; break; }
 }
 
 /* ==================================================================
@@ -117,10 +82,7 @@ if (!function_exists('fer_config')) {
     echo '<h2>Ferien und Feiertage</h2>'
        . '<p><b>Die Programmbibliothek <code>ferien_lib.php</code> wurde nicht gefunden.</b></p>'
        . '<p>Gesucht wurde in:</p><ul>';
-    foreach (array(
-        dirname(dirname(dirname(__DIR__))) . '/html/plugins/' . $fe_plugin . '/ferien_lib.php',
-        dirname(__DIR__) . '/html/ferien_lib.php',
-    ) as $fe_cand) {
+    foreach ($fe_lib_kand as $fe_cand) {
         echo '<li><code>' . htmlspecialchars($fe_cand, ENT_QUOTES, 'UTF-8') . '</code></li>';
     }
     echo '</ul><p>Das Plugin ist damit nicht arbeitsfaehig. Bitte neu installieren; '
@@ -239,7 +201,7 @@ function fe_x2_felder($form)
             foreach (array('own_name', 'own_von', 'own_bis', 'own_typ') as $o) { $f[] = $o . '.' . $i; }
         }
         $h = array('school', 'public', 'local_holidays', 'bridge', 'typ_streng', 'halbtag_frei',
-                   'notify_audio', 'notify_push', 'n_freetag', 'n_ferienstart', 'n_bridge');
+                   'notify_audio', 'notify_push', 'n_freetag', 'n_ferienstart', 'n_bridge', 'ics_jaehrlich');
         /* Nr. 36 b, Stufe 2: die Felder der Sprachausgabe nennt das Modul
          * (ansage_x2_felder(), ohne die Sprechtoken); die Loeschhaken sind Haken. */
         foreach (ansage_x2_felder() as $fe_xn) {
@@ -251,8 +213,13 @@ function fe_x2_felder($form)
         return array($f, $h, array('tts_alexa_token', 'tts_google_token'));
     }
     if ($form === 'mqtt_save') {
-        /* Gruppe 1 (1.2.27): dazu der Haken "Befehle ueber MQTT annehmen" (Befehlsbruecke). */
-        return array(array('mqtt_topic'), array('mqtt_enabled', 'befehle_mqtt_ein'));
+        /* Gruppe 1 (1.2.27): dazu der Haken "Befehle ueber MQTT annehmen" (Befehlsbruecke); Gruppe 19 (1.2.28, V1):
+         * "Kalendertage an andere Plugins geben". */
+        return array(array('mqtt_topic'), array('mqtt_enabled', 'befehle_mqtt_ein', 'haus_kalender_ein'));
+    }
+    if ($form === 'endpunkt_save') {
+        /* Gruppe 19 (1.2.28, Entwurf 3.2): "HTTP-Weg fuer Loxone annehmen" (Reiter Einbindung). */
+        return array(array(), array('endpunkt_ein'));
     }
     return array(array(), array());
 }
@@ -315,6 +282,19 @@ function fe_x2zahl($feld, $wert)
     global $fe_x2;
     if (is_array($fe_x2) && array_key_exists($feld, $fe_x2['werte'])) { return fe_e($fe_x2['werte'][$feld]); }
     return (string) (int) $wert;
+}
+
+/* Gruppe 19 (1.2.28, V1, Entwurf 2.6): Folgen einer Aenderung von haus_kalender_ein/mqtt_enabled - nach dem Speichern
+ * (Reiter MQTT, Zurueckspielen einer Sicherung). fer_haus_folgen() raeumt die zwoelf Themen haus/kalender ab, wenn diese
+ * Installation aufhoert, Anbieter zu sein (und es war oder den Merker traegt); der Merker _haus_frueher bleibt bei 'rest'
+ * oder 'kein_broker' stehen - dann raeumen der Minutenlauf und die Deinstallation noch einmal. */
+function fe_haus_folgen($alt, $neu)
+{
+    global $fe_hinweise;
+    if (!function_exists('fer_haus_folgen')) { return; }
+    list($fe_hm, , $fe_hf) = fer_haus_folgen($alt, $neu);
+    if ($fe_hm !== '') { $fe_hinweise[] = $fe_hm; }
+    if ($fe_hf !== null) { fer_haus_frueher_setzen($fe_hf === 1); }
 }
 
 /** Der Wochentag in der Sprache der Oberflaeche (O5) - nicht date('D'). */
@@ -411,6 +391,18 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['vorlage_befehle']) &&
     $fe_err = sprintf(fer_t('BEFEHL.NICHT_LADBAR'), $fe_vb_grund);
     $fe_tab = 'tab-loxone';
 }
+/* Gruppe 19 (1.2.28, N2/E-E8): die lesenden Ansichten Zeile, JSON und Debug ueber die Oberflaeche - hinter der
+   LoxBerry-Anmeldung und unabhaengig vom Haken "HTTP-Weg fuer Loxone annehmen" (ferien.php antwortet ohne ihn mit
+   403). Weissliste, vor lbheader wie die Downloads; dieselbe Ausgabe wie ferien.php (fer_ansicht()). */
+if ($_SERVER['REQUEST_METHOD'] === 'GET' && isset($_GET['ansicht']) && is_string($_GET['ansicht'])
+    && in_array($_GET['ansicht'], array('zeile', 'json', 'debug'), true) && function_exists('fer_ansicht')) {
+    list($fe_ac, $fe_atyp, $fe_atext) = fer_ansicht($_GET['ansicht']);
+    http_response_code($fe_ac);
+    header('Content-Type: ' . $fe_atyp);
+    header('Cache-Control: no-store');
+    echo $fe_atext;
+    exit;
+}
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['vorlage']) && function_exists('fer_vorlage')) {
     list($fe_vname, $fe_vinhalt) = fer_vorlage();
     header('Content-Type: application/x-download');
@@ -459,6 +451,33 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['fetchnow']) && functi
     list($fe_ok, $fe_q) = fer_fetch(true);
     fer_state(true);
     list($fe_note_art, $fe_note) = fe_abruf_meldung($fe_ok, $fe_q);
+    /* Gruppe 19 (1.2.28, N2): "Neu abrufen" im Reiter Test ist derselbe Vorgang (bis 1.2.27 ein Verweis auf
+     * ferien.php?refresh=1&debug=1 mit Token) - danach der Verweis auf die Debug-Ansicht. */
+    if ($fe_tab === 'tab-test') { $fe_hinweise[] = fer_t('MELD.ABRUF_DEBUG'); }
+}
+
+/* Gruppe 19 (1.2.28, N2/E-E8): Test-Push aus dem Reiter Test als POST - dieselbe Stelle wie ferien.php?ptest=1 und die
+ * Befehlsbruecke (fer_befehl_testpush()), ohne Token, unabhaengig vom Haken "HTTP-Weg fuer Loxone annehmen". */
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['testpush']) && function_exists('fer_befehl_testpush')) {
+    $fe_tp = fer_befehl_testpush('oberflaeche');
+    $fe_note_art = $fe_tp['ok'] ? 'ok' : 'err';
+    $fe_note = $fe_tp['ok'] ? fer_t('MELD.PTEST_OK') : fer_t('MELD.PTEST_FEHL');
+    $fe_tab = 'tab-test';
+}
+
+/* Gruppe 19 (1.2.28, Entscheidung 2, Entwurf 3.2): "HTTP-Weg fuer Loxone annehmen" - eigenes kleines Formular im
+ * Abschnitt "Bisherige Anlagen (HTTP)" des Reiters Einbindung. */
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['endpunkt_save'])) {
+    $fe_new = fer_config();
+    $fe_new['endpunkt_ein'] = isset($_POST['endpunkt_ein']) ? 1 : 0;
+    if (fer_config_speichern($fe_new)) {
+        $fe_saved = true;
+        fe_zweitschrift($fe_cfgfile, $fe_bkfile, $fe_new);
+        $fe_hinweise[] = fer_t($fe_new['endpunkt_ein'] ? 'MELD.EP_EIN' : 'MELD.EP_AUS');
+    } else {
+        $fe_err = sprintf(fer_t('MELD.SPEICHERN_FEHL'), $fe_cfgfile);
+    }
+    $fe_tab = 'tab-loxone';
 }
 
 /* Ferien-a1 (Verbesserungsbau 01.10.2026): Probe gegen die Quelle (DE-BY).
@@ -517,6 +536,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['mqtt_save'])) {
      * MQTT-Formular (Regeln/07 Abschnitt 7). Die Bruecke startet bzw. endet sofort beim Speichern
      * (fer_bruecke_schalten() weiter unten), sonst ueber den Waechter in bin/cron.php; eine laufende Bruecke liest die Einstellungen spaetestens alle 30 s. */
     $fe_new['befehle_mqtt_ein'] = isset($_POST['befehle_mqtt_ein']) ? 1 : 0;
+    /* Gruppe 19 (1.2.28, V1): "Kalendertage an andere Plugins geben (haus/kalender/...)", ab Werk aus. */
+    $fe_mqtt_alt = $fe_new;
+    $fe_new['haus_kalender_ein'] = isset($_POST['haus_kalender_ein']) ? 1 : 0;
     /* O2 (1.2.16): abweisen statt verbiegen. Bis 1.2.15 wurde "ferien/kueche"
      * still zu "ferien/kche", "ferien test" zu "ferientest" und "haus/ferien/#"
      * zu "haus/ferien/" - und alle Themen wanderten ohne ein Wort. Ein leeres
@@ -563,6 +585,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['mqtt_save'])) {
                 $fe_fehler[] = sprintf(fer_t('BEFEHL.M_STOP_FEHL'), $fe_baus);
             }
         }
+        /* Gruppe 19 (1.2.28, V1): Haken an -> der naechste Minutenlauf schickt den vollen Satz; Haken oder MQTT aus ->
+         * die zwoelf Themen haus/kalender abraeumen (mit Ruecklesen), nur als (ehemaliger) Anbieter. */
+        fe_haus_folgen($fe_mqtt_alt, $fe_new);
     } else {
         $fe_err = sprintf(fer_t('MELD.SPEICHERN_FEHL'), $fe_cfgfile);
     }
@@ -646,6 +671,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['save'])) {
     }
     $fe_new['ics_typ'] = $fe_pruef('ics_typ', $fe_post('ics_typ', 'urlaub'), $fe_alt('ics_typ', 'urlaub'), fer_t('T12.ICS_TYP'));
     $fe_new['ics_filter'] = $fe_pruef('ics_filter', $fe_post('ics_filter', ''), $fe_alt('ics_filter', ''), fer_t('T12.ICS_FILTER'));
+    /* Gruppe 19 (1.2.28, V4 Option E): jaehrliche Ganztagstermine nur mit Filterwort - mit leerem Filter wird gespeichert,
+     * der Haken wirkt aber nicht (gelbe Meldung). */
+    $fe_new['ics_jaehrlich'] = isset($_POST['ics_jaehrlich']) ? 1 : 0;
     $fe_new['urlaub_vorlauf'] = $fe_pruef('urlaub_vorlauf', $fe_post('urlaub_vorlauf', '1'), $fe_alt('urlaub_vorlauf', 1),
         fer_t('T12.VORLAUF'));
     // MQTT wohnt seit 1.1.5 im eigenen Reiter mit eigenem Formular - hier
@@ -654,6 +682,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['save'])) {
     $fe_new['mqtt_topic'] = isset($fe_vorher['mqtt_topic']) && $fe_vorher['mqtt_topic'] !== '' ? $fe_vorher['mqtt_topic'] : 'ferien';
     /* Gruppe 1 (1.2.27): ebenso der Haken der Befehlsbruecke - sonst schaltete "Speichern" sie still ab. */
     $fe_new['befehle_mqtt_ein'] = isset($fe_vorher['befehle_mqtt_ein']) ? (int) $fe_vorher['befehle_mqtt_ein'] : 0;
+    /* Gruppe 19 (1.2.28): ebenso die Haken anderer Reiter und der Merker "war Anbieter" - $fe_new entsteht hier neu. Ohne
+     * endpunkt_ein stuende der Schluessel nicht in der Datei, und die Lese-Regel schaltete den HTTP-Weg einer
+     * Neuinstallation still ein. */
+    $fe_new['endpunkt_ein'] = isset($fe_vorher['endpunkt_ein']) ? (int) $fe_vorher['endpunkt_ein'] : 0;
+    $fe_new['haus_kalender_ein'] = isset($fe_vorher['haus_kalender_ein']) ? (int) $fe_vorher['haus_kalender_ein'] : 0;
+    if (!empty($fe_vorher['_haus_frueher'])) { $fe_new['_haus_frueher'] = 1; }
     // Dasselbe gilt fuer das Aktionstoken (ab 1.1.7). $fe_new wird hier von
     // Grund auf neu gebaut - genau daran gingen am 13.08.2026 in drei anderen
     // Linien die Token verloren, und mit ihnen alle Adressen in Loxone.
@@ -746,6 +780,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['save'])) {
     } elseif (fer_config_speichern($fe_new)) {
         $fe_saved = true;
         fe_zweitschrift($fe_cfgfile, $fe_bkfile, $fe_new);
+        /* Gruppe 19 (1.2.28, V4): gespeichert, aber ohne Filterwort wirkt der Haken nicht - gelbe Meldung. */
+        if (!empty($fe_new['ics_jaehrlich']) && trim((string) $fe_new['ics_filter']) === '') {
+            $fe_hinweise[] = fer_t('MELD.ICS_JAEHRLICH_OHNE');
+        }
         // Zwischenspeicher raeumen - und zwar den RICHTIGEN.
         //
         // Bis 1.0.1 stand hier zweimal ein fester Pfad unter /tmp/ferien/.
@@ -781,7 +819,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['save'])) {
                                   'locality', 'local_holidays');
         // Kalender: aendert sich die Adresse oder der Filter, ist der
         // zwischengespeicherte Stand nicht mehr der gemeinte.
-        foreach (array('ics_url', 'ics_filter') as $fe_if) {
+        foreach (array('ics_url', 'ics_filter', 'ics_jaehrlich') as $fe_if) {
             $fe_a = isset($fe_vorher[$fe_if]) ? (string) $fe_vorher[$fe_if] : '';
             if ($fe_a !== (string) $fe_new[$fe_if] && function_exists('fer_datadir')) {
                 @unlink(fer_datadir() . '/kalender.json');
@@ -820,6 +858,7 @@ if (!is_array($fe_cfg)) { $fe_cfg = array(); }
 $fe_cfg += array('country' => 'DE', 'subdivision' => 'DE-BY', 'lang' => 'DE', 'school' => 1, 'public' => 1,
     'locality' => '', 'local_holidays' => 0, 'bridge' => 1, 'own' => array(), 'mqtt_enabled' => 1, 'mqtt_topic' => 'ferien',
     'befehle_mqtt_ein' => 0,      // Gruppe 1 (1.2.27): wie fer_vorgaben() - MQTT ab Werk ein (E4), Befehle aus
+    'endpunkt_ein' => 0, 'haus_kalender_ein' => 0, 'ics_jaehrlich' => 0,     // Gruppe 19 (1.2.28): wie fer_vorgaben()
     'notify' => array(), 'tts' => array(), 'aktionstoken' => '',
     'subdivision2' => '', 'group' => '', 'bridge_mode' => 'klassisch', 'bridge_luecke' => 4,
     'typ_streng' => 0, 'halbtag_frei' => 1, 'ics_url' => '', 'ics_typ' => 'urlaub',
@@ -936,8 +975,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['fer_zurueck'])) {
     } elseif ((int) $_FILES['fer_sicherung']['size'] > 262144) {
         $fe_err = fer_t('TEXT.SICH_ZU_GROSS');
     } else {
+        $fe_rueck_alt = fer_config();
         $fer_erg = fer_sicherung_lesen(
-            (string) @file_get_contents($_FILES['fer_sicherung']['tmp_name']), fer_config());
+            (string) @file_get_contents($_FILES['fer_sicherung']['tmp_name']), $fe_rueck_alt);
         $fer_neu = $fer_erg[0];
         $fer_fehler = $fer_erg[1];
         $fer_n = $fer_erg[2];
@@ -970,6 +1010,21 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['fer_zurueck'])) {
                 $fe_hinweise = array_merge($fe_hinweise, $fer_hin);
                 @unlink(fer_tmpdir() . '/state.json');
                 @unlink(fer_tmpdir() . '/mqtt_sig.txt');
+                /* Gruppe 19 (1.2.28, FE3, Entscheidung 1 "nur fer_bruecke_schalten()"): die Bruecke sofort schalten wie
+                 * beim Speichern im Reiter MQTT - bis 1.2.27 erst der Waechter (<= 60 s, nach einem Start bis 600 s). */
+                list($fer_brc, $fer_bart, $fer_baus) = fer_bruecke_schalten($fer_neu);
+                if ($fer_bart === 'start' && $fer_brc === 0) {
+                    $fe_hinweise[] = fer_t('BEFEHL.M_EIN') . ' ' . $fer_baus;
+                } elseif ($fer_bart === 'start') {
+                    $fe_fehler[] = sprintf(fer_t('BEFEHL.M_START_FEHL'), $fer_baus);
+                } elseif ($fer_bart === 'stop' && $fer_brc === 0) {
+                    $fe_hinweise[] = fer_t('BEFEHL.M_AUS');
+                } elseif ($fer_bart === 'stop') {
+                    $fe_fehler[] = sprintf(fer_t('BEFEHL.M_STOP_FEHL'), $fer_baus);
+                }
+                /* V1 (Entwurf 2.6 c): schaltet die Sicherung haus_kalender_ein oder MQTT aus, raeumt eine (ehemalige)
+                 * Anbieter-Installation die Themen haus/kalender ab. Der alte Stand traegt den Merker _haus_frueher. */
+                fe_haus_folgen($fe_rueck_alt, $fer_neu);
             } else {
                 $fe_err = fer_t('TEXT.SICH_NICHT_ANGEKOMMEN');
             }
@@ -1024,7 +1079,7 @@ if (is_array($fe_x2)) {
                        'bridge_luecke', 'urlaub_vorlauf', 'ics_url', 'ics_typ', 'ics_filter') as $fe_xk) {
             if (isset($fe_xw[$fe_xk])) { $fe_anz[$fe_xk] = $fe_xw[$fe_xk]; }
         }
-        foreach (array('school', 'public', 'local_holidays', 'bridge', 'typ_streng', 'halbtag_frei') as $fe_xk) {
+        foreach (array('school', 'public', 'local_holidays', 'bridge', 'typ_streng', 'halbtag_frei', 'ics_jaehrlich') as $fe_xk) {
             if (isset($fe_xw[$fe_xk])) { $fe_anz[$fe_xk] = (int) $fe_xw[$fe_xk]; }
         }
         foreach (array('notify_time' => 'time') as $fe_xk => $fe_xz) {
@@ -1047,10 +1102,12 @@ if (is_array($fe_x2)) {
         if (isset($fe_xw['mqtt_topic'])) { $fe_anz['mqtt_topic'] = $fe_xw['mqtt_topic']; }
         if (isset($fe_xw['mqtt_enabled'])) { $fe_anz['mqtt_enabled'] = (int) $fe_xw['mqtt_enabled']; }
         if (isset($fe_xw['befehle_mqtt_ein'])) { $fe_anz['befehle_mqtt_ein'] = (int) $fe_xw['befehle_mqtt_ein']; }
+        if (isset($fe_xw['haus_kalender_ein'])) { $fe_anz['haus_kalender_ein'] = (int) $fe_xw['haus_kalender_ein']; }
     }
 }
 
-if ($fe_frame) { LBWeb::lbheader('Ferien und Feiertage', 'https://wiki.loxberry.de/', 'help.html'); }
+/* Gruppe 19 (1.2.28, E5): der Hilfelink zeigt auf die eigene Wiki-Seite (seit 01.10.2026), nicht auf die Startseite. */
+if ($fe_frame) { LBWeb::lbheader('Ferien und Feiertage', 'https://wiki.loxberry.de/plugins/ferienfeiertage/start', 'help.html'); }
 
 ?>
 <style>
@@ -1279,8 +1336,8 @@ $fe_k_alter = isset($fe_st['alter_tage']) ? (int) $fe_st['alter_tage'] : -1; ?>
 <!-- ================= <?php echo fer_t('TEXT.EINSTELLUNGEN'); ?> ================= -->
 <div class="sm-pane<?= fe_aktiv('tab-settings') ?>" id="tab-settings">
 <div class="sm-hinweis"><?php echo fer_t('TEXT.WAS_IST_DAS'); ?></div>
+<?php /* Gruppe 19 (1.2.28, N4/E-E10): "Jetzt abrufen" ist orange - im Reiter kommt kein grauer Knopf mehr vor (Regeln/04). */ ?>
 <div class="sm-legende">
-<span><i class="sm-punkt sm-b-technik"></i> <?php echo fer_t('LEGENDE.TECHNIK'); ?></span>
 <span><i class="sm-punkt sm-b-aktion"></i> <?php echo fer_t('LEGENDE.AKTION'); ?></span>
 </div>
 <form action="index.php" method="post" autocomplete="off">
@@ -1465,6 +1522,11 @@ if (is_string($fe_anz['subdivision']) && $fe_anz['subdivision'] !== '' && !isset
         <div class="sm-small"><?php echo fer_t('T12.ICS_FILTER_H'); ?></div>
     </div>
 </div>
+<?php /* Gruppe 19 (1.2.28, V4 Option E): ab Werk aus, wirkt nur mit Filterwort. */ ?>
+<label style="display:inline-flex;align-items:center;gap:6px;">
+    <input data-role="none" type="checkbox" name="ics_jaehrlich" <?= !empty($fe_anz['ics_jaehrlich']) ? 'checked' : '' ?>> <?php echo fe_e(fer_t('T12.ICS_JAEHRLICH')); ?>
+</label>
+<div class="sm-small"><?php echo fe_e(fer_t('T12.ICS_JAEHRLICH_H')); ?></div>
 
 <h2><?php echo fer_t('TEXT.EIGENE_TERMINE_OPTIONAL'); ?></h2>
 <div class="sm-small"><?php echo fer_t('TEXT.FR_BETRIEBSFERIEN_URLAUB_ODER_SCHU'); ?><br>
@@ -1549,7 +1611,8 @@ echo ansage_formular_html($fe_tts, array(
   <?php echo fer_fmt(); ?>
     <input data-role="none" type="hidden" name="fetchnow" value="1">
     <input data-role="none" type="hidden" name="activetab" value="tab-settings">
-    <button data-role="none" class="sm-btn sm-b-technik" type="submit" style="margin-top:0;"><?php echo fer_t('TEXT.JETZT_ABRUFEN'); ?></button>
+    <?php /* Gruppe 19 (1.2.28, N4): fragt die Quelle und ERSETZT termine.json - Reihe "Loest etwas aus" (orange). */ ?>
+    <button data-role="none" class="sm-btn sm-b-aktion" type="submit" style="margin-top:0;"><?php echo fer_t('TEXT.JETZT_ABRUFEN'); ?></button>
 </form>
 </div>
 
@@ -1580,6 +1643,12 @@ echo ansage_formular_html($fe_tts, array(
     <input data-role="none" type="checkbox" name="befehle_mqtt_ein" <?= !empty($fe_anz['befehle_mqtt_ein']) ? 'checked' : '' ?>> <?php echo fe_e(fer_t('T12.MQ_BEFEHLE_HAKEN')); ?>
 </label>
 <div class="sm-small"><?php echo fe_e(fer_t('T12.MQ_BEFEHLE_H')); ?></div>
+<?php /* Gruppe 19 (1.2.28, V1, Entscheidung 3): Anbieter haus/kalender/* - ab Werk aus, nur mit MQTT. */ ?>
+<label style="display:inline-flex;align-items:center;gap:6px;margin-top:12px;">
+    <input data-role="none" type="checkbox" name="haus_kalender_ein" <?= !empty($fe_anz['haus_kalender_ein']) ? 'checked' : '' ?>> <?php echo fe_e(fer_t('MQTT.HAUS_HAKEN')); ?>
+</label>
+<div class="sm-small"><?php echo fe_e(fer_t('MQTT.HAUS_WIRKT')); ?></div>
+<div class="sm-hilfe"><?php echo fe_e(fer_t('MQTT.HAUS_HINWEIS')); ?></div>
 
 <button data-role="none" class="sm-btn sm-b-aktion" type="submit"><?php echo fer_t('TEXT.SPEICHERN'); ?></button>
 </form>
@@ -1617,8 +1686,11 @@ $fe_praefix = trim((string) $fe_cfg['mqtt_topic']) !== '' ? trim((string) $fe_cf
 <h2><?php echo fer_t('T12.MQ_THEMEN'); ?></h2>
 <?php /* 1.2.26: gezaehlt werden nur Felder mit Thema - das Lebenszeichen ZAEHLER steht nur in der Loxone-Zeile. */
 $fe_mit_thema = array_filter(fer_felder(), function ($f) { return $f[5] !== ''; }); ?>
+<?php /* Gruppe 19 (1.2.28, E6): ok steht seit 1.2.28 auch im Lebenszeichen - in der Tabelle nur einmal (bei den Feldern). */
+$fe_lz = fer_mqtt_lebenszeichen($fe_st);
+unset($fe_lz['ok']); ?>
 <div class="sm-small" style="margin-bottom:6px;"><?= sprintf(fe_e(fer_t('T12.MQ_THEMEN_H')),
-    count($fe_mit_thema) + count(fer_mqtt_texte($fe_st)) + count(fer_mqtt_lebenszeichen($fe_st))) ?>
+    count($fe_mit_thema) + count(fer_mqtt_texte($fe_st)) + count($fe_lz)) ?>
 <?php echo fer_t('MELD.MQ_RETAIN_H'); ?></div>
 <?php /* M4 (1.2.16): Spalte "zurueckbehalten" (Entscheidung 3). Alle Themen
    dieser Linie sind Tageswerte oder Dienstaussagen und gehen mit "publish"
@@ -1635,7 +1707,7 @@ $fe_mit_thema = array_filter(fer_felder(), function ($f) { return $f[5] !== ''; 
 <td><span class="sm-small"><?php echo fer_t('T12.MQ_NUR_MQTT'); ?></span></td>
 <td><?php echo fer_t('T12.MQ_TEXTWERT'); ?> <span class="sm-mono"><?= fe_e($fe_tw) ?></span></td><td><?php echo fer_t('MELD.NEIN'); ?></td></tr>
 <?php } ?>
-<?php foreach (fer_mqtt_lebenszeichen($fe_st) as $fe_tt => $fe_tw) { ?>
+<?php foreach ($fe_lz as $fe_tt => $fe_tw) { ?>
 <tr><td><span class="sm-mono"><?= fe_e($fe_praefix . '/' . $fe_tt) ?></span></td>
 <td><span class="sm-small"><?php echo fer_t('T12.MQ_NUR_MQTT'); ?></span></td>
 <td><?php echo fer_t($fe_tt === 'datum' ? 'MELD.MQ_DATUM' : ($fe_tt === 'status/zaehler' ? 'MELD.MQ_ZAEHLER' : 'MELD.MQ_TS')); ?></td><td><?php echo fer_t('MELD.NEIN'); ?></td></tr>
@@ -1645,6 +1717,12 @@ $fe_mit_thema = array_filter(fer_felder(), function ($f) { return $f[5] !== ''; 
 
 <div class="sm-pane<?= fe_aktiv('tab-loxone') ?>" id="tab-loxone">
 <h2><?php echo fer_t('TEXT.EINBINDUNG_IN_LOXONE_SCHRITT_FR_SC'); ?></h2>
+<?php /* Gruppe 19 (1.2.28, N5, Regeln/04): EINE gesammelte Legende oben im Reiter - bis 1.2.27 standen zwei mitten im
+   Reiter und keine ueber der ersten Knopfreihe (Befehlsvorlage). */ ?>
+<div class="sm-legende">
+<span><i class="sm-punkt sm-b-technik"></i> <?php echo fer_t('LEGENDE.TECHNIK'); ?></span>
+<span><i class="sm-punkt sm-b-aktion"></i> <?php echo fer_t('LEGENDE.AKTION'); ?></span>
+</div>
 <p><?php echo fer_t('TEXT.DER_MINISERVER_BEKOMMT_FERTIG_AUSG'); ?> <b><?php echo fer_t('TEXT.IST_HEUTE_SCHULFREI_IST_MORGEN_SCH'); ?></b>
 <?php echo fer_t('TEXT.DAMIT_LASSEN_SICH_WECKER_MORGEN_BR'); ?></p>
 <?php
@@ -1683,12 +1761,13 @@ list($fe_eb_bl, $fe_eb_bl_fehl) = fer_bruecke_liste(); ?>
 <?php if ($fe_eb_gw <= 0 || $fe_eb_gw >= 2) { ?>
 <div id="eb-v2" style="margin-top:6px;"><?php echo fe_e(sprintf(fer_t('T12.EB_S2_V2'), $fe_eb_pf)); ?></div>
 <div class="sm-breit"><table class="sm-tbl" id="eb-hakenliste">
-<tr><th>#</th><th><?php echo fe_e(fer_t('T12.EB_HAKEN_SP_THEMA')); ?></th><th><?php echo fe_e(fer_t('T12.EB_HAKEN_SP_NAME')); ?></th><th><?php echo fe_e(fer_t('T12.EB_HAKEN_SP_SEITE')); ?></th></tr>
+<tr><th>#</th><th><?php echo fe_e(fer_t('T12.EB_HAKEN_SP_THEMA')); ?></th><th><?php echo fe_e(fer_t('T12.EB_HAKEN_SP_NAME')); ?></th><th><?php echo fe_e(fer_t('T12.EB_HAKEN_SP_SEITE')); ?></th><th><?php echo fe_e(fer_t('T12.EB_HAKEN_SP_NC')); ?></th></tr>
 <?php foreach ($fe_eb_haken as $fe_hi => $fe_h) { ?>
-<tr><td><?php echo (int) $fe_hi + 1; ?></td><td><span class="sm-mono"><?php echo fe_e($fe_h[0]); ?></span></td><td><span class="sm-mono"><?php echo fe_e($fe_h[1]); ?></span></td><td><?php echo $fe_h[2] ? fe_e(fer_t('T12.EB_HAKEN_JA')) : '&ndash;'; ?></td></tr>
+<tr><td><?php echo (int) $fe_hi + 1; ?></td><td><span class="sm-mono"><?php echo fe_e($fe_h[0]); ?></span></td><td><span class="sm-mono"><?php echo fe_e($fe_h[1]); ?></span></td><td><?php echo $fe_h[2] ? fe_e(fer_t('T12.EB_HAKEN_JA')) : '&ndash;'; ?></td><td><?php echo (isset($fe_h[4]) && $fe_h[4] === 'N') ? fe_e(fer_t('T12.EB_HAKEN_JA_NC')) : '&ndash;'; ?></td></tr>
 <?php } ?>
 </table></div>
 <div class="sm-small"><?php echo fe_e(sprintf(fer_t('T12.EB_HAKEN_ZAHL'), count($fe_eb_haken), $fe_eb_seite)); ?> <?php echo fe_e(fer_t('T12.EB_HAKEN_RESET')); ?></div>
+<div class="sm-small" id="eb-noncached"><?php echo fe_e(sprintf(fer_t('T12.EB_HAKEN_NC'), fer_mqtt_gateway_name($fe_eb_pf, 'ok'))); ?></div>
 <div class="sm-small" id="eb-reconnect" style="margin-top:4px;"><?php echo fe_e(sprintf(fer_t('T12.EB_RECONNECT'), fer_mqtt_gateway_name($fe_eb_pf, 'ok'))); ?></div>
 <?php } ?>
 </div>
@@ -1814,12 +1893,32 @@ $fe_bl_thema = trim((string) $fe_cfg['mqtt_topic']) !== '' ? trim((string) $fe_c
 <div class="sm-step"><b><?php echo fer_t('TEXT.PRAXIS_ERFAHRUNGEN_ZUM_BENACHRICHT'); ?></b> <?php echo fer_t('TEXT.ER_SENDET_NUR_BEI_EINER_01_FLANKE_'); ?>
 </div>
 
+<?php /* Gruppe 19 (1.2.28): die Adressen des HTTP-Wegs nur mit dem Haken "HTTP-Weg fuer Loxone annehmen". */
+$fe_ep_an = (int) $fe_cfg['endpunkt_ein'] === 1; ?>
 <div class="sm-step"><b><?php echo fer_t('TEXT.SCHRITT_5_MQTT_ALTERNATIVE_JSON'); ?></b><br>
+<?php if ($fe_ep_an) { ?>
 <?php echo fer_t('TEXT.ALLE_WERTE_GIBT_ES_AUCH_BER_DAS_LO'); ?> <span class="sm-mono">http://<?= $fe_host ?>/plugins/<?= fe_e($fe_plugin) ?><?php echo fer_t('TEXT.FERIEN_PHP_JSON_1'); ?></span>
+<?php } else { ?>
+<span class="sm-small"><?php echo fe_e(fer_t('T12.EB_EP_ERST')); ?></span>
+<?php } ?>
 </div>
 
 <h3 class="sm-h3" id="eb-http"><?php echo fe_e(fer_t('T12.EB_HTTP_TITEL')); ?></h3>
 <div class="sm-hilfe"><?php echo fe_e(fer_t('T12.EB_HTTP_TEXT')); ?></div>
+<?php /* Gruppe 19 (1.2.28, Entscheidung 2, Entwurf 3.2): der Haken mit eigenem kleinem Formular (Speichern orange). */ ?>
+<form action="index.php" method="post" id="eb-endpunkt" style="margin:8px 0 10px;">
+  <?php echo fer_fmt(); ?>
+  <input data-role="none" type="hidden" name="endpunkt_save" value="1">
+  <input data-role="none" type="hidden" name="activetab" value="tab-loxone">
+  <label style="display:inline-flex;align-items:center;gap:6px;">
+    <input data-role="none" type="checkbox" name="endpunkt_ein" value="1" <?= $fe_ep_an ? 'checked' : '' ?>> <?php echo fe_e(fer_t('T12.EB_EP_HAKEN')); ?>
+  </label>
+  <div class="sm-small"><?php echo fe_e(fer_t('T12.EB_EP_HINWEIS')); ?></div>
+  <button data-role="none" class="sm-btn sm-b-aktion" type="submit"><?php echo fer_t('TEXT.SPEICHERN'); ?></button>
+</form>
+<?php if (!$fe_ep_an) { ?>
+<div class="sm-alert sm-info" id="eb-ep-aus"><?php echo fe_e(fer_t('T12.EB_EP_ERST')); ?></div>
+<?php } else { ?>
 
 <div class="sm-step"><b><?php echo fer_t('TEXT.SCHRITT_1_VIRTUELLER_HTTP_EINGANG_'); ?></b> <?php echo fer_t('TEXT.ABFRAGE_ALLE_300_S'); ?>
 <table class="sm-tbl">
@@ -1856,9 +1955,6 @@ $fe_bl_thema = trim((string) $fe_cfg['mqtt_topic']) !== '' ? trim((string) $fe_c
 
 <h2><?php echo fer_t('TEXT.H_VORLAGE'); ?></h2>
 <div class="sm-hinweis"><?php echo fer_t('TEXT.H_VORLAGE_TEXT'); ?></div>
-<div class="sm-legende">
-<span><i class="sm-punkt sm-b-technik"></i> <?php echo fer_t('LEGENDE.TECHNIK'); ?></span>
-</div>
 <form action="index.php" method="post" style="margin-bottom:14px;">
   <?php echo fer_fmt(); ?>
   <input data-role="none" type="hidden" name="activetab" value="tab-loxone">
@@ -1883,9 +1979,6 @@ $fe_bl_thema = trim((string) $fe_cfg['mqtt_topic']) !== '' ? trim((string) $fe_c
 <tr><td><span class="sm-mono">?ptest=1</span></td><td><span class="sm-mono">/plugins/<?= fe_e($fe_plugin) ?>/ferien.php?ptest=1&amp;token=<?= fe_e($fe_cfg['aktionstoken']) ?></span></td></tr>
 <tr><td><span class="sm-mono">?selftest=1</span></td><td><span class="sm-mono">/plugins/<?= fe_e($fe_plugin) ?>/ferien.php?selftest=1&amp;token=<?= fe_e($fe_cfg['aktionstoken']) ?></span></td></tr>
 </table>
-<div class="sm-legende">
-<span><i class="sm-punkt sm-b-aktion"></i> <?php echo fer_t('LEGENDE.AKTION'); ?></span>
-</div>
 <div class="sm-knopfreihe">
   <form method="post" action="index.php">
     <?php echo fer_fmt(); ?>
@@ -1899,6 +1992,7 @@ $fe_bl_thema = trim((string) $fe_cfg['mqtt_topic']) !== '' ? trim((string) $fe_c
   </form>
 </div>
 </div>
+<?php } /* Ende: nur mit dem Haken "HTTP-Weg fuer Loxone annehmen" (Gruppe 19, 1.2.28) */ ?>
 </div>
 
 <!-- ================= Test ================= -->
@@ -2031,15 +2125,23 @@ if ($fe_qp === null) { ?>
 <?php } ?>
 <?php } ?>
 
+<?php /* Gruppe 19 (1.2.28, V1): die Haus-Themen haus/kalender - grau aus, gruen letzte Sitzung ok, gelb gescheitert. */
+if (function_exists('fer_haus_testzeile')) { list($fe_hz_st, $fe_hz_txt) = fer_haus_testzeile($fe_cfg); ?>
+<h3 class="sm-h3" id="haus-kalender"><?php echo fe_e(fer_t('MQTT.HAUS_T_TITEL')); ?></h3>
+<div class="<?= $fe_hz_st === 1 ? 'sm-alert sm-ok' : ($fe_hz_st === 0 ? 'sm-alert sm-warn' : 'sm-small') ?>" id="haus-kalender-lage"><?php echo fe_e($fe_hz_txt); ?></div>
+<?php } ?>
+
+<?php /* Gruppe 19 (1.2.28, N2/E-E8): die lesenden Ansichten ueber die Oberflaeche (hinter der Anmeldung, unabhaengig
+   vom Haken "HTTP-Weg fuer Loxone annehmen"); bis 1.2.27 Verweise auf ferien.php. */ ?>
 <h3 class="sm-h3"><?php echo fer_t('TEXT.ANSEHEN'); ?></h3>
 <div class="sm-knopfreihe">
-<a class="sm-btn sm-b-lesen"  href="/plugins/<?= fe_e($fe_plugin) ?>/ferien.php" target="_blank"><?php echo fer_t('TEXT.LOXONE_ZEILE_ABRUFEN'); ?></a>
-<a class="sm-btn sm-b-lesen"  href="/plugins/<?= fe_e($fe_plugin) ?>/ferien.php?json=1" target="_blank"><?php echo fer_t('TEXT.JSON_ANSICHT'); ?></a>
+<a class="sm-btn sm-b-lesen"  href="index.php?ansicht=zeile" target="_blank"><?php echo fer_t('TEXT.LOXONE_ZEILE_ABRUFEN'); ?></a>
+<a class="sm-btn sm-b-lesen"  href="index.php?ansicht=json" target="_blank"><?php echo fer_t('TEXT.JSON_ANSICHT'); ?></a>
 </div>
 
 <h3 class="sm-h3"><?php echo fer_t('TEXT.TECHNISCHE_AUSKUNFT'); ?></h3>
 <div class="sm-knopfreihe">
-<a class="sm-btn sm-b-technik"  href="/plugins/<?= fe_e($fe_plugin) ?>/ferien.php?debug=1" target="_blank"><?php echo fer_t('TEXT.DEBUG_ALLE_TERMINE'); ?></a>
+<a class="sm-btn sm-b-technik"  href="index.php?ansicht=debug" target="_blank"><?php echo fer_t('TEXT.DEBUG_ALLE_TERMINE'); ?></a>
 </div>
 
 <h3 class="sm-h3"><?php echo fer_t('TEXT.LST_ETWAS_AUS'); ?></h3>
@@ -2053,11 +2155,21 @@ if ($fe_qp === null) { ?>
     <input data-role="none" type="hidden" name="activetab" value="tab-test">
     <button data-role="none" class="sm-btn sm-b-aktion" type="submit" style="margin-top:0;"><?php echo fer_t('TEXT.TEST_ANSAGE'); ?></button>
 </form>
-<a class="sm-btn sm-b-aktion"  href="/plugins/<?= fe_e($fe_plugin) ?>/ferien.php?ptest=1&amp;token=<?= fe_e($fe_cfg['aktionstoken']) ?>" target="_blank"><?php echo fer_t('TEXT.TEST_PUSHNACHRICHT'); ?></a>
-<?php /* C6/O8 (1.2.16): ?refresh=1 fragt die Quelle und SCHREIBT termine.json
-   - also mit Token und in der Reihe "Loest etwas aus", nicht mehr grau unter
-   "Technische Auskunft". Hoechstens einmal je 5 Minuten. */ ?>
-<a class="sm-btn sm-b-aktion"  href="/plugins/<?= fe_e($fe_plugin) ?>/ferien.php?refresh=1&amp;debug=1&amp;token=<?= fe_e($fe_cfg['aktionstoken']) ?>" target="_blank"><?php echo fer_t('TEXT.NEU_ABRUFEN_DEBUG'); ?></a>
+<?php /* Gruppe 19 (1.2.28, N2/E-E8): Test-Push und Neu abrufen als POST-Formulare (Formularmerkmal, POST - Umleitung -
+   GET) statt Verweisen auf ferien.php mit dem Token. Neu abrufen fragt die Quelle und SCHREIBT termine.json - Reihe
+   "Loest etwas aus" (C6/O8); danach steht oben der Verweis auf die Debug-Ansicht. */ ?>
+<form action="index.php" method="post" style="display:inline;">
+  <?php echo fer_fmt(); ?>
+    <input data-role="none" type="hidden" name="testpush" value="1">
+    <input data-role="none" type="hidden" name="activetab" value="tab-test">
+    <button data-role="none" class="sm-btn sm-b-aktion" type="submit" style="margin-top:0;"><?php echo fer_t('TEXT.TEST_PUSHNACHRICHT'); ?></button>
+</form>
+<form action="index.php" method="post" style="display:inline;">
+  <?php echo fer_fmt(); ?>
+    <input data-role="none" type="hidden" name="fetchnow" value="1">
+    <input data-role="none" type="hidden" name="activetab" value="tab-test">
+    <button data-role="none" class="sm-btn sm-b-aktion" type="submit" style="margin-top:0;"><?php echo fer_t('TEXT.NEU_ABRUFEN_DEBUG'); ?></button>
+</form>
 </div>
 
 

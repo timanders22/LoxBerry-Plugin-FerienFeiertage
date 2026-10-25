@@ -51,6 +51,14 @@ date_default_timezone_set('Europe/Berlin');
  * deshalb auch nicht ins Protokoll - sonst stuende es alle sechzig Sekunden
  * darin.
  */
+/* Gruppe 19 (1.2.28, Entwurf 2.6, E-E13): die Deinstallation ruft "cron.php --haus-leeren" vor dem Loeschen - die
+ * zwoelf retained Themen haus/kalender/* abraeumen (mit Ruecklesen), nur wenn diese Installation Anbieter ist oder war
+ * (haus_kalender_ein oder Merker _haus_frueher). Vor der Sperre: ein haengender Minutenlauf haelt die Deinstallation
+ * nicht auf. Rueckgabe immer 0. */
+if (isset($argv) && is_array($argv) && in_array('--haus-leeren', $argv, true)) {
+    exit(fer_haus_leeren_ausgabe());
+}
+
 $fer_lock = fer_sperre('cron');
 if ($fer_lock === false) {
     echo "BUSY\n";
@@ -91,10 +99,14 @@ if (empty($fer_cfg['mqtt_enabled'])) {
     @unlink($sigf);
     @unlink($beat);
 } else {
-    /* Praefix und Alter gehoeren in die Signatur (M1, M2): ein neues Praefix
-     * sendet sofort den Vollsatz unter dem neuen Namen. */
-    $sig = json_encode(array($st['heute'], $st['morgen'], $st['naechste'], $st['ok'], $st['warnung'],
-                             fer_meldeflags($st), (string) $fer_cfg['mqtt_topic'], $st['alter_tage']));
+    /* Signatur = alle gesendeten Werte ohne die drei fluechtigen Lebenszeichen, plus Praefix (Gruppe 19, 1.2.28, FE8:
+     * eine Liste statt zwei, Bauregel fer_felder()). Bis 1.2.27 fehlten Urlaub, die Feiertage danach, die zweite Region
+     * und der Brueckentag - ein neuer Urlaub im Kalender ging erst mit dem 30-min-Herzschlag hinaus. Feste Liste der
+     * fluechtigen Themen: ok bleibt drin, obwohl es seit 1.2.28 auch im Lebenszeichen steht. Ein neues Praefix sendet
+     * sofort den Vollsatz unter dem neuen Namen (M1). */
+    $fer_sig_m = fer_mqtt_nachrichten($st, false);
+    foreach (array('datum', 'status/ts', 'status/zaehler') as $fer_lz) { unset($fer_sig_m[$fer_lz]); }
+    $sig = json_encode(array((string) $fer_cfg['mqtt_topic'], $fer_sig_m));
     if ($sig === false) { $sig = 'unlesbar'; }
     $old = is_file($sigf) ? (string) file_get_contents($sigf) : '';
     if ($sig !== $old || !is_file($beat) || time() - filemtime($beat) > 1800) {
@@ -107,6 +119,15 @@ if (empty($fer_cfg['mqtt_enabled'])) {
         /* M2: das Lebenszeichen (status/ts, datum) bei JEDEM Lauf. */
         fer_mqtt_publish($st, true);
     }
+}
+
+/* Gruppe 19 (1.2.28, V1): Anbieter haus/kalender/* - nur mit dem Haken "Kalendertage an andere Plugins geben" und MQTT
+ * (fer_haus_lauf(): kurze TCP-Sitzung direkt am Broker, Vollversand ohne Merker und alle 30 min, sonst Geaendertes,
+ * zaehler je Lauf; Haken aus und war Anbieter -> Abraeumen hoechstens alle 10 min). Ein Fehler haelt den Lauf nicht an. */
+try {
+    fer_haus_lauf($st, $fer_cfg);
+} catch (Throwable $fer_ht) {
+    fer_log_if_changed('haus', 'Haus-Themen haus/kalender: ' . get_class($fer_ht) . ': ' . $fer_ht->getMessage());
 }
 
 /* Gruppe 1 / MQTT (1.2.27; Entwurf ff E7): die Abo-Datei des Gateways V1 auf das eingestellte Praefix bringen -

@@ -153,8 +153,9 @@ if [ "$UPGRADE" = 1 ] && [ -d "$SICHER" ]; then
             || echo "<WARNING> Der Kalender-Zwischenspeicher liess sich NICHT zurueckstellen."
     fi
     # Nach dem Update: kein alter Zwischenstand, und der naechste Lauf sendet
-    # MQTT vollstaendig (Regeln/07).
-    rm -f "/tmp/$PFOLDER/state.json" "/tmp/$PFOLDER/mqtt_sig.txt" "/tmp/$PFOLDER/mqtt_beat" 2>/dev/null
+    # MQTT vollstaendig (Regeln/07) - seit 1.2.28 auch die Haus-Themen haus/kalender (Merker haus_letzte.json).
+    rm -f "/tmp/$PFOLDER/state.json" "/tmp/$PFOLDER/mqtt_sig.txt" "/tmp/$PFOLDER/mqtt_beat" \
+          "/tmp/$PFOLDER/haus_letzte.json" "/tmp/$PFOLDER/haus_sitzung.json" 2>/dev/null
     # Die Update-Sicherung erst wegraeumen, wenn ihr Inhalt angekommen ist.
     # Bis 1.2.13 fiel sie ohne Bedingung (Pruefung-FerienFeiertage-1.2.14,
     # Fall K13); liegen bleibt sie nur, wenn sie das Token traegt und die

@@ -10,6 +10,32 @@ Bundesländern/Kantonen.
 
 Kompatibel mit LoxBerry 3.x und **LoxBerry 4** (reines PHP, PHP 7.4 und 8.x).
 
+## Neu in 1.2.28
+
+Gruppe 19 (Prüfbericht, Entwurf und Entscheidungen vom 25.10.2026):
+
+* **Neu: Kalendertage an andere Plugins** (Reiter MQTT, ab Werk aus): `haus/kalender/heute|morgen/feiertag|ruhetag|frei|urlaub`,
+  `haus/kalender/ferien_in`, `…/ferien_rest`, `…/feiertag_in` und `haus/kalender/datum` (retained) sowie
+  `haus/kalender/zaehler` je Minute – nur Zahlen, nie Namen, über eine kurze Verbindung direkt zum Broker. Beim
+  Ausschalten und bei der Deinstallation räumt das Plugin die Themen mit Rücklesen ab. Erster Abnehmer später:
+  Sprachsteuerung („Ist morgen schulfrei?“).
+* **HTTP-Weg mit Haken:** `ferien.php` antwortet nur noch mit „HTTP-Weg für Loxone annehmen“ (Reiter Einbindung). Nach
+  dem Update ist der Haken gesetzt – bestehende Anlagen merken nichts; eine Neuinstallation bekommt 403. Abfahrts-Assistent
+  und Abfuhrkalender lesen dann die Bibliothek. Zeile, JSON und Debug zeigt der Reiter Test hinter der Anmeldung;
+  Test-Push und Neu abrufen sind dort Knöpfe ohne Token.
+* **Kalender-Abo:** abgesagte Termine und Erinnerungen zählen nicht mehr, Termine mit `VALUE=DATE-TIME` sind kein
+  Ganztag, `DURATION` statt `DTEND` wird verstanden, `DTSTART` mit genau 8 Ziffern gilt als Ganztag. Neu (ab Werk aus):
+  jährliche Ganztagstermine nur mit Filterwort – so wird kein Geburtstag zum Urlaub.
+* **MQTT:** `ok` kommt jede Minute mit dem Lebenszeichen (im Gateway V2 „Noncached“, Spalte in der Hakenliste), ferne
+  Änderungen (neuer Urlaub, verschobener Feiertag) gehen sofort hinaus statt mit dem 30-Minuten-Takt, 5 ms Pause im
+  Vollsatz; die PHP-Erweiterung sockets wird nicht mehr gebraucht.
+* **Sprachausgabe 1.1.4:** Sonos4Lox und SonoX als Ausgabearten (SonoX schickt Ansagetexte an Google); Befehlsbrücke 1.0.1.
+* **Sicherung:** eine Sicherung aus 1.2.26/1.2.27 lässt sich wieder zurückspielen (fehlende neue Einstellungen behalten
+  ihren Wert); beim Zurückspielen schaltet sich die Befehlsbrücke sofort.
+* Kleinere Korrekturen: Update bricht ab, wenn die Update-Marke nicht angelegt werden kann; Minutenlauf auch bei
+  schreibgeschütztem Protokollordner; strengere Wurzel- und Pfadermittlung (Zweitinstallation, Archiv); Vorlagenadresse
+  einer Zweitinstallation; „Jetzt abrufen“ orange; Hilfelink auf die eigene Wiki-Seite.
+
 ## Neu in 1.2.27
 
 Umstellung auf MQTT (Gruppe 1): Werte **und** Befehle zwischen Plugin und Loxone gehen über das MQTT-Gateway des

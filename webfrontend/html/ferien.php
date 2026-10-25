@@ -45,6 +45,12 @@
  *   ?say=1&token=T     -> Test: Vorabend-Ansage abspielen
  *   ?ptest=1&token=T   -> Test-Pushnachricht ausloesen (PTEST=1 fuer 5 Minuten)
  *   ?selftest=1&token=T -> nur pruefen, ob das Token stimmt; loest nichts aus
+ *
+ * Seit 1.2.28 (Gruppe 19, Entscheidung 2) antwortet dieser Endpunkt nur mit dem Haken "HTTP-Weg fuer Loxone annehmen"
+ * (endpunkt_ein, Reiter Einbindung): Neuinstallation aus, Update an. Abgeschaltet antwortet JEDE Art mit HTTP 403 und
+ * "<ART>;OK=0;ERR=ENDPUNKT_AUS" - nie JSON mit 'heute': Abfahrts-Assistent und AWM-Abfuhr fallen dann auf die
+ * Bibliothek zurueck. ?json/?debug mit Urlaubsnamen sind damit fuer Neuanlagen nicht mehr unangemeldet lesbar; die
+ * Oberflaeche zeigt dieselben Ansichten hinter der Anmeldung (index.php?ansicht=..., fer_ansicht()).
  */
 
 require_once __DIR__ . '/ferien_lib.php';
@@ -52,6 +58,20 @@ require_once __DIR__ . '/ferien_lib.php';
 /* C16 (1.2.16): die Bibliothek stellt beim Einbinden keine Zeitzone mehr ein.
  * Dieser Endpunkt ist ein eigener Prozess und rechnet in Europe/Berlin. */
 date_default_timezone_set('Europe/Berlin');
+
+/* endpunkt_ein (1.2.28, Hausform G9-G18, Entscheidung 2, E-E16): VOR ?refresh und vor der Leser-Merkung - ein
+ * abgewiesener Aufruf wird nicht als Leser vermerkt und fragt die Quelle nicht. Kein Protokoll je Aufruf (Loxone
+ * fragt zyklisch), kein Zugriff auf den Zustand. Die Lese-Regel (Bestand ohne Schluessel -> 1) steht in fer_config(). */
+$fer_ep_cfg = fer_config();
+if ((int) (isset($fer_ep_cfg['endpunkt_ein']) ? $fer_ep_cfg['endpunkt_ein'] : 0) !== 1) {
+    http_response_code(403);
+    header('Content-Type: text/plain; charset=utf-8');
+    header('Cache-Control: no-store');
+    $fer_ep_art = isset($_GET['selftest']) ? 'SELFTEST' : (isset($_GET['say']) ? 'SAY'
+        : (isset($_GET['ptest']) ? 'PTEST' : (isset($_GET['refresh']) ? 'REFRESH' : 'FERIEN')));
+    echo $fer_ep_art . ";OK=0;ERR=ENDPUNKT_AUS\n";
+    exit;
+}
 
 /** Ist ein gueltiges Aktionstoken mitgeschickt worden?
  *
@@ -124,22 +144,13 @@ if ($fer_leser_weg !== '' && function_exists('fer_leser_http')) {
 }
 
 if (isset($_GET['json'])) {
-    header('Content-Type: application/json; charset=utf-8');
-    $st = fer_state($fer_refresh);
-    /* Ohne Daten der Quelle: 503 statt eines Zustands aus eigenen Terminen
-     * (C5). Der Abfahrts-Assistent und AWM-Abfuhr lesen dann ueber ihren
-     * Rueckweg (Bibliothek) - ok=0 wie bisher. */
-    if (empty($st['quelle_da'])) {
-        http_response_code(503);
-        echo json_encode(array('ok' => 0, 'grund' => 'KEINE_DATEN'), JSON_PRETTY_PRINT) . "\n";
-        exit;
-    }
-    /* 1.2.26 (Entwurf Welle 18 ff, Entscheidung 15): ann aus fer_meldeflags() - dieselbe Quelle wie die Zeile
-     * und MQTT, also auch hier nur fuer die angehakten Anlaesse. */
-    $fer_fl = fer_meldeflags($st);
-    $st['ann'] = $fer_fl['ann'];
-    $st['ptest'] = fer_ptest_active();
-    echo json_encode($st, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_PRETTY_PRINT);
+    /* Seit 1.2.28 aus fer_ansicht() (N2): ohne Daten der Quelle 503 und {"ok":0,"grund":"KEINE_DATEN"} statt eines
+     * Zustands aus eigenen Terminen (C5) - Abfahrts-Assistent und AWM-Abfuhr lesen dann ueber die Bibliothek; ann aus
+     * fer_meldeflags() (1.2.26). Ausgabe byte-gleich mit 1.2.27. */
+    list($fer_ac, $fer_typ, $fer_at) = fer_ansicht('json', $fer_refresh);
+    header('Content-Type: ' . $fer_typ);
+    if ($fer_ac !== 200) { http_response_code($fer_ac); }
+    echo $fer_at;
     exit;
 }
 
@@ -217,106 +228,12 @@ if (isset($_GET['ptest'])) {
     exit;
 }
 
-/* Kein Abruf mehr an dieser Stelle (C5): die Zeile liest den gespeicherten
- * Stand. Bis 1.2.15 stand hier fer_fetch() - ohne Termindatei ging damit
- * jeder Aufruf ins Netz. */
-$st = fer_state($fer_refresh);
-$cfg = fer_config();
-/* Dieselbe Quelle wie die MQTT-Meldung - siehe fer_meldeflags(). */
-$flags = fer_meldeflags($st);
-$fer_ohne = empty($st['quelle_da']);
-if ($fer_ohne) {
-    http_response_code(503);
-}
-
-if (isset($_GET['debug'])) {
-    $d = fer_data();
-    echo 'DEBUG  Region: ' . fe_e_klar($cfg['country']) . '/' . fe_e_klar($cfg['subdivision'])
-       . '  Abruf: ' . $fer_quelle
-       . '  Stand: ' . substr((string) $st['stand'], 0, 19)
-       . '  zuletzt gelungen: ' . ($st['stand_ok'] !== '' ? substr((string) $st['stand_ok'], 0, 19) : '-')
-       . ' (' . (int) $st['alter_tage'] . ' Tage)'
-       . (!empty($st['teilausfall']) ? '  Teilausfall: ' . implode(', ', (array) $st['teilausfall']) : '')
-       . '  Daten bis: ' . $st['reicht_bis'] . "\n";
-    echo 'HEUTE  ' . $st['heute']['datum'] . ': schulfrei=' . $st['heute']['schulfrei']
-       . ' Ferien=' . ($st['heute']['ferien_name'] !== '' ? $st['heute']['ferien_name'] : '-')
-       . ' Feiertag=' . ($st['heute']['feiertag_name'] !== '' ? $st['heute']['feiertag_name'] : '-')
-       . ' Brueckentag=' . $st['heute']['bruecke'] . "\n";
-    echo 'MORGEN ' . $st['morgen']['datum'] . ': schulfrei=' . $st['morgen']['schulfrei']
-       . ' Ferien=' . ($st['morgen']['ferien_name'] !== '' ? $st['morgen']['ferien_name'] : '-')
-       . ' Feiertag=' . ($st['morgen']['feiertag_name'] !== '' ? $st['morgen']['feiertag_name'] : '-') . "\n\n";
-    echo "Kommende Ferien:\n";
-    foreach ((array) $d['ferien'] as $e) {
-        if ($e['bis'] < date('Y-m-d')) { continue; }
-        printf("  %s bis %s  %s%s%s\n", $e['von'], $e['bis'], $e['name'],
-            !empty($e['ics']) ? '  (aus dem Kalender)' : (!empty($e['eigen']) ? '  (eigener Termin)' : ''),
-            (isset($e['art']) && $e['art'] !== '' && $e['art'] !== 'School') ? '  [Art: ' . $e['art'] . ']' : '');
-    }
-    if (!empty($d['ferien2'])) {
-        echo "\nKommende Ferien der zweiten Region (" . $cfg['subdivision2'] . "):\n";
-        foreach ((array) $d['ferien2'] as $e) {
-            if ($e['bis'] < date('Y-m-d')) { continue; }
-            printf("  %s bis %s  %s\n", $e['von'], $e['bis'], $e['name']);
-        }
-    }
-    echo "\nKommende Feiertage:\n";
-    foreach ((array) $d['feiertage'] as $e) {
-        if ($e['bis'] < date('Y-m-d')) { continue; }
-        printf("  %s  %s%s%s%s\n", $e['von'], $e['name'],
-            !empty($e['eigen']) ? '  (eigener Termin)' : '',
-            (isset($e['art']) && $e['art'] !== '' && $e['art'] !== 'Public') ? '  [Art: ' . $e['art'] . ']' : '',
-            !empty($e['halbtag']) ? ('  [halber Tag' . (!empty($e['hinweis']) ? ': ' . $e['hinweis'] : '') . ']') : '');
-    }
-    echo "\nUrlaub (Abwesenheit):\n";
-    if (empty($d['urlaub'])) {
-        echo "  keine Urlaubszeitraeume eingetragen\n";
-    } else {
-        foreach ((array) $d['urlaub'] as $e) {
-            if ($e['bis'] < date('Y-m-d')) { continue; }
-            printf("  %s bis %s  %s\n", $e['von'], $e['bis'], $e['name']);
-        }
-        printf("  aktiv=%d in=%d rest=%d letzter Tag=%d\n", $st['urlaub']['aktiv'],
-            $st['urlaub']['in'], $st['urlaub']['rest'], $st['urlaub']['letzter_tag']);
-    }
-    if ($st['brueckentage']) {
-        echo "\nBrueckentage der naechsten 12 Monate:\n  " . implode(', ', $st['brueckentage']) . "\n";
-    }
-    echo "\n";
-}
-
-/*
- * Die Zeile entsteht seit 1.2.0 aus fer_zeile() und damit aus fer_felder().
- *
- * Vorher stand hier ein printf mit 27 Platzhaltern und 27 Argumenten in
- * getrennter Reihenfolge - die leichteste Art, allen Feldern hinter einer
- * verschobenen Stelle den falschen Wert zu geben, ohne dass irgendwo etwas
- * auffaellt. Jetzt stehen Name, Bedeutung, Grenzen, MQTT-Thema und Wert an
- * EINER Stelle, und die Loxone-Vorlage entsteht aus derselben.
- *
- * ACHTUNG - die REIHENFOLGE der Felder ist Teil der Schnittstelle.
- *
- * Loxone sucht in der Zeile die wortwoertliche Zeichenkette der
- * Befehlserkennung (z. B. "FERIEN=") und nimmt den ERSTEN Treffer. In dieser
- * Zeile steht "FERIEN=" aber auch als Teil von "MFERIEN=" - genauso
- * "FEIERTAG=" in "MFEIERTAG=", "SCHULFREI=" in "MSCHULFREI=" und so fort.
- * Es geht nur gut, weil jedes Heute-Feld VOR seinem M-Gegenstueck steht.
- *
- * Dieser Absatz war bis 1.1.7 eine Bitte an den naechsten Leser. Seit 1.2.0
- * prueft fer_reihenfolge_pruefen() es an der fertigen Zeile nach, und der
- * Reiter Test zeigt das Ergebnis - eine Regel, die ein Werkzeug prueft, ist
- * hinterlegt; eine Regel in Prosa ist eine Hoffnung.
- */
-if ($fer_ohne) {
-    /* 503 ohne Daten (C5, Regeln/07): keine Werte, nur der Grund. Loxone
-     * behaelt dann seine letzten Werte - auch vor dem ersten Abruf gibt es
-     * kein SCHULTAG=1 mehr, das aus dem Wochentag geraten ist. */
-    echo "FERIEN;OK=0;GRUND=KEINE_DATEN\n";
-    exit;
-}
-echo fer_zeile($st, $flags);
-
-/** Ein Wert fuer die Debug-Zeile - auch wenn er (aus einer alten Datei) keine
- *  Zeichenkette ist. */
-function fe_e_klar($w) {
-    return is_scalar($w) ? (string) $w : '?';
-}
+/* Kein Abruf an dieser Stelle (C5): Zeile und ?debug=1 lesen den gespeicherten Stand. Seit 1.2.28 (N2, E-E8) aus
+ * fer_ansicht() - derselben Stelle, die die Oberflaeche hinter der Anmeldung nutzt (index.php?ansicht=zeile|debug);
+ * die Ausgabe ist byte-gleich mit 1.2.27 (Vorher/Nachher-Probe). Die Zeile entsteht aus fer_zeile() und damit aus
+ * fer_felder(); die REIHENFOLGE der Felder ist Teil der Schnittstelle (Loxone nimmt den ersten Treffer von "FERIEN=",
+ * jedes Heute-Feld steht vor seinem M-Gegenstueck - geprueft von fer_reihenfolge_pruefen(), Reiter Test). Ohne Daten
+ * der Quelle HTTP 503 und nur "FERIEN;OK=0;GRUND=KEINE_DATEN" (C5, Regeln/07): Loxone behaelt seine letzten Werte. */
+list($fer_ac, , $fer_at) = fer_ansicht(isset($_GET['debug']) ? 'debug' : 'zeile', $fer_refresh, $fer_quelle);
+if ($fer_ac !== 200) { http_response_code($fer_ac); }
+echo $fer_at;

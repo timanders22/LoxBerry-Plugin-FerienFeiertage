@@ -19,11 +19,21 @@
  * Die Datei setzt keine Konfiguration und schreibt nichts.
  */
 if (!function_exists('fer_config')) {
+    /* Gruppe 19 (1.2.28, FE14; Bauform Abfahrts-Assistent 1.6.31): ausdruecklich LBHOMEDIR + LBPPLUGINDIR (Pruefstaende)
+     * zuerst, dann installiert (bin/plugins/<ordner> -> webfrontend/html/plugins/<ordner>) ODER Archiv (bin/ neben
+     * webfrontend/) - nicht mehr beide. */
     $fer_kand = array();
+    $fer_lb = (string) getenv('LBHOMEDIR');
+    $fer_ordner = basename(rtrim((string) getenv('LBPPLUGINDIR'), '/'));
+    if ($fer_lb !== '' && $fer_ordner !== ''
+        && !in_array($fer_ordner, array('.', 'html', 'htmlauth', 'bin', 'plugins', 'webfrontend'), true)) {
+        $fer_kand[] = $fer_lb . '/webfrontend/html/plugins/' . $fer_ordner . '/ferien_lib.php';
+    }
     if (basename(dirname(__DIR__)) === 'plugins') {
         $fer_kand[] = dirname(dirname(dirname(__DIR__))) . '/webfrontend/html/plugins/' . basename(__DIR__) . '/ferien_lib.php';
+    } else {
+        $fer_kand[] = dirname(__DIR__) . '/webfrontend/html/ferien_lib.php';
     }
-    $fer_kand[] = dirname(__DIR__) . '/webfrontend/html/ferien_lib.php';
     foreach ($fer_kand as $fer_k) {
         if (is_file($fer_k)) { require_once $fer_k; break; }
     }
@@ -36,7 +46,8 @@ return array(
     'fassung' => 1,
     'linie'   => 'ferien',
     'plugin'  => 'Ferien und Feiertage',
-    'geladen' => function_exists('fer_config') && function_exists('fer_befehl_ansage') && function_exists('fer_mqtt_praefix'),
+    'geladen' => function_exists('fer_config') && function_exists('fer_befehl_ansage') && function_exists('fer_mqtt_praefix')
+                 && function_exists('fer_befehl_testpush'),
     'einstellungen' => function () {
         $c = fer_config();
         return array('praefix'     => fer_mqtt_praefix($c),

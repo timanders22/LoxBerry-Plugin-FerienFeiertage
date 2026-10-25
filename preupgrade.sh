@@ -36,8 +36,18 @@ esac
 MARKE="$BASE/data/plugins/$PFOLDER.upgrade_laeuft"
 # Seit 1.2.27 traegt die Marke die Zeit (Unix-Sekunden): die Befehlsbruecke (bin/befehlsbruecke.sh, gemeinsame
 # Stammfassung) startet nur, wenn keine Marke juenger als 3600 s liegt - eine leere Marke galt ihr nicht.
-if ! date +%s > "$MARKE" 2>/dev/null; then
-    echo "<WARNING> Die Marke fuer das Update liess sich nicht anlegen: $MARKE - postinstall.sh wird nichts zurueckspielen."
+# Gruppe 19 (1.2.28, FE6, Entscheidung 1 "nur Marke"; wortgleich Abfahrts-Assistent 1.6.31): laesst sich die Marke
+# nicht anlegen, hielte postinstall.sh das Update fuer eine Neuinstallation, und preinstall.sh legte die Einstellungen
+# beiseite. Deshalb Abbruch mit rc 2, VOR purge_installation (plugininstall.pl :882-890 -> &fail); bis 1.2.27 nur
+# eine Warnung und rc 0. In geschweiften Klammern: sonst schreibt die Schale ihre eigene Meldung ("Is a directory",
+# "cannot create ...") am 2>/dev/null vorbei ins Protokoll (N8).
+{ date +%s > "$MARKE"; } 2>/dev/null
+if ! grep -qx '[0-9][0-9]*' "$MARKE" 2>/dev/null; then
+    echo "<FAIL> Die Marke $MARKE liess sich nicht anlegen."
+    echo "<FAIL> Ohne sie hielte die Installation dieses Update fuer eine Neuinstallation und legte"
+    echo "<FAIL> die Einstellungen beiseite. Die Aktualisierung wird abgebrochen; die bisherige"
+    echo "<FAIL> Fassung bleibt unveraendert installiert."
+    exit 2
 fi
 
 # Gruppe 1 (1.2.27): die Befehlsbruecke vor dem Austausch der Dateien anhalten. Die Marke liegt schon - der Waechter
