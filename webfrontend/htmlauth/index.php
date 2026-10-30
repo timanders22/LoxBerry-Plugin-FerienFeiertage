@@ -207,6 +207,15 @@ function fe_x2_felder($form)
         foreach (ansage_x2_felder() as $fe_xn) {
             if (preg_match('/_token_loeschen\z/', $fe_xn)) { $h[] = $fe_xn; } else { $f[] = $fe_xn; }
         }
+        /* Welle Mehrfach-Ziele (1.2.29): die Tabelle der weiteren Ziele - im Formular name[2..6], hier name.N
+         * (fer_ziele_x2_name()/fer_ziele_x2_post()). Auch die Haken der Tabelle reisen als Text ("1"); ein fehlender
+         * heisst "aus" (fe_x2_sammeln() liest Haken nur ohne Index). */
+        if (fer_mit_zielen()) {
+            for ($fe_xz = 2; $fe_xz <= 6; $fe_xz++) {
+                foreach (array('tts_ziel_art', 'tts_ziel_wo', 'tts_ziel_laut', 'tts_ziel_sprache', 'tts_ziel_ein',
+                               'tts_ziel_loeschen') as $fe_xn) { $f[] = $fe_xn . '.' . $fe_xz; }
+            }
+        }
         /* Ansage-2: das Sprechtoken ist ein Geheimnisfeld - es kann als
          * beanstandet MARKIERT werden, sein Wert reist nie mit (weder
          * fe_x2_sammeln() noch fe_x2_pruefen() nehmen ihn an). */
@@ -507,11 +516,20 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['quellprobe']) && func
  * Aktionstoken (F5 im neuen Fenster sprach erneut, Entwurf B6) und ein eigener Knopf
  * nur fuer Google. POST - Umleitung - GET wie alle Handler: F5 loest nichts erneut aus.
  * Protokoll und Meldung nennen nie Text oder Token. */
-if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['ansage_test'])) {
+/* Welle Mehrfach-Ziele (Sprachmodul 1.2.1): die Knoepfe "Testansage an Ziel n" schicken ansage_test_ziel=n - es spricht
+ * nur dieses Ziel; der bisherige Knopf spricht an alle Ziele gleichzeitig. Eine unbrauchbare Nummer spricht nichts. */
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && (isset($_POST['ansage_test']) || isset($_POST['ansage_test_ziel']))) {
     $fe_tcfg = fer_config();
     $fe_tk = fer_ansage_k();
-    $fe_tr = ansage_testansage($fe_tcfg['tts'], $fe_tk);
-    fer_log('Testansage: ' . ansage_kurz($fe_tr));
+    $fe_tnur = (isset($_POST['ansage_test_ziel']) && fer_mit_zielen()) ? ansage_test_ziel($_POST) : 0;
+    if (isset($_POST['ansage_test_ziel']) && $fe_tnur === 0) {
+        $fe_tr = array('stand' => 0, 'kennung' => 'ZIEL_UNBEKANNT|-', 'art' => '-', 'http' => 0, 'zeile' => '', 'zeichen' => 0);
+    } elseif ($fe_tnur >= 1) {
+        $fe_tr = ansage_testansage($fe_tcfg['tts'], $fe_tk, $fe_tnur);
+    } else {
+        $fe_tr = ansage_testansage($fe_tcfg['tts'], $fe_tk);
+    }
+    fer_log('Testansage' . ($fe_tnur >= 1 ? ' an Ziel ' . $fe_tnur : '') . ': ' . ansage_kurz($fe_tr));
     if ($fe_tr['stand'] === 1) {
         $fe_note_art = 'ok';
         $fe_note = fer_t('TTS.M_TEST_OK');
@@ -765,10 +783,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['save'])) {
     list($fe_tts_alt) = ansage_vervollstaendigen($fe_tts_alt, 'musicserver');
     $fe_tmangel = array();
     $fe_tbean = array();
+    $fe_thinw = array();     // Welle Mehrfach-Ziele (Sprachmodul 1.2.1): Hinweise des Moduls, die das Speichern nicht verhindern
     $fe_new['tts'] = ansage_formular_lesen($_POST, $fe_tts_alt, $fe_tmangel, $fe_tbean,
-        array('modi' => fer_ansage_modi()), fer_ansage_k());
+        array('modi' => fer_ansage_modi(), 'ziele' => fer_mit_zielen()), fer_ansage_k(), $fe_thinw);
     foreach ($fe_tmangel as $fe_tm) { $fe_fehler[] = $fe_tm['text']; }
-    foreach ($fe_tbean as $fe_tb) { $fe_x2bean[] = $fe_tb; }
+    foreach ($fe_tbean as $fe_tb) { $fe_x2bean[] = fer_ziele_x2_name($fe_tb); }     // 1.2.29: name[N] der Tabelle -> name.N
     /* C8 (1.2.16): ueber fer_config_speichern() - Nebendatei, 0600,
      * Laengenvergleich, rename. */
     if ($fe_fehler) {
@@ -779,6 +798,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['save'])) {
                           'bean' => array_values(array_unique($fe_x2bean)));
     } elseif (fer_config_speichern($fe_new)) {
         $fe_saved = true;
+        foreach ($fe_thinw as $fe_th) { $fe_hinweise[] = $fe_th['text']; }     // Welle Mehrfach-Ziele: erst nach dem Speichern
         fe_zweitschrift($fe_cfgfile, $fe_bkfile, $fe_new);
         /* Gruppe 19 (1.2.28, V4): gespeichert, aber ohne Filterwort wirkt der Haken nicht - gelbe Meldung. */
         if (!empty($fe_new['ics_jaehrlich']) && trim((string) $fe_new['ics_filter']) === '') {
@@ -1596,13 +1616,16 @@ echo ansage_formular_html($fe_tts, array(
         return (is_array($fe_x2) && $fe_x2['form'] === 'save' && array_key_exists($n, $fe_x2['werte']))
             ? $fe_x2['werte'][$n] : $g;
     },
-    'm' => function ($n) { return fe_x2m($n); },
+    'm' => function ($n) { return fe_x2m(fer_ziele_x2_name($n)); },     // 1.2.29: name[N] der Tabelle -> name.N
     'c' => function ($n, $g) {
         global $fe_x2;
         return (is_array($fe_x2) && $fe_x2['form'] === 'save' && isset($fe_x2['werte'][$n]))
             ? $fe_x2['werte'][$n] === '1' : (bool) $g;
     },
-    'modi' => fer_ansage_modi()), fer_ansage_k()); ?>
+    'modi' => fer_ansage_modi(),
+    /* Welle Mehrfach-Ziele (Sprachmodul 1.2.1): Tabelle der weiteren Ausgabeziele; nach einer Beanstandung traegt sie das Eingetippte. */
+    'ziele' => fer_mit_zielen(),
+    'ziele_post' => (is_array($fe_x2) && $fe_x2['form'] === 'save') ? fer_ziele_x2_post($fe_x2['werte']) : null), fer_ansage_k()); ?>
 <div class="sm-hilfe"><?= fe_e(fer_t('TTS.H_TESTANSAGE')) ?></div>
 
 <button data-role="none" class="sm-btn sm-b-aktion" type="submit"><?php echo fer_t('TEXT.SPEICHERN'); ?></button>
@@ -2154,6 +2177,9 @@ if (function_exists('fer_haus_testzeile')) { list($fe_hz_st, $fe_hz_txt) = fer_h
     <input data-role="none" type="hidden" name="ansage_test" value="1">
     <input data-role="none" type="hidden" name="activetab" value="tab-test">
     <button data-role="none" class="sm-btn sm-b-aktion" type="submit" style="margin-top:0;"><?php echo fer_t('TEXT.TEST_ANSAGE'); ?></button>
+<?php /* Welle Mehrfach-Ziele (Sprachmodul 1.2.1): je weiteres Ziel ein Knopf "Testansage an Ziel n (Geraet (Plugin))";
+   ohne weitere Ziele nichts. */
+if (fer_mit_zielen()) { echo ansage_testknoepfe_html($fe_tts, fer_ansage_k(), array('klasse' => 'sm-btn sm-b-aktion')); } ?>
 </form>
 <?php /* Gruppe 19 (1.2.28, N2/E-E8): Test-Push und Neu abrufen als POST-Formulare (Formularmerkmal, POST - Umleitung -
    GET) statt Verweisen auf ferien.php mit dem Token. Neu abrufen fragt die Quelle und SCHREIBT termine.json - Reihe

@@ -10,6 +10,32 @@ Bundesländern/Kantonen.
 
 Kompatibel mit LoxBerry 3.x und **LoxBerry 4** (reines PHP, PHP 7.4 und 8.x).
 
+## Neu in 1.2.29
+
+Pflegefassung der Nachtwelle (29.10.2026) mit der Welle Mehrfach-Ziele, ohne Änderung an Ferien, Feiertagen und
+MQTT-Werten:
+
+* **Befehlsbrücke 1.0.2** (gemeinsame Stammfassung): Die Vorlage der MQTT-Befehle (`VQ_ferien_mqtt.xml`, Reiter
+  Einbindung in Loxone) kommt jetzt mit Windows-Zeilenenden (CRLF) wie die Ausfuhren der Loxone Config. Titel, Adresse
+  und Befehle sind unverändert, ein Neuimport ist nicht nötig.
+* **Sprachausgabe 1.2.1** (gemeinsames Modul): Sichtbar neu sind der Hinweis unter dem Feld „Sprache“, die Bezeichnung
+  „Amazon Echo (Alexa-NG)“ in der Auswahl und die Tabelle der weiteren Ausgabeziele (nächster Punkt). Abfahrts-Assistent
+  1.6.34, Abfuhrkalender 1.4.27 und Ferien und Feiertage 1.2.29 laden einander in denselben Prozess (Ferien-Bibliothek)
+  und gehen deshalb zusammen auf 1.2.1 – bitte alle drei einspielen.
+* **Mehrere Lautsprecher gleichzeitig (Sprachmodul 1.2.1):** Unter der Ausgabeart (jetzt „Ziel 1“) nimmt die Tabelle
+  *Weitere Ausgabeziele (gleichzeitig)* bis zu fünf weitere Ziele auf – etwa Google-Lautsprecher (Chromecast 4 Lox NG)
+  in einem Raum und Amazon Echo (Alexa-NG) in einem anderen neben dem Loxone Music Server. Die Ansage geht an alle
+  eingeschalteten Ziele zugleich (eine Ansage dauert so lange wie das langsamste Ziel, höchstens 10 s, mit Sonos 30 s);
+  scheitert eines, sprechen die anderen. Protokoll und Reiter Test nennen jedes Ziel, im Reiter Test gibt es je Ziel
+  eine Testansage. Die bestehende Einstellung ist unverändert Ziel 1; ohne weitere Ziele verhält sich alles wie in
+  1.2.28. Antwort an Loxone, MQTT-Themen und Brückenbefehl `ansage` bleiben, wie sie sind.
+* **Vor einem Zurückgehen** auf 1.2.28 oder älter die weiteren Ziele entfernen: ältere Fassungen kennen die Liste nicht
+  und fielen beim Laden auf die Werkseinstellung der Sprachausgabe zurück.
+* **Selbstprüfung „MQTT-Gateway V2: Datenpunkte angehakt?“** (Reiter Test): Läuft das Gateway in Fassung 2, sieht das
+  Plugin in `config/system/subscriptions.json` nach, ob alle Datenpunkte der Hakenliste (Reiter Einbindung in Loxone,
+  Schritt 2, auch die Texte der Musterseiten) angehakt sind und `ok` „Noncached“ trägt; was fehlt, steht mit Namen da. Unter Fassung 1 trifft die
+  Zeile nicht zu.
+
 ## Neu in 1.2.28
 
 Gruppe 19 (Prüfbericht, Entwurf und Entscheidungen vom 25.10.2026):

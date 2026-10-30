@@ -51,7 +51,8 @@ function fer_zone_aus($alt)
 
 /* Gemeinsame Sprachausgabe (Abschrift von Werkzeuge/gemeinsam/sprachausgabe.php,
  * Nr. 36 b). Seit 1.2.23 Stufe 2: Sprechen, Formular, Wertpruefung, Zeile im Reiter
- * Test und Testansage kommen aus dem Modul (Fassung 1.1.1). Liegt neben dieser Datei.
+ * Test und Testansage kommen aus dem Modul (Fassung 1.1.1; seit 1.2.29 Stamm 1.2.1 mit weiteren
+ * Ausgabezielen, fer_mit_zielen(), Welle Mehrfach-Ziele). Liegt neben dieser Datei.
  * Laedt ein anderes Plugin diese Bibliothek (Abfahrts-Assistent, AWM-Abfuhr) und hat
  * es schon eine eigene Abschrift geladen, gilt jene; die Datei schuetzt sich selbst
  * gegen doppeltes Laden. Was dort laeuft (fer_data(), fer_day(), fer_state() und
@@ -63,6 +64,35 @@ require_once __DIR__ . '/sprachausgabe.php';
  *  Fassungspruefung noetig: in fremden Prozessen ruft diese Bibliothek das Modul nur zum Vervollstaendigen. */
 function fer_ansage_modi() {
     return array('aus', 'musicserver', 'ms4h', 'audioserver', 'custom', 'alexang', 'cc4lox', 'sonos4lox', 'sonox');
+}
+
+/** Welle Mehrfach-Ziele (Sprachmodul 1.2.1): bietet diese Linie die Tabelle der weiteren Ausgabeziele an? Nur, wenn die
+ *  geladene Abschrift sie kann - laden zwei Abschriften im selben Prozess, gilt die zuerst geladene. */
+function fer_mit_zielen() {
+    return version_compare(ANSAGE_FASSUNG, '1.2.0', '>=') && function_exists('ansage_ziele_html')
+        && function_exists('ansage_ziele_pruefen') && function_exists('ansage_testknoepfe_html');
+}
+
+/** Welle Mehrfach-Ziele (Sprachmodul 1.2.1): die Schluessel des Ansageblocks, die diese Linie prueft und aus einer
+ *  Sicherung annimmt - die des Moduls und, wenn die geladene Abschrift sie kann, die Liste der weiteren Ziele. */
+function fer_ansage_schluessel() {
+    $s = array_keys(ansage_vorgaben());
+    if (fer_mit_zielen()) { $s[] = 'ziele'; }
+    return $s;
+}
+
+/** Welle Mehrfach-Ziele (Sprachmodul 1.2.1), X-2 mit flachen Schluesseln (name.N): die Felder der Tabelle heissen im
+ *  Formular name[N] (N = 2..6, ansage_ziel_feldnamen()). fer_ziele_x2_name() macht daraus name.N (Beanstandung und
+ *  Markierung), fer_ziele_x2_post() aus den gesammelten Eingaben wieder das POST der Tabelle (ziele_post). */
+function fer_ziele_x2_name($n) {
+    return is_string($n) ? (string) preg_replace('/^(tts_ziel_[a-z]+)\[([2-9])\]\z/', '$1.$2', $n) : $n;
+}
+function fer_ziele_x2_post(array $werte) {
+    $p = array();
+    foreach ($werte as $k => $v) {
+        if (is_string($v) && preg_match('/^(tts_ziel_[a-z]+)\.([2-9])\z/', (string) $k, $m)) { $p[$m[1]][(int) $m[2]] = $v; }
+    }
+    return isset($p['tts_ziel_art']) ? $p : null;
 }
 
 /**
@@ -2979,6 +3009,10 @@ function fer_selbsttest($basis = '', $vorher = null) {
     /* Gruppe 1 (1.2.27, Befehlsbruecke): nimmt sie Befehle an? "aus" (Haken, ab Werk) ist ein Hinweis, kein Kreuz. */
     $bl = fer_bruecke_lage();
     $add(fer_t('PRUEF.F_BRUECKE'), $bl[0], $bl[1]);
+    /* Nachtwelle N5 (1.2.29): stehen unter MQTT-Gateway V2 die Haken der Hakenliste (Reiter Einbindung, Schritt 2)
+     * in config/system/subscriptions.json - und "Noncached" bei ok? Unter V1 trifft es nicht zu. */
+    $fer_v2 = fer_mqtt_v2_haken_lage($cfg);
+    $add(fer_t('PRUEF.F_V2'), $fer_v2[0], $fer_v2[1]);
 
     /* Gruppe 19 (1.2.28): Noncached genau fuer ok (Hausform G15-G18), und die Haus-Themen haus/kalender: Themenliste
      * gegen die Werte in beide Richtungen (Regeln/07), kein Wert '', nur ganze Zahlen; bei Haken an "Broker erreichbar"
@@ -3407,6 +3441,108 @@ function fer_mqtt_hakenliste($cfg = null) {
         if (isset($texte[$n])) { $aus[] = array(fer_mqtt_thema($pf . '/' . $texte[$n]), $n, true, true, ''); }
     }
     return $aus;
+}
+
+/**
+ * Nachtwelle N5 (1.2.29): die angehakten Datenpunkte aus config/system/subscriptions.json des MQTT-Gateways V2
+ * (Subscriptions[].Id je Thema, Noncached; Form wie Govee gv_mqtt_v2_haken_lage(), MGiSmart mg_v2_abos()). Rein.
+ * Rueckgabe array(Thema => Noncached bool), null = keine JSON-Daten; ohne Liste in der Datei: leer (nichts angehakt).
+ */
+function fer_mqtt_v2_abos($daten)
+{
+    if (!is_array($daten)) { return null; }
+    $liste = array();
+    foreach (array('Subscriptions', 'subscriptions') as $s) {
+        if (isset($daten[$s]) && is_array($daten[$s])) { $liste = $daten[$s]; break; }
+    }
+    $abo = array();
+    foreach ($liste as $e) {
+        if (!is_array($e)) { continue; }
+        $id = '';
+        foreach (array('Id', 'id', 'Topic', 'topic') as $k) {
+            if (isset($e[$k]) && is_string($e[$k])) { $id = trim($e[$k]); break; }
+        }
+        if ($id === '') { continue; }
+        $nc = false;
+        foreach (array('Noncached', 'noncached') as $k) {
+            if (isset($e[$k]) && is_scalar($e[$k])) {
+                $nc = ($e[$k] === true || in_array(strtolower(trim((string) $e[$k])), array('1', 'true', 'yes', 'on'), true));
+                break;
+            }
+        }
+        $abo[$id] = !empty($abo[$id]) || $nc;
+    }
+    return $abo;
+}
+
+/** Nachtwelle N5 (1.2.29): eine Themenliste fuer die Pruefzeile kuerzen - hoechstens $n Eintraege, dann "... (+k)";
+ *  leer "-". */
+function fer_mqtt_v2_kurz(array $l, $n = 8)
+{
+    if (!$l) { return '-'; }
+    return implode(', ', array_slice($l, 0, $n)) . (count($l) > $n ? ' … (+' . (count($l) - $n) . ')' : '');
+}
+
+/**
+ * Nachtwelle N5 (1.2.29): Soll gegen Ist (Rein). Soll ist die Hakenliste fer_mqtt_hakenliste() - dieselbe Liste, die der Reiter "Einbindung in Loxone", Schritt 2 zeigt,
+ * mit den Textthemen, die dort stehen (sie haben einen Texteingang; ohne Haken kaemen sie unter V2 nie an). Fehlt ein
+ * Thema in den Abos, steht es in fehlt[]; braucht es "Noncached" und hat es nicht, steht es in ohne_nc[].
+ * Traegt ein Datenpunkt ohne Noncached-Bedarf "Noncached", steht er in nc_zuviel[] und ist ein Fehler
+ * (Hausform wie MGiSmart 1.1.28 mg_v2_haken_abgleich(), Vereinheitlichung 29.10.2026). Je Eintrag $soll:
+ * array(thema voll, noncached bool).
+ * Rueckgabe array(ok bool, fehlt[], ohne_nc[], angehakt, soll, davon Noncached, nc_zuviel[]).
+ */
+function fer_mqtt_v2_abgleich(array $soll, array $abo)
+{
+    $fehlt = array();
+    $ohne = array();
+    $zuviel = array();
+    $da = 0;
+    $n = 0;
+    $nc = 0;
+    foreach ($soll as $e) {
+        $n++;
+        if ($e[1]) { $nc++; }
+        if (!array_key_exists($e[0], $abo)) { $fehlt[] = $e[0]; continue; }
+        $da++;
+        if ($e[1] && !$abo[$e[0]]) { $ohne[] = $e[0]; }
+        elseif (!$e[1] && $abo[$e[0]]) { $zuviel[] = $e[0]; }
+    }
+    return array(!$fehlt && !$ohne && !$zuviel, $fehlt, $ohne, $da, $n, $nc, $zuviel);
+}
+
+/** Nachtwelle N5 (1.2.29): die Hakenliste (fer_mqtt_hakenliste(), EINE Quelle mit dem Reiter Einbindung) als Soll-
+ *  Liste des V2-Abgleichs: array(thema voll, noncached). */
+function fer_mqtt_v2_soll($cfg = null) {
+    $aus = array();
+    foreach (fer_mqtt_hakenliste($cfg) as $h) {
+        $aus[] = array($h[0], isset($h[4]) && $h[4] === 'N');
+    }
+    return $aus;
+}
+
+/**
+ * Nachtwelle N5 (1.2.29): Zeile "MQTT-Gateway V2: Datenpunkte angehakt?" der Selbstpruefung (Reiter Test). Liest nur
+ * config/system/general.json (fer_gateway_fassung()) und config/system/subscriptions.json. Rueckgabe
+ * array(true|false|null, Text): null = trifft nicht zu (Gateway V1, MQTT im Plugin aus) oder nicht feststellbar.
+ */
+function fer_mqtt_v2_haken_lage($cfg = null) {
+    if (!is_array($cfg)) { $cfg = fer_config(); }
+    $f = fer_gateway_fassung();
+    $home = fer_paths()['lbhome'];
+    if ($f === 0 || $home === '') { return array(null, fer_t('PRUEF.H_V2_UNKLAR')); }
+    if ($f < 2) { return array(null, fer_t('PRUEF.H_V2_V1')); }
+    if (empty($cfg['mqtt_enabled'])) { return array(null, fer_t('PRUEF.H_V2_MQTT_AUS')); }
+    $roh = @file_get_contents($home . '/config/system/subscriptions.json');
+    $abo = is_string($roh) ? fer_mqtt_v2_abos(json_decode($roh, true)) : null;
+    if ($abo === null) {
+        return array(null, sprintf(fer_t('PRUEF.H_V2_UNKLAR_DATEI'), 'config/system/subscriptions.json'));
+    }
+    list($ok, $fehlt, $ohne, $da, $soll, $nc, $zuviel) = fer_mqtt_v2_abgleich(fer_mqtt_v2_soll($cfg), $abo);
+    if ($soll === 0) { return array(null, fer_t('PRUEF.H_V2_LEER')); }   // leere Hakenliste: kein Urteil
+    if ($ok) { return array(true, sprintf(fer_t('PRUEF.H_V2_OK'), $soll, $nc)); }
+    return array(false, sprintf(fer_t('PRUEF.H_V2_FEHLT'), $da, $soll, fer_mqtt_v2_kurz($fehlt), fer_mqtt_v2_kurz($ohne))
+        . ($zuviel ? ' ' . sprintf(fer_t('PRUEF.H_V2_NC_ZUVIEL'), fer_mqtt_v2_kurz($zuviel)) : ''));
 }
 
 /**
@@ -3913,6 +4049,15 @@ function fer_sicherung_lesen($roh, $geltend = null, &$namen = null)
             $fehlend[] = $fk;
         }
     }
+    /* Welle Mehrfach-Ziele (Sprachmodul 1.2.1, Spaetliste): fehlt die Liste der weiteren Ziele in der Sicherung (Datei einer
+     * aelteren Fassung), gelten die jetzigen weiteren Ziele weiter - genannt im Hinweis. Eine Sicherung MIT leerer Liste
+     * heisst "keine weiteren Ziele" und wird so uebernommen. */
+    $fe_spaete = array();
+    if (array_key_exists('tts', $daten) && is_array($neu['tts']) && function_exists('ansage_sicherung_spaet')) {
+        list($neu['tts'], $fe_spaete) = ansage_sicherung_spaet($neu['tts'],
+            (isset($geltend['tts']) && is_array($geltend['tts'])) ? $geltend['tts'] : null);
+    }
+    foreach ($fe_spaete as $fe_sn) { $spaet[] = $fe_sn; }     // Welle Mehrfach-Ziele: tts.ziele (Spaetliste)
     if ($spaet) { $hinweise[] = sprintf(fer_t('TEXT.SICH_SPAET'), implode(', ', $spaet)); }
     if ($fehlend) {
         $mangel[] = sprintf(fer_t('TEXT.SICH_FEHLEND'), count($fehlend), implode(', ', $fehlend));
@@ -4071,6 +4216,7 @@ function fer_wert_pruefen($k, $w)
         case 'tts.lang': case 'tts.template': case 'tts.alexa_geraet': case 'tts.alexa_laut':
         case 'tts.google_geraet': case 'tts.google_laut': case 'tts.sonos_zone': case 'tts.sonos_laut':
         case 'tts.sonox_raum': case 'tts.sonox_laut': case 'tts.sonox_sprache':
+        case 'tts.ziele':     // Welle Mehrfach-Ziele (1.2.29): die Liste prueft das Modul mit der Modusliste dieser Linie
             /* Nr. 36 b, Stufe 2: dieselbe Pruefung wie beim Speichern und vor dem Senden
              * (ansage_wert_pruefen(): Ausgabeart aus fer_ansage_modi(), Adresse und Vorlage
              * im Heimnetz, Zonen, Lautstaerke 1-100). Der Grund nennt nie den Wert. Die
@@ -4091,7 +4237,7 @@ function fer_wert_pruefen($k, $w)
             $soll = $k === 'notify'
                 ? array('audio', 'push', 'time', 'freetag', 'ferienstart', 'bridge_month')
                 // Nr. 36 b, Stufe 2: die Schluessel des Moduls ohne die Sprechtoken
-                : array_values(array_diff(array_keys(ansage_vorgaben()), ansage_geheim()));
+                : array_values(array_diff(fer_ansage_schluessel(), ansage_geheim()));     // + ziele (1.2.29)
             $aus = array();
             $gruende = array();
             foreach ($w as $uk => $uw) {
