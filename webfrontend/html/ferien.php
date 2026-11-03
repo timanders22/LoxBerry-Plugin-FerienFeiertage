@@ -67,7 +67,9 @@ if ((int) (isset($fer_ep_cfg['endpunkt_ein']) ? $fer_ep_cfg['endpunkt_ein'] : 0)
     http_response_code(403);
     header('Content-Type: text/plain; charset=utf-8');
     header('Cache-Control: no-store');
-    $fer_ep_art = isset($_GET['selftest']) ? 'SELFTEST' : (isset($_GET['say']) ? 'SAY'
+    /* 1.2.30 (Nachzug 01.11.2026, wie Renault NG 2.1.23): !empty statt isset - bis 1.2.29 galt auch ?selftest=0 und ?selftest= als Selbsttest,
+     * und eine Adresse mit diesem Anhang tat nie etwas anderes. */
+    $fer_ep_art = !empty($_GET['selftest']) ? 'SELFTEST' : (isset($_GET['say']) ? 'SAY'
         : (isset($_GET['ptest']) ? 'PTEST' : (isset($_GET['refresh']) ? 'REFRESH' : 'FERIEN')));
     echo $fer_ep_art . ";OK=0;ERR=ENDPUNKT_AUS\n";
     exit;
@@ -138,7 +140,7 @@ if ($fer_refresh) {
  * Aufrufe (?selftest, ?say, ?ptest) werden nicht vermerkt. Das Token wird nie
  * vermerkt (fer_leser_http()). */
 $fer_leser_weg = isset($_GET['json']) ? 'json'
-    : ((isset($_GET['selftest']) || isset($_GET['say']) || isset($_GET['ptest'])) ? '' : 'zeile');
+    : ((!empty($_GET['selftest']) || isset($_GET['say']) || isset($_GET['ptest'])) ? '' : 'zeile');
 if ($fer_leser_weg !== '' && function_exists('fer_leser_http')) {
     register_shutdown_function(function () use ($fer_leser_weg) { fer_leser_http($fer_leser_weg); });
 }
@@ -161,7 +163,7 @@ header('Content-Type: text/plain; charset=utf-8');
  * dass etwas passiert. Sonst laesst sich nicht feststellen, ob die Adresse im
  * Miniserver noch stimmt, ohne wirklich etwas auszuloesen.
  */
-if (isset($_GET['selftest'])) {
+if (!empty($_GET['selftest'])) {
     $fe_cfg_st = fer_config();
     $fe_soll_st = (isset($fe_cfg_st['aktionstoken']) && is_string($fe_cfg_st['aktionstoken']))
         ? $fe_cfg_st['aktionstoken'] : '';

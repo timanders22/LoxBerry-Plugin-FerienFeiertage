@@ -785,7 +785,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['save'])) {
     $fe_tbean = array();
     $fe_thinw = array();     // Welle Mehrfach-Ziele (Sprachmodul 1.2.1): Hinweise des Moduls, die das Speichern nicht verhindern
     $fe_new['tts'] = ansage_formular_lesen($_POST, $fe_tts_alt, $fe_tmangel, $fe_tbean,
-        array('modi' => fer_ansage_modi(), 'ziele' => fer_mit_zielen()), fer_ansage_k(), $fe_thinw);
+        array('modi' => fer_ansage_modi(), 'ziele' => fer_mit_zielen(), 'token_vor_ort' => true, 'aus_gewinnt' => true), fer_ansage_k(), $fe_thinw);
+    list($fe_new['ansage_regeln']) = ansage_regeln_formular($_POST, fer_ansage_regeln(), array(), $fe_tmangel, $fe_tbean, fer_ansage_k());     // S2: Wann gesprochen wird (Stamm)
     foreach ($fe_tmangel as $fe_tm) { $fe_fehler[] = $fe_tm['text']; }
     foreach ($fe_tbean as $fe_tb) { $fe_x2bean[] = fer_ziele_x2_name($fe_tb); }     // 1.2.29: name[N] der Tabelle -> name.N
     /* C8 (1.2.16): ueber fer_config_speichern() - Nebendatei, 0600,
@@ -923,7 +924,7 @@ if (empty($fe_cfg['aktionstoken']) && $fe_zweit_voll) {
     }
 }
 $fe_notify = is_array($fe_cfg['notify']) ? $fe_cfg['notify'] : array();
-$fe_notify += array('audio' => 0, 'push' => 0, 'time' => '19:00', 'freetag' => 1, 'ferienstart' => 1, 'bridge_month' => 1);
+$fe_notify += array('audio' => 1, 'push' => 0, 'time' => '19:00', 'freetag' => 1, 'ferienstart' => 1, 'bridge_month' => 1);
 $fe_tts = is_array($fe_cfg['tts']) ? $fe_cfg['tts'] : array();
 list($fe_tts) = ansage_vervollstaendigen($fe_tts, 'musicserver');    // Nr. 36 b: eine Vorgabenliste
 $fe_st = function_exists('fer_state') ? fer_state() : array();
@@ -1625,7 +1626,20 @@ echo ansage_formular_html($fe_tts, array(
     'modi' => fer_ansage_modi(),
     /* Welle Mehrfach-Ziele (Sprachmodul 1.2.1): Tabelle der weiteren Ausgabeziele; nach einer Beanstandung traegt sie das Eingetippte. */
     'ziele' => fer_mit_zielen(),
-    'ziele_post' => (is_array($fe_x2) && $fe_x2['form'] === 'save') ? fer_ziele_x2_post($fe_x2['werte']) : null), fer_ansage_k()); ?>
+    'ziele_post' => (is_array($fe_x2) && $fe_x2['form'] === 'save') ? fer_ziele_x2_post($fe_x2['werte']) : null), fer_ansage_k());
+echo ansage_regeln_html(fer_ansage_regeln(), array(), array(), array(
+    'w' => function ($n, $g) {
+        global $fe_x2;
+        return (is_array($fe_x2) && $fe_x2['form'] === 'save' && array_key_exists($n, $fe_x2['werte']))
+            ? $fe_x2['werte'][$n] : $g;
+    },
+    'm' => function ($n) { return fe_x2m(fer_ziele_x2_name($n)); },
+    'c' => function ($n, $g) {
+        global $fe_x2;
+        return (is_array($fe_x2) && $fe_x2['form'] === 'save' && isset($fe_x2['werte'][$n]))
+            ? $fe_x2['werte'][$n] === '1' : (bool) $g;
+    },
+    'token_vor_ort' => true), fer_ansage_k()); ?>
 <div class="sm-hilfe"><?= fe_e(fer_t('TTS.H_TESTANSAGE')) ?></div>
 
 <button data-role="none" class="sm-btn sm-b-aktion" type="submit"><?php echo fer_t('TEXT.SPEICHERN'); ?></button>
@@ -2181,6 +2195,7 @@ if (function_exists('fer_haus_testzeile')) { list($fe_hz_st, $fe_hz_txt) = fer_h
    ohne weitere Ziele nichts. */
 if (fer_mit_zielen()) { echo ansage_testknoepfe_html($fe_tts, fer_ansage_k(), array('klasse' => 'sm-btn sm-b-aktion')); } ?>
 </form>
+<?= fer_ansage_lage_html() ?>
 <?php /* Gruppe 19 (1.2.28, N2/E-E8): Test-Push und Neu abrufen als POST-Formulare (Formularmerkmal, POST - Umleitung -
    GET) statt Verweisen auf ferien.php mit dem Token. Neu abrufen fragt die Quelle und SCHREIBT termine.json - Reihe
    "Loest etwas aus" (C6/O8); danach steht oben der Verweis auf die Debug-Ansicht. */ ?>
