@@ -11,7 +11,7 @@
  */
 
 error_reporting(E_ALL & ~E_DEPRECATED & ~E_NOTICE);
-ini_set('display_errors', '1');
+ini_set('display_errors', '0');
 
 /* Pfade - EINE Quelle fuer Oberflaeche und Bibliothek (Gruppe 19, 1.2.28, FE2 b / N3; Bauart Abfahrts-Assistent seit
  * 1.6.13). Bis 1.2.27 definierte diese Seite eine eigene lb_wurzel_ermitteln() (ohne data/plugins und general.json)
