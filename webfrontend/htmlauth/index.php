@@ -379,6 +379,7 @@ $fe_tab = preg_match($fe_muster, (string) (isset($_POST['activetab']) ? $_POST['
    Aktionen" (Ansage jetzt, Test-Push) mit dem Aktionstoken. */
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['vorlage_vo']) && function_exists('fer_vorlage_vo')) {
     list($fe_vname, $fe_vinhalt) = fer_vorlage_vo();
+    while (ob_get_level() > 0) { @ob_end_clean(); }
     header('Content-Type: application/x-download');
     header('Content-Disposition: attachment; filename="' . $fe_vname . '"');
     echo $fe_vinhalt;
@@ -391,6 +392,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['vorlage_vo']) && func
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['vorlage_befehle']) && function_exists('fer_vorlage_befehle')) {
     $fe_vb = fer_vorlage_befehle();
     if ($fe_vb !== null) {
+        while (ob_get_level() > 0) { @ob_end_clean(); }
         header('Content-Type: application/x-download');
         header('Content-Disposition: attachment; filename="' . $fe_vb[0] . '"');
         echo $fe_vb[1];
@@ -414,6 +416,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'GET' && isset($_GET['ansicht']) && is_string
 }
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['vorlage']) && function_exists('fer_vorlage')) {
     list($fe_vname, $fe_vinhalt) = fer_vorlage();
+    while (ob_get_level() > 0) { @ob_end_clean(); }
     header('Content-Type: application/x-download');
     header('Content-Disposition: attachment; filename="' . $fe_vname . '"');
     echo $fe_vinhalt;
@@ -973,6 +976,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['fer_sichern'])) {
     $fer_js = json_encode($fer_voll,
         JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
     if ($fer_js !== false) {
+        while (ob_get_level() > 0) { @ob_end_clean(); }
         header('Content-Type: application/json; charset=utf-8');
         header('Content-Disposition: attachment; filename="ferienfeiertage_einstellungen_'
                . date('Ymd_His') . '.json"');

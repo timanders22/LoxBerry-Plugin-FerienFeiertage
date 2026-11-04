@@ -10,6 +10,10 @@ Bundesländern/Kantonen.
 
 Kompatibel mit LoxBerry 3.x und **LoxBerry 4** (reines PHP, PHP 7.4 und 8.x).
 
+## Neu in 1.2.33
+
+- Vor einem Download wird jeder offene Ausgabepuffer geleert: PHP-Warnungen oder Reste landen nicht mehr in der heruntergeladenen Vorlage oder Sicherung.
+
 ## Neu in 1.2.32
 
 - Die Oberfläche zeigt PHP-Fehler nicht mehr im Browser an: Sie verrieten Serverpfade und hätten heruntergeladene Dateien beschädigt.
