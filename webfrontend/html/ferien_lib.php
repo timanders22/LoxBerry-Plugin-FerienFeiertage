@@ -914,6 +914,33 @@ function fer_rec($e, $name) {
  * - Die Region der Termindatei wird geprueft; eine fremde gilt nicht.
  * - Ein gescheitertes Schreiben ist ein Fehlschlag, kein 'frisch'.
  */
+/**
+ * 1.2.34 (FE-1): ist die Antwort ein Abruf oder nur gueltiges JSON? Bis 1.2.33 genuegte is_array:
+ * HTTP 200 mit [] oder einem fremden JSON-Objekt loeschte alle Feiertage, und die leere Datei galt
+ * sieben Tage als frisch (OK=1, feiertag=0 am Feiertag). Unbrauchbar ist eine Antwort ohne einen
+ * einzigen Termin-Eintrag. Eine leere Liste zaehlt nur dann, wenn der gespeicherte Topf nichts
+ * Laufendes enthielt - fuer manche Laender fuehrt die Quelle wirklich keine Ferien.
+ */
+function fer_antwort_brauchbar($d, $alt_topf, $von) {
+    if (!is_array($d)) {
+        return false;
+    }
+    if (!$d) {
+        foreach ((array) $alt_topf as $r) {
+            if (is_array($r) && isset($r['bis']) && (string) $r['bis'] >= $von) {
+                return false;
+            }
+        }
+        return true;
+    }
+    foreach ($d as $e) {
+        if (is_array($e) && isset($e['startDate'])) {
+            return true;
+        }
+    }
+    return false;
+}
+
 function fer_fetch($force = false) {
     $cfg = fer_config();
     $f = fer_datafile();
@@ -957,7 +984,7 @@ function fer_fetch($force = false) {
         $topf = ($ep === 'SchoolHolidays') ? 'ferien' : 'feiertage';
         $js = fer_http($base . $ep . '?' . ($ep === 'SchoolHolidays' ? $qs : $q));
         $d = @json_decode((string) $js, true);
-        if (!is_array($d)) {
+        if (!fer_antwort_brauchbar($d, ($passt && isset($alt[$topf])) ? $alt[$topf] : array(), $von)) {   // 1.2.34 (FE-1)
             $fehl[] = $topf;
             continue;
         }
@@ -998,7 +1025,8 @@ function fer_fetch($force = false) {
             . '&validFrom=' . $von . '&validTo=' . $bis;
         $js2 = fer_http($base . 'SchoolHolidays?' . $q2);
         $d2 = @json_decode((string) $js2, true);
-        if (is_array($d2)) {
+        $alt2 = ($passt && isset($alt['ferien2']) && (string) (isset($alt['sub2']) ? $alt['sub2'] : '') === $sub2) ? $alt['ferien2'] : array();
+        if (fer_antwort_brauchbar($d2, $alt2, $von)) {   // 1.2.34 (FE-1)
             $geholt++;
             $out['sub2'] = $sub2;
             foreach ($d2 as $e) {
@@ -4117,7 +4145,11 @@ function fer_sicherung_lesen($roh, $geltend = null, &$namen = null)
         if ($k === 'ansage_regeln') {     // S2: ungueltig = abgewiesen, gueltig = uebernommen
             $s2_g = '';
             $s2_r = ansage_regeln_wert($w, $s2_g);
-            if ($s2_r === null) {  continue; }
+            if ($s2_r === null) {     // 1.2.34: bis 1.2.33 stillschweigend uebergangen, die Datei galt als heil
+                $mangel[] = sprintf(fer_t('TEXT.SICH_WERT'), 'config.ansage_regeln', ansage_kennung_text($s2_g !== '' ? $s2_g : 'M_R_BLOCK', fer_ansage_k()));
+                $namen[] = 'config.ansage_regeln';
+                continue;
+            }
             $neu['ansage_regeln'] = $s2_r;
             
             continue;

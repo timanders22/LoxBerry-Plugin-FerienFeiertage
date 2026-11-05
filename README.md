@@ -10,6 +10,14 @@ Bundesländern/Kantonen.
 
 Kompatibel mit LoxBerry 3.x und **LoxBerry 4** (reines PHP, PHP 7.4 und 8.x).
 
+## Neu in 1.2.34
+
+- **Update:** Scheitert die Sicherung oder die Marke, bricht das Update ab und die bisherige Fassung bleibt.
+- **Sprechtoken:** Ein von Hand eingetragenes Alexa- oder Google-Token wird nicht mehr vom Token des Nachbar-Plugins überschrieben.
+- **Formular:** Tafel- und HomePod-Felder gehören jetzt zu den Feldern, die eine Beanstandung im Formular mitführt und markiert. Ein beanstandeter Tafel- oder HomePod-Name bleibt zur Korrektur im Feld stehen.
+- **Sicherung zurückspielen:** Ungültige Regeln der Sprachausgabe in der Datei werden gemeldet und die Datei wird abgewiesen, statt sie still zu übergehen.
+- **Abruf:** Eine leere oder fremde Antwort der Datenquelle löscht die gespeicherten Feiertage und Ferien nicht mehr; der alte Stand bleibt, und das Plugin versucht es bald wieder.
+
 ## Neu in 1.2.33
 
 - Vor einem Download wird jeder offene Ausgabepuffer geleert: PHP-Warnungen oder Reste landen nicht mehr in der heruntergeladenen Vorlage oder Sicherung.

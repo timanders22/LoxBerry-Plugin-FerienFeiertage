@@ -207,6 +207,8 @@ function fe_x2_felder($form)
         foreach (ansage_x2_felder() as $fe_xn) {
             if (preg_match('/_token_loeschen\z/', $fe_xn)) { $h[] = $fe_xn; } else { $f[] = $fe_xn; }
         }
+        /* 1.2.34: Tafel und HomePod dazu: ansage_regeln_formular() beanstandet sie, ohne Eintrag hier ging die Beanstandung samt Eingaben verloren. */
+        $f[] = 'ansage_tafel_namen'; $f[] = 'ansage_homepod_geraet'; $h[] = 'ansage_tafel_ein'; $h[] = 'ansage_homepod_ein';
         /* Welle Mehrfach-Ziele (1.2.29): die Tabelle der weiteren Ziele - im Formular name[2..6], hier name.N
          * (fer_ziele_x2_name()/fer_ziele_x2_post()). Auch die Haken der Tabelle reisen als Text ("1"); ein fehlender
          * heisst "aus" (fe_x2_sammeln() liest Haken nur ohne Index). */
@@ -790,6 +792,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['save'])) {
     $fe_new['tts'] = ansage_formular_lesen($_POST, $fe_tts_alt, $fe_tmangel, $fe_tbean,
         array('modi' => fer_ansage_modi(), 'ziele' => fer_mit_zielen(), 'token_vor_ort' => true, 'aus_gewinnt' => true), fer_ansage_k(), $fe_thinw);
     list($fe_new['ansage_regeln']) = ansage_regeln_formular($_POST, fer_ansage_regeln(), array(), $fe_tmangel, $fe_tbean, fer_ansage_k());     // S2: Wann gesprochen wird (Stamm)
+    // 1.2.34: ein eingetipptes oder geloeschtes Sprechtoken ist nicht mehr vom Nachbarn; bis 1.2.33 verlor das Speichern den Vermerk ganz.
+    $fe_new['ansage_token_herkunft'] = ansage_token_herkunft_formular($_POST, isset($fe_vorher['ansage_token_herkunft']) ? $fe_vorher['ansage_token_herkunft'] : array());
     foreach ($fe_tmangel as $fe_tm) { $fe_fehler[] = $fe_tm['text']; }
     foreach ($fe_tbean as $fe_tb) { $fe_x2bean[] = fer_ziele_x2_name($fe_tb); }     // 1.2.29: name[N] der Tabelle -> name.N
     /* C8 (1.2.16): ueber fer_config_speichern() - Nebendatei, 0600,
