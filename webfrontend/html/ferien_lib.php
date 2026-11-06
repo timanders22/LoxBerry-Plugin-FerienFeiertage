@@ -3219,7 +3219,8 @@ function fer_selbsttest($basis = '', $vorher = null) {
     $add(fer_t('PRUEF.F_V2'), $fer_v2[0], $fer_v2[1]);
 
     /* Gruppe 19 (1.2.28): Noncached genau fuer ok (Hausform G15-G18), und die Haus-Themen haus/kalender: Themenliste
-     * gegen die Werte in beide Richtungen (Regeln/07), kein Wert '', nur ganze Zahlen; bei Haken an "Broker erreichbar"
+     * gegen die Werte in beide Richtungen (Regeln/07), kein Wert '', ganze Zahlen - nur datum_text (1.2.36) ist Text
+     * TT.MM.JJJJ, unabhaengig nachgerechnet aus datum, dazu feste Faelle; bei Haken an "Broker erreichbar"
      * (eine Sitzung ohne Senden - ohne Kennwort, ohne Wert in der Zeile). */
     $fer_nc = array();
     foreach (fer_mqtt_hakenliste($cfg) as $fer_h) {
@@ -3232,7 +3233,21 @@ function fer_selbsttest($basis = '', $vorher = null) {
     $fer_ht = fer_haus_themen();
     $fer_hf = array_merge(array_keys(array_diff_key($fer_ht, $fer_hw)), array_keys(array_diff_key($fer_hw, $fer_ht)));
     foreach ($fer_hw as $fer_hk => $fer_v) {
+        if ($fer_hk === 'haus/kalender/datum_text') { continue; }
         if (!is_int($fer_v) || (string) $fer_v === '') { $fer_hf[] = $fer_hk; }
+    }
+    /* 1.2.36: datum_text ist derselbe Tag wie datum als TT.MM.JJJJ - hier ohne fer_haus_datum_text() aus den Ziffern
+     * von datum nachgerechnet; '-' nur, wenn datum kein gueltiger Tag ist. Dazu feste Faelle der Formatfunktion. */
+    $fer_dz = isset($fer_hw['haus/kalender/datum']) ? (int) $fer_hw['haus/kalender/datum'] : 0;
+    $fer_ds = sprintf('%08d', $fer_dz);
+    $fer_dsoll = (strlen($fer_ds) === 8 && ctype_digit($fer_ds)
+        && checkdate((int) substr($fer_ds, 4, 2), (int) substr($fer_ds, 6, 2), (int) substr($fer_ds, 0, 4)))
+        ? substr($fer_ds, 6, 2) . '.' . substr($fer_ds, 4, 2) . '.' . substr($fer_ds, 0, 4) : '-';
+    $fer_dt = isset($fer_hw['haus/kalender/datum_text']) ? $fer_hw['haus/kalender/datum_text'] : null;
+    if (!is_string($fer_dt) || $fer_dt === '' || $fer_dt !== $fer_dsoll) { $fer_hf[] = 'haus/kalender/datum_text'; }
+    foreach (array(array(20261106, '06.11.2026'), array(20260101, '01.01.2026'), array(20281231, '31.12.2028'),
+                   array(20280229, '29.02.2028'), array(20270229, '-'), array(0, '-')) as $fer_df) {
+        if (fer_haus_datum_text($fer_df[0]) !== $fer_df[1]) { $fer_hf[] = 'haus/kalender/datum_text(' . $fer_df[0] . ')'; }
     }
     $add(fer_t('PRUEF.F_HAUS'), count($fer_hf) === 0,
         count($fer_hf) === 0 ? sprintf(fer_t('PRUEF.H_HAUS_OK'), count($fer_ht))
@@ -5205,8 +5220,9 @@ function fer_ics_selbstpruefung()
 }
 
 /* ---------- Anbieter haus/kalender/* (V1, Entscheidung 3; Entwurf 2.3-2.7) ----------
- * Ab Werk aus (Haken haus_kalender_ein im Reiter MQTT, wirkt nur mit "Zustand per MQTT veroeffentlichen"). Nur Zahlen,
- * nie Namen. Gesendet per kurzer TCP-Sitzung direkt an den Broker, nicht ueber den UDP-Eingang des Gateways: ein
+ * Ab Werk aus (Haken haus_kalender_ein im Reiter MQTT, wirkt nur mit "Zustand per MQTT veroeffentlichen"). Nur Zahlen
+ * und seit 1.2.36 der Tag als Text (datum_text, TT.MM.JJJJ - ein Datum, kein Name), nie Namen. Gesendet per kurzer
+ * TCP-Sitzung direkt an den Broker, nicht ueber den UDP-Eingang des Gateways: ein
  * verlorenes Datagramm liesse einen retained Tageswert einen Tag falsch stehen, und das Abraeumen braucht das
  * Ruecklesen ohnehin. Kein mosquitto_pub (kein Kennwort auf einer Befehlszeile), die Befehlsbruecke bleibt unveraendert.
  * Fremde haus-Themen fasst diese Linie nie an; haus/tag/ bleibt den BLE-Tags vorbehalten. */
@@ -5215,7 +5231,9 @@ function fer_ics_selbstpruefung()
  *  fuer Senden, Abraeumen, Reiter Test und Selbstpruefung. */
 function fer_haus_themen()
 {
-    $t = array('haus/kalender/datum' => true);
+    /* 1.2.36 (Hausherr 06.11.2026): datum_text direkt hinter datum - derselbe Tag als Text TT.MM.JJJJ, retained wie
+     * datum; datum behaelt seine Bedeutung (JJJJMMTT als Zahl). */
+    $t = array('haus/kalender/datum' => true, 'haus/kalender/datum_text' => true);
     foreach (array('heute', 'morgen') as $tag) {
         foreach (array('feiertag', 'ruhetag', 'frei', 'urlaub') as $w) {
             $t['haus/kalender/' . $tag . '/' . $w] = true;
@@ -5228,10 +5246,24 @@ function fer_haus_themen()
     return $t;
 }
 
-/** Die zwoelf retained Themen (ohne den Zaehler) - abgeraeumt werden nur diese. */
+/** Die dreizehn retained Themen (ohne den Zaehler; seit 1.2.36 mit datum_text) - abgeraeumt werden nur diese. */
 function fer_haus_retained()
 {
     return array_keys(array_filter(fer_haus_themen()));
+}
+
+/** datum_text (1.2.36, Hausherr 06.11.2026): derselbe Tag wie haus/kalender/datum (JJJJMMTT als ganze Zahl) als Text
+ *  TT.MM.JJJJ - Tag und Monat zweistellig, Jahr vierstellig -, damit Loxone ihn lesbar anzeigen kann. Folgt datum; ist
+ *  datum kein gueltiger Tag (datum ist immer gesetzt, aber aus einem kaputten Zustand wird 0), dann '-'. */
+function fer_haus_datum_text($datum)
+{
+    $d = (int) $datum;
+    if ($d < 10000101 || $d > 99991231) { return '-'; }
+    $j = intdiv($d, 10000);
+    $m = intdiv($d, 100) % 100;
+    $t = $d % 100;
+    if (!checkdate($m, $t, $j)) { return '-'; }
+    return sprintf('%02d.%02d.%04d', $t, $m, $j);
 }
 
 /** Ist dieser Tagessatz ein gesetzlicher Feiertag im Sinne der Plugin-Einstellung? Ein halber nur, wenn er dort als
@@ -5244,7 +5276,8 @@ function fer_haus_feiertag($tag, $cfg)
 }
 
 /**
- * Die Werte der Haus-Themen aus dem Zustand (fer_state()) - Thema => ganze Zahl. ok = 1 (Daten der Quelle decken heute
+ * Die Werte der Haus-Themen aus dem Zustand (fer_state()) - Thema => ganze Zahl; einzige Ausnahme ist datum_text
+ * (1.2.36), der Tag von datum als Text TT.MM.JJJJ (fer_haus_datum_text(), '-' ohne gueltiges datum). ok = 1 (Daten der Quelle decken heute
  * und morgen): volle Aussage. Sonst ist jede Zahl, die an der Quelle haengt, -1 ("ohne Aussage", Nr. 15); urlaub kommt
  * aus eigenen Daten und bleibt 0/1 (E-E6). datum ist immer der Tag der Heute-Werte. ferien_in = FERIENIN (eigene
  * Termine "Ferien"/"Urlaub" zaehlen mit, E-E7), ferien_rest = FERIENREST nur bei laufenden Ferien, feiertag_in =
@@ -5256,6 +5289,7 @@ function fer_haus_werte($st, $cfg, $zaehler)
     $w = array();
     $w['haus/kalender/datum'] = (int) str_replace('-', '',
         (string) (isset($st['heute']['datum']) ? $st['heute']['datum'] : date('Y-m-d')));
+    $w['haus/kalender/datum_text'] = fer_haus_datum_text($w['haus/kalender/datum']);
     foreach (array('heute', 'morgen') as $tag) {
         $s = (isset($st[$tag]) && is_array($st[$tag])) ? $st[$tag] : array();
         $f = fer_haus_feiertag($s, $cfg);
@@ -5493,7 +5527,7 @@ function fer_haus_frueher_setzen($ja)
  * Anbieter haus/kalender/* im Minutenlauf (bin/cron.php nach dem MQTT-Block). Nur mit haus_kalender_ein = 1 UND
  * mqtt_enabled = 1 UND einer erkannten LoxBerry-Wurzel; sonst wird der Merker verworfen (das Einschalten schickt dann
  * den vollen Satz), und war diese Installation Anbieter (_haus_frueher), raeumt der Lauf hoechstens alle 10 Minuten die
- * zwoelf retained Themen ab. Gesendet werden die geaenderten Themen, der volle Satz ohne Merker (erster Lauf, Neustart,
+ * dreizehn retained Themen ab. Gesendet werden die geaenderten Themen, der volle Satz ohne Merker (erster Lauf, Neustart,
  * Update, nach dem Einschalten) und alle 30 Minuten (heilt einen Broker ohne Persistenz), dazu in JEDER Sitzung
  * haus/kalender/zaehler (nicht retained, derselbe Zaehler wie status/zaehler). Der Merker wird NUR nach einer Sitzung
  * mit lage 'ok' fortgeschrieben. Rueckgabe: Ergebnis der Sitzung oder null.
@@ -5544,7 +5578,7 @@ function fer_haus_lauf($st, $cfg)
 }
 
 /**
- * Die zwoelf retained Themen abraeumen (Entwurf 2.6, Nr. 15): erst zuruecklesen; ist nichts belegt -> 'nichts'. Sonst
+ * Die dreizehn retained Themen abraeumen (Entwurf 2.6, Nr. 15): erst zuruecklesen; ist nichts belegt -> 'nichts'. Sonst
  * PUBLISH mit Retain-Bit und LEERER Nutzlast fuer die belegten Themen und in derselben Sitzung zuruecklesen, bis zu drei
  * Runden. Nur die eigenen Namen aus fer_haus_themen(), nie haus/#, nie fremde Themen. Rueckgabe array('lage' =>
  * geleert | nichts | rest | kein_broker, 'offen' => belegte Themen, 'grund' => Lage der gescheiterten Sitzung).
@@ -5578,7 +5612,7 @@ function fer_haus_leeren($runden = 3)
 /**
  * Folgen einer Aenderung von haus_kalender_ein/mqtt_enabled (Reiter MQTT, Zurueckspielen einer Sicherung): wird die
  * Installation Anbieter, verfaellt der Merker (der naechste Minutenlauf schickt den vollen Satz); hoert sie auf, Anbieter
- * zu sein, und war sie es (Haken und MQTT an) oder traegt sie _haus_frueher, raeumt sie die zwoelf Themen mit Ruecklesen
+ * zu sein, und war sie es (Haken und MQTT an) oder traegt sie _haus_frueher, raeumt sie die dreizehn Themen mit Ruecklesen
  * ab. Rueckgabe array(Meldung oder '', 'ok'|'warn', neuer Merker _haus_frueher 0/1 oder null = unveraendert).
  */
 function fer_haus_folgen($alt, $neu)
@@ -5638,7 +5672,8 @@ function fer_haus_testzeile($cfg)
     $g = function ($t) use ($w) { return isset($w[$t]) ? (string) $w[$t] : '-'; };
     $txt = sprintf(fer_t('MQTT.HAUS_T_AN'),
         (is_array($mz) && isset($mz['zeit'])) ? date('d.m.Y H:i:s', (int) $mz['zeit']) : '-',
-        $g('haus/kalender/datum'), $g('haus/kalender/heute/frei'), $g('haus/kalender/morgen/frei'),
+        $g('haus/kalender/datum'), $g('haus/kalender/datum_text'), $g('haus/kalender/heute/frei'),
+        $g('haus/kalender/morgen/frei'),
         date('H:i:s', (int) $sz['zeit']), (string) $sz['lage']);
     return array($sz['lage'] === 'ok' && time() - (int) $sz['zeit'] <= 150 ? 1 : 0, $txt);
 }

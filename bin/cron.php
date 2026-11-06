@@ -52,7 +52,7 @@ date_default_timezone_set('Europe/Berlin');
  * darin.
  */
 /* Gruppe 19 (1.2.28, Entwurf 2.6, E-E13): die Deinstallation ruft "cron.php --haus-leeren" vor dem Loeschen - die
- * zwoelf retained Themen haus/kalender/* abraeumen (mit Ruecklesen), nur wenn diese Installation Anbieter ist oder war
+ * dreizehn retained Themen haus/kalender/* abraeumen (mit Ruecklesen), nur wenn diese Installation Anbieter ist oder war
  * (haus_kalender_ein oder Merker _haus_frueher). Vor der Sperre: ein haengender Minutenlauf haelt die Deinstallation
  * nicht auf. Rueckgabe immer 0. */
 if (isset($argv) && is_array($argv) && in_array('--haus-leeren', $argv, true)) {

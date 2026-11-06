@@ -79,7 +79,7 @@ fi
 # Zustand geaendert haben, und eine alte state.json wuerde bis zu einer
 # Stunde weiterbenutzt. Der MQTT-Merker faellt mit - der naechste Lauf sendet
 # den Vollsatz (Regeln/07). Seit 1.2.28 (Gruppe 19, V1) ebenso der Merker der Haus-Themen haus/kalender: der naechste
-# Lauf schickt dann alle zwoelf retained Themen (Vollversand).
+# Lauf schickt dann alle dreizehn retained Themen (Vollversand; seit 1.2.36 mit datum_text).
 rm -f "/tmp/$PFOLDER/state.json" "/tmp/$PFOLDER/mqtt_sig.txt" "/tmp/$PFOLDER/mqtt_beat" \
       "/tmp/$PFOLDER/haus_letzte.json" "/tmp/$PFOLDER/haus_sitzung.json" 2>/dev/null
 

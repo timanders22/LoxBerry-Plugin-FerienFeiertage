@@ -296,7 +296,7 @@ function fe_x2zahl($feld, $wert)
 }
 
 /* Gruppe 19 (1.2.28, V1, Entwurf 2.6): Folgen einer Aenderung von haus_kalender_ein/mqtt_enabled - nach dem Speichern
- * (Reiter MQTT, Zurueckspielen einer Sicherung). fer_haus_folgen() raeumt die zwoelf Themen haus/kalender ab, wenn diese
+ * (Reiter MQTT, Zurueckspielen einer Sicherung). fer_haus_folgen() raeumt die dreizehn Themen haus/kalender ab, wenn diese
  * Installation aufhoert, Anbieter zu sein (und es war oder den Merker traegt); der Merker _haus_frueher bleibt bei 'rest'
  * oder 'kein_broker' stehen - dann raeumen der Minutenlauf und die Deinstallation noch einmal. */
 function fe_haus_folgen($alt, $neu)
@@ -609,7 +609,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['mqtt_save'])) {
             }
         }
         /* Gruppe 19 (1.2.28, V1): Haken an -> der naechste Minutenlauf schickt den vollen Satz; Haken oder MQTT aus ->
-         * die zwoelf Themen haus/kalender abraeumen (mit Ruecklesen), nur als (ehemaliger) Anbieter. */
+         * die dreizehn Themen haus/kalender abraeumen (mit Ruecklesen), nur als (ehemaliger) Anbieter. */
         fe_haus_folgen($fe_mqtt_alt, $fe_new);
     } else {
         $fe_err = sprintf(fer_t('MELD.SPEICHERN_FEHL'), $fe_cfgfile);

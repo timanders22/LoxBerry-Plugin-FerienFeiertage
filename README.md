@@ -10,6 +10,12 @@ Bundesländern/Kantonen.
 
 Kompatibel mit LoxBerry 3.x und **LoxBerry 4** (reines PHP, PHP 7.4 und 8.x).
 
+## Neu in 1.2.36
+
+- **Datum als Text:** Mit „Kalendertage an andere Plugins“ (Reiter MQTT) kommt neben `haus/kalender/datum` (JJJJMMTT)
+  jetzt auch `haus/kalender/datum_text` – derselbe Tag lesbar als TT.MM.JJJJ, z. B. 06.11.2026, retained und beim
+  Ausschalten mit abgeräumt. So kann Loxone das Datum direkt anzeigen; `haus/kalender/datum` bleibt unverändert.
+
 ## Neu in 1.2.35
 
 - Gemeinsames Sprachmodul 1.4.2: Wird eine Ansage bewusst nicht gesprochen (gerade eben schon gesagt, gesperrt oder Ruhezeit), steht das im Protokoll jetzt so – und nicht mehr als Fehler.
@@ -77,7 +83,8 @@ MQTT-Werten:
 Gruppe 19 (Prüfbericht, Entwurf und Entscheidungen vom 25.10.2026):
 
 * **Neu: Kalendertage an andere Plugins** (Reiter MQTT, ab Werk aus): `haus/kalender/heute|morgen/feiertag|ruhetag|frei|urlaub`,
-  `haus/kalender/ferien_in`, `…/ferien_rest`, `…/feiertag_in` und `haus/kalender/datum` (retained) sowie
+  `haus/kalender/ferien_in`, `…/ferien_rest`, `…/feiertag_in` und `haus/kalender/datum` (retained; seit 1.2.36 daneben
+  `haus/kalender/datum_text`, derselbe Tag als Text TT.MM.JJJJ) sowie
   `haus/kalender/zaehler` je Minute – nur Zahlen, nie Namen, über eine kurze Verbindung direkt zum Broker. Beim
   Ausschalten und bei der Deinstallation räumt das Plugin die Themen mit Rücklesen ab. Erster Abnehmer später:
   Sprachsteuerung („Ist morgen schulfrei?“).
