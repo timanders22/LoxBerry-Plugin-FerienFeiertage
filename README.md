@@ -10,6 +10,10 @@ Bundesländern/Kantonen.
 
 Kompatibel mit LoxBerry 3.x und **LoxBerry 4** (reines PHP, PHP 7.4 und 8.x).
 
+## Neu in 1.2.37
+
+- „Einstellungen sichern“ schreibt den internen Vermerk, welches Sprechtoken vom Nachbar-Plugin übernommen ist, nicht mehr in die Datei. Beim Zurückspielen wurde er schon bisher nicht übernommen.
+
 ## Neu in 1.2.36
 
 - **Datum als Text:** Mit „Kalendertage an andere Plugins“ (Reiter MQTT) kommt neben `haus/kalender/datum` (JJJJMMTT)

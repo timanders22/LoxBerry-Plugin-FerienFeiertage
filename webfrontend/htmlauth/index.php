@@ -969,6 +969,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['fer_sichern'])) {
      * wer umzieht, braucht die Datei, und die Werte lassen sich darin
      * berichtigen. fer_sicherung_lesen() uebergeht Schluessel mit "_". */
     $fer_voll = fer_config();
+    /* 1.2.37: der Vermerk, welches Sprechtoken vom Nachbarn uebernommen ist, geht nie in eine Sicherung (Stamm;
+     * fer_sicherung_lesen() uebergeht ihn ohnehin). Bis 1.2.36 stand er darin (gemessen 07.11.2026). */
+    unset($fer_voll['ansage_token_herkunft']);
     /* Ansage-2: das Alexa-NG-Sprechtoken wird wie ein Kennwort behandelt und
      * geht NICHT mit; das Zurueckspielen behaelt das geltende. */
     // Ansage-3: ebenso das Sprechtoken fuer Google-Lautsprecher (Nr. 36 b: eine Quelle).
