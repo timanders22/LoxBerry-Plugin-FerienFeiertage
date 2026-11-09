@@ -10,6 +10,10 @@ Bundesländern/Kantonen.
 
 Kompatibel mit LoxBerry 3.x und **LoxBerry 4** (reines PHP, PHP 7.4 und 8.x).
 
+## Neu in 1.2.38
+
+- Sprachausgabe: Wird das Formular beanstandet, stehen „Nachtruhe einhalten“, „Nachtruhe von“, „Nachtruhe bis“ und „Dieselbe Ansage höchstens einmal in (Minuten)“ danach so da, wie sie eingetippt wurden, und ein beanstandetes Feld ist rot umrandet. Bisher kamen die gespeicherten Werte zurück. Gespeichert wurde in beiden Fällen nichts.
+
 ## Neu in 1.2.37
 
 - „Einstellungen sichern“ schreibt den internen Vermerk, welches Sprechtoken vom Nachbar-Plugin übernommen ist, nicht mehr in die Datei. Beim Zurückspielen wurde er schon bisher nicht übernommen.

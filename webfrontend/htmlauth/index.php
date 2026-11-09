@@ -209,6 +209,12 @@ function fe_x2_felder($form)
         }
         /* 1.2.34: Tafel und HomePod dazu: ansage_regeln_formular() beanstandet sie, ohne Eintrag hier ging die Beanstandung samt Eingaben verloren. */
         $f[] = 'ansage_tafel_namen'; $f[] = 'ansage_homepod_geraet'; $h[] = 'ansage_tafel_ein'; $h[] = 'ansage_homepod_ein';
+        /* 1.2.38 (Bestandspruefung 09.11.2026): ebenso die uebrigen Felder des Regelblocks (Ruhezeit, Sperre) -
+         * ansage_regeln_formular() beanstandet sie, und ohne Eintrag kamen nach der Beanstandung die gespeicherten
+         * Werte zurueck; der Haken "Ruhezeit" ist ein Haken (abgehakt = '0'). */
+        foreach (ansage_regeln_x2_felder() as $fe_xn) {
+            if ($fe_xn === 'ansage_ruhe_ein') { $h[] = $fe_xn; } else { $f[] = $fe_xn; }
+        }
         /* Welle Mehrfach-Ziele (1.2.29): die Tabelle der weiteren Ziele - im Formular name[2..6], hier name.N
          * (fer_ziele_x2_name()/fer_ziele_x2_post()). Auch die Haken der Tabelle reisen als Text ("1"); ein fehlender
          * heisst "aus" (fe_x2_sammeln() liest Haken nur ohne Index). */
