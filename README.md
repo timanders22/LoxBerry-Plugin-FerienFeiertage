@@ -10,6 +10,10 @@ Bundesländern/Kantonen.
 
 Kompatibel mit LoxBerry 3.x und **LoxBerry 4** (reines PHP, PHP 7.4 und 8.x).
 
+## Neu in 1.2.39
+
+- Neuer Haken „Urlaub zählt auch als Ferien“ in den Einstellungen, ab Werk an – also wie bisher. Bisher setzte jeder Urlaub (eigener Termin oder Kalender) zwingend auch `FERIEN` und überschrieb den Ferientext. Ohne Haken bleiben `FERIEN`, Ferientext und Feriendauer bei Schulferien und eigenen Ferienterminen; `URLAUB` und die übrigen Urlaubswerte ändern sich nicht (Issue #2). Eine ältere Sicherung behält beim Zurückspielen den geltenden Wert.
+
 ## Neu in 1.2.38
 
 - Sprachausgabe: Wird das Formular beanstandet, stehen „Nachtruhe einhalten“, „Nachtruhe von“, „Nachtruhe bis“ und „Dieselbe Ansage höchstens einmal in (Minuten)“ danach so da, wie sie eingetippt wurden, und ein beanstandetes Feld ist rot umrandet. Bisher kamen die gespeicherten Werte zurück. Gespeichert wurde in beiden Fällen nichts.

@@ -297,6 +297,11 @@ function fer_vorgaben()
     'endpunkt_ein' => 0,
     'haus_kalender_ein' => 0,
     'ics_jaehrlich' => 0,
+    /* --- neu in 1.2.39 (Issue #2, 12.10.2026) ---------------------------------------------------------------------
+     * urlaub_als_ferien: "Urlaub zaehlt auch als Ferien". Seit dem Einbau der eigenen Termine geht ein Urlaub zusaetzlich
+     * in die Ferienliste (Wecker, Briefing, Schulfrei-Logik). Ab Werk 1 = wie bisher; wer FERIEN nur fuer Schulferien
+     * will, nimmt den Haken heraus. Dann bleiben auch FERIEN, Ferientext und Feriendauer vom Urlaub unberuehrt. */
+    'urlaub_als_ferien' => 1,
 );
 }
 
@@ -1410,6 +1415,8 @@ function fer_data_innen() {
     /* Termine aus dem Kalender-Abonnement - vor den handgepflegten, damit
      * die Oberflaeche sie in derselben Liste zeigt. Sie tragen 'ics', damit
      * man ihnen ansieht, woher sie kommen. */
+    /* 1.2.39: fehlt der Schluessel (Datei aus aelterer Fassung, nicht ueber fer_config()), gilt das bisherige Verhalten. */
+    $urlaub_als_ferien = !isset($cfg['urlaub_als_ferien']) || !empty($cfg['urlaub_als_ferien']);
     $ics_typ = in_array((string) $cfg['ics_typ'], array('ferien', 'feiertag', 'urlaub'), true)
         ? (string) $cfg['ics_typ'] : 'urlaub';
     foreach (fer_ics_holen() as $k) {
@@ -1420,7 +1427,7 @@ function fer_data_innen() {
         } elseif ($ics_typ === 'urlaub') {
             $rec['urlaub'] = 1;
             $d['urlaub'][] = $rec;
-            $d['ferien'][] = $rec;
+            if ($urlaub_als_ferien) { $d['ferien'][] = $rec; }
         } else {
             $d['ferien'][] = $rec;
         }
@@ -1442,9 +1449,10 @@ function fer_data_innen() {
         } elseif ($typ === 'urlaub') {
             // Urlaub = Abwesenheit. Zaehlt zusaetzlich wie Ferien, damit Wecker,
             // Briefing und Schulfrei-Logik waehrend der Abwesenheit stimmen.
+            // Seit 1.2.39 abschaltbar (urlaub_als_ferien, ab Werk 1).
             $rec['urlaub'] = 1;
             $d['urlaub'][] = $rec;
-            $d['ferien'][] = $rec;
+            if ($urlaub_als_ferien) { $d['ferien'][] = $rec; }
         } else {
             $d['ferien'][] = $rec;
         }
@@ -4412,7 +4420,7 @@ function fer_wert_pruefen($k, $w)
             return $auswahl($w, array('DE', 'EN', 'FR', 'IT', 'NL', 'PL', 'CS'));
         case 'school': case 'public': case 'local_holidays': case 'bridge':
         case 'typ_streng': case 'halbtag_frei': case 'mqtt_enabled': case 'befehle_mqtt_ein':
-        case 'endpunkt_ein': case 'haus_kalender_ein': case 'ics_jaehrlich':
+        case 'endpunkt_ein': case 'haus_kalender_ein': case 'ics_jaehrlich': case 'urlaub_als_ferien':
         case 'notify.audio': case 'notify.push': case 'notify.freetag':
         case 'notify.ferienstart': case 'notify.bridge_month':
             return $zahl($w, 0, 1);
@@ -5008,7 +5016,8 @@ function fer_quellprobe()
  */
 function fer_spaet_schluessel()
 {
-    return array('befehle_mqtt_ein', 'endpunkt_ein', 'haus_kalender_ein', 'ics_jaehrlich');
+    // urlaub_als_ferien seit 1.2.39: eine aeltere Sicherung behaelt den geltenden Wert (ab Werk 1 = bisheriges Verhalten).
+    return array('befehle_mqtt_ein', 'endpunkt_ein', 'haus_kalender_ein', 'ics_jaehrlich', 'urlaub_als_ferien');
 }
 
 /**

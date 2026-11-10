@@ -201,7 +201,8 @@ function fe_x2_felder($form)
             foreach (array('own_name', 'own_von', 'own_bis', 'own_typ') as $o) { $f[] = $o . '.' . $i; }
         }
         $h = array('school', 'public', 'local_holidays', 'bridge', 'typ_streng', 'halbtag_frei',
-                   'notify_audio', 'notify_push', 'n_freetag', 'n_ferienstart', 'n_bridge', 'ics_jaehrlich');
+                   'notify_audio', 'notify_push', 'n_freetag', 'n_ferienstart', 'n_bridge', 'ics_jaehrlich',
+                   'urlaub_als_ferien');
         /* Nr. 36 b, Stufe 2: die Felder der Sprachausgabe nennt das Modul
          * (ansage_x2_felder(), ohne die Sprechtoken); die Loeschhaken sind Haken. */
         foreach (ansage_x2_felder() as $fe_xn) {
@@ -703,6 +704,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['save'])) {
     /* Gruppe 19 (1.2.28, V4 Option E): jaehrliche Ganztagstermine nur mit Filterwort - mit leerem Filter wird gespeichert,
      * der Haken wirkt aber nicht (gelbe Meldung). */
     $fe_new['ics_jaehrlich'] = isset($_POST['ics_jaehrlich']) ? 1 : 0;
+    $fe_new['urlaub_als_ferien'] = isset($_POST['urlaub_als_ferien']) ? 1 : 0;   // 1.2.39, Issue #2
     $fe_new['urlaub_vorlauf'] = $fe_pruef('urlaub_vorlauf', $fe_post('urlaub_vorlauf', '1'), $fe_alt('urlaub_vorlauf', 1),
         fer_t('T12.VORLAUF'));
     // MQTT wohnt seit 1.1.5 im eigenen Reiter mit eigenem Formular - hier
@@ -896,7 +898,7 @@ $fe_cfg += array('country' => 'DE', 'subdivision' => 'DE-BY', 'lang' => 'DE', 's
     'notify' => array(), 'tts' => array(), 'aktionstoken' => '',
     'subdivision2' => '', 'group' => '', 'bridge_mode' => 'klassisch', 'bridge_luecke' => 4,
     'typ_streng' => 0, 'halbtag_frei' => 1, 'ics_url' => '', 'ics_typ' => 'urlaub',
-    'ics_filter' => '', 'urlaub_vorlauf' => 1);
+    'ics_filter' => '', 'urlaub_vorlauf' => 1, 'urlaub_als_ferien' => 1);
 
 /* Beim ERSTEN Aufruf ein Token erzeugen, damit die Adressen fuer Loxone
  * sofort benutzbar sind (es schuetzt ?say= und ?ptest= im unangemeldeten
@@ -1117,7 +1119,8 @@ if (is_array($fe_x2)) {
                        'bridge_luecke', 'urlaub_vorlauf', 'ics_url', 'ics_typ', 'ics_filter') as $fe_xk) {
             if (isset($fe_xw[$fe_xk])) { $fe_anz[$fe_xk] = $fe_xw[$fe_xk]; }
         }
-        foreach (array('school', 'public', 'local_holidays', 'bridge', 'typ_streng', 'halbtag_frei', 'ics_jaehrlich') as $fe_xk) {
+        foreach (array('school', 'public', 'local_holidays', 'bridge', 'typ_streng', 'halbtag_frei', 'ics_jaehrlich',
+                       'urlaub_als_ferien') as $fe_xk) {
             if (isset($fe_xw[$fe_xk])) { $fe_anz[$fe_xk] = (int) $fe_xw[$fe_xk]; }
         }
         foreach (array('notify_time' => 'time') as $fe_xk => $fe_xz) {
@@ -1518,6 +1521,12 @@ if (is_string($fe_anz['subdivision']) && $fe_anz['subdivision'] !== '' && !isset
         <input data-role="none" type="<?= fe_x2typ('urlaub_vorlauf') ?>" name="urlaub_vorlauf"<?= fe_x2m('urlaub_vorlauf') ?> min="0" max="14" value="<?= fe_x2zahl('urlaub_vorlauf', $fe_anz['urlaub_vorlauf']) ?>">
         <div class="sm-small"><?php echo fer_t('T12.VORLAUF_H'); ?></div>
     </div>
+</div>
+<div style="margin-top:10px;">
+    <label style="display:inline-flex;align-items:center;gap:6px;">
+        <input data-role="none" type="checkbox" name="urlaub_als_ferien" <?= !empty($fe_anz['urlaub_als_ferien']) ? 'checked' : '' ?>> <?php echo fe_e(fer_t('T12.URLAUB_ALS_FERIEN')); ?>
+    </label>
+    <div class="sm-small"><?php echo fe_e(fer_t('T12.URLAUB_ALS_FERIEN_H')); ?></div>
 </div>
 <div style="margin-top:10px;">
     <label style="display:inline-flex;align-items:center;gap:6px;margin-right:20px;">
