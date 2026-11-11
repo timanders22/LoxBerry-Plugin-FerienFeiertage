@@ -10,6 +10,11 @@ Bundesländern/Kantonen.
 
 Kompatibel mit LoxBerry 3.x und **LoxBerry 4** (reines PHP, PHP 7.4 und 8.x).
 
+## Neu in 1.2.41
+
+- **Konfiguration wird vervollständigt:** Fehlen in `ferien.json` Einstellungen, die eine neuere Fassung mitbringt, trägt der Minutenlauf (`bin/cron.php`) sie jetzt einmal mit ihrer Vorgabe in die Datei ein. Das Protokoll nennt die ergänzten Namen in einer Zeile, nie die Werte. Bisher ergänzte das Plugin fehlende Einstellungen nur beim Lesen; in die Datei kamen sie erst beim nächsten Speichern im Formular. Gemessen am Gerät am 11.11.2026: es fehlte `urlaub_als_ferien` (neu in 1.2.39). Dessen Vorgabe 1 entspricht dem bisherigen Verhalten; am Verhalten ändert sich also nichts.
+- Geschrieben werden die Werte, die in der Datei stehen, plus die fehlenden Vorgaben. Schlüssel, die das Plugin nicht kennt, bleiben stehen, die Zweitschrift zieht mit, geschrieben wird nur, wenn etwas fehlt. Leere Objekte (`{}`) bleiben dabei leere Objekte, oben wie verschachtelt, und werden nicht zu einer leeren Liste (`[]`). Fehlt `endpunkt_ein`, wird wie beim Lesen 1 eingetragen, der HTTP-Weg bleibt also an. Eine fehlende, leere oder beschädigte Datei und eine Datei ohne Aktionstoken werden nicht angefasst; das bleibt Sache der Selbstheilung. Gemessen ist das im Prüfstand unter PHP 7.4 und 8.4 auf dem Arbeitsrechner, nicht am Gerät.
+
 ## Neu in 1.2.40
 
 - Gemeinsames Sprachmodul 1.4.3: Als LoxBerry-Wurzel aus `LBHOMEDIR` gilt für die Sprachausgabe nur noch ein Ordner mit `config/plugins`, `data/plugins` und `config/system/general.json`; bis 1.4.2 genügte `config/system`, und ein Prüfstand oder Rest mit diesem Ordner wurde wie ein LoxBerry gelesen. Auf einem LoxBerry ändert sich nichts.

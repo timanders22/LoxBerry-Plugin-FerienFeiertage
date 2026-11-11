@@ -65,6 +65,10 @@ if ($fer_lock === false) {
     exit(0);
 }
 
+/* 1.2.41 (Regeln/05): fehlende Einstellungen einmal mit ihrer Vorgabe in ferien.json eintragen - nach der Sperre (kein
+ * zweiter Minutenlauf schreibt dazwischen) und vor dem ersten Lesen der Konfiguration. Schreibt nur, wenn etwas fehlt. */
+fer_config_vervollstaendigen();
+
 /* Das Lebenszeichen ZAEHLER (1.2.26; Entwurf Welle 18 ff, Entscheidung 3): EINMAL je Lauf hochzaehlen, gleich
  * nach der Sperre und vor dem Abruf - ein haengender Abruf soll das Lebenszeichen nicht aufhalten, ein stehender
  * Minutenlauf es aber anhalten. Wie AWM-Abfuhr. */

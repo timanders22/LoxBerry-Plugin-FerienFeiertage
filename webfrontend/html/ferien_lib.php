@@ -321,10 +321,12 @@ function fer_vorgaben()
  *
  * Rueckgabe: die gelesenen Daten oder null, wenn die Datei nichts traegt.
  */
-function fer_inhalt_oder_null($pfad)
+function fer_inhalt_oder_null($pfad, &$roh_aus = null)
 {
+    $roh_aus = null;   // seit 11.11.2026: der Rohtext fuer fer_config_vervollstaendigen()
     if (!is_file($pfad)) { return null; }
     $roh = trim((string) @file_get_contents($pfad));
+    $roh_aus = $roh;
     if ($roh === '') { return null; }
     $d = json_decode($roh, true);
     if (!is_array($d) || $d === array()) { return null; }
@@ -506,6 +508,77 @@ function fer_config() {
      * Geheimnisse: nie im Formular, nicht in der Sicherung. */
     list($cfg['tts']) = ansage_vervollstaendigen($cfg['tts'], 'musicserver');
     return $cfg;
+}
+
+/** Leere Objekte des Rohtextes ($o, json_decode ohne true) im Feld $a wieder als Objekt fuehren (11.11.2026),
+ *  damit json_encode() sie als {} und nicht als [] schreibt - oben wie verschachtelt, auch unter fremden
+ *  Schluesseln. Nur fuer fer_config_vervollstaendigen(); das Speichern im Formular bleibt, wie es ist.
+ *  Bauart Bewaesserung 0.9.56 (bw_json_leere_objekte()). */
+function fer_json_leere_objekte($a, $o)
+{
+    if (!is_array($a)) { return $a; }
+    if (is_object($o)) {
+        if (!get_object_vars($o) && $a === array()) { return new stdClass(); }
+        foreach ($a as $k => $v) {
+            $ks = (string) $k;
+            if (is_array($v) && property_exists($o, $ks)) { $a[$k] = fer_json_leere_objekte($v, $o->$ks); }
+        }
+    } elseif (is_array($o)) {
+        foreach ($a as $k => $v) {
+            if (is_array($v) && array_key_exists($k, $o)) { $a[$k] = fer_json_leere_objekte($v, $o[$k]); }
+        }
+    }
+    return $a;
+}
+
+/**
+ * Fehlende Einstellungen EINMAL mit ihrer Vorgabe in die Datei schreiben (1.2.41; Regeln/05, Bauform Docker NG 1.3.7).
+ *
+ * Bis 1.2.40 ergaenzte fer_config() fehlende Schluessel nur im Speicher; in die Datei kamen sie erst beim naechsten
+ * Speichern im Formular. Gemessen am Geraet 11.11.2026: in ferien.json fehlte urlaub_als_ferien (neu in 1.2.39).
+ * Aufgerufen von bin/cron.php im Minutenlauf, nach der Sperre und vor dem ersten Lesen der Konfiguration.
+ *
+ *  - nur eine Datei, die das Merkwort traegt (fer_config_hat_inhalt(): JSON-Objekt mit Aktionstoken); eine fehlende,
+ *    leere oder beschaedigte Datei ist Sache von fer_selbstheilung(), nicht dieser Funktion;
+ *  - geschrieben werden die WERTE AUS DER DATEI, so wie sie dort stehen, plus die fehlenden Vorgaben - nicht das, was
+ *    fer_config() daraus macht (leeres tts -> Werkblock, own/notify ohne Liste -> leer);
+ *  - nur die Schluessel aus fer_vorgaben(), die das Speichern im Formular ohnehin schreibt (es speichert fer_config());
+ *    Unterschluessel von notify und tts bleiben Sache der Lesefunktion;
+ *  - endpunkt_ein nach der Lese-Regel aus fer_config(): eine Bestandsdatei ohne den Schluessel behaelt den HTTP-Weg (1);
+ *  - fremde Schluessel bleiben stehen; geschrieben wird nur, wenn etwas fehlt; Weg und Zweitschrift wie beim Speichern
+ *    (fer_config_speichern(), fer_zweitschrift_ziehen(), 0600); eine Protokollzeile mit den Namen, nie mit Werten.
+ *
+ * Rueckgabe: die Namen der eingetragenen Schluessel; leer, wenn nichts geschrieben wurde.
+ */
+function fer_config_vervollstaendigen()
+{
+    $p = fer_paths();
+    clearstatcache(true, $p['config']);
+    $roh = null;
+    $datei = fer_inhalt_oder_null($p['config'], $roh);
+    if (!fer_config_hat_inhalt($datei)) { return array(); }
+    // Ein leeres Objekt der Datei ({}) bliebe nach json_decode(..., true) ein leeres Feld und kaeme beim
+    // Schreiben als [] zurueck - der Rohwert wird erhalten, bevor ergaenzt wird (11.11.2026).
+    $datei = fer_json_leere_objekte($datei, json_decode((string) $roh));
+    $fehlend = array();
+    foreach (fer_vorgaben() as $k => $w) {
+        if (array_key_exists($k, $datei)) { continue; }
+        $datei[$k] = ($k === 'endpunkt_ein') ? 1 : $w;
+        $fehlend[] = $k;
+    }
+    if (!$fehlend) { return array(); }
+    /* Ohne Schreibrecht im Ordner scheitert das rename() in fer_datei_schreiben() - dann EINE Zeile, nicht jede
+     * Minute eine (fer_log_if_changed()). */
+    if (!is_writable(dirname($p['config']))) {
+        fer_log_if_changed('vervollstaendigen', 'Die Konfiguration liess sich nicht vervollstaendigen - kein '
+            . 'Schreibrecht im Ordner ' . dirname($p['config']) . ' (fehlend: ' . implode(', ', $fehlend) . ').');
+        return array();
+    }
+    if (!fer_config_speichern($datei)) { return array(); }
+    fer_zweitschrift_ziehen($p['config'], $p['backup'], $datei, array('aktionstoken'));
+    fer_log('Konfiguration vervollstaendigt: ' . count($fehlend) . ' fehlende Einstellung(en) mit der Vorgabe '
+        . 'eingetragen (' . implode(', ', $fehlend) . ').');
+    return $fehlend;
 }
 
 /**
