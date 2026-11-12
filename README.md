@@ -10,6 +10,10 @@ Bundesländern/Kantonen.
 
 Kompatibel mit LoxBerry 3.x und **LoxBerry 4** (reines PHP, PHP 7.4 und 8.x).
 
+## Neu in 1.2.42
+
+- **Reiter Test ohne die PHP-Erweiterung ctype:** Eine Prüfzeile des Selbsttests (Datum des Hauskalenders) benutzte `ctype_digit()`. Diese Erweiterung steht nicht in `dpkg/apt` und ist auf einem LoxBerry nicht zugesichert; fehlte sie, brach der Reiter *Test* unter PHP 8 an dieser Stelle ab, unter PHP 7.4 kam eine Warnung und die Zeile meldete fälschlich einen Fehler. Jetzt prüft dieselbe Zeile mit einem regulären Ausdruck. Am gemessenen LoxBerry ist ctype geladen; dort ändert sich nichts. Gemessen auf dem Arbeitsrechner unter PHP 7.4 und 8.4 mit abgeschalteter Funktion, nicht am Gerät.
+
 ## Neu in 1.2.41
 
 - **Konfiguration wird vervollständigt:** Fehlen in `ferien.json` Einstellungen, die eine neuere Fassung mitbringt, trägt der Minutenlauf (`bin/cron.php`) sie jetzt einmal mit ihrer Vorgabe in die Datei ein. Das Protokoll nennt die ergänzten Namen in einer Zeile, nie die Werte. Bisher ergänzte das Plugin fehlende Einstellungen nur beim Lesen; in die Datei kamen sie erst beim nächsten Speichern im Formular. Gemessen am Gerät am 11.11.2026: es fehlte `urlaub_als_ferien` (neu in 1.2.39). Dessen Vorgabe 1 entspricht dem bisherigen Verhalten; am Verhalten ändert sich also nichts.

@@ -3321,7 +3321,10 @@ function fer_selbsttest($basis = '', $vorher = null) {
      * von datum nachgerechnet; '-' nur, wenn datum kein gueltiger Tag ist. Dazu feste Faelle der Formatfunktion. */
     $fer_dz = isset($fer_hw['haus/kalender/datum']) ? (int) $fer_hw['haus/kalender/datum'] : 0;
     $fer_ds = sprintf('%08d', $fer_dz);
-    $fer_dsoll = (strlen($fer_ds) === 8 && ctype_digit($fer_ds)
+    /* 1.2.42: preg_match statt der Ziffernpruefung aus ctype - ctype steht nicht in dpkg/apt und ist auf einem LoxBerry nicht
+     * zugesichert (Regeln/03); ohne die Erweiterung brach der Reiter Test hier ab (PHP 8: Aufruf einer
+     * unbekannten Funktion; PHP 7.4: Warnung und falsches Ergebnis). Gemessen mit abgeschalteter Funktion. */
+    $fer_dsoll = (preg_match('/^[0-9]{8}\z/', $fer_ds) === 1
         && checkdate((int) substr($fer_ds, 4, 2), (int) substr($fer_ds, 6, 2), (int) substr($fer_ds, 0, 4)))
         ? substr($fer_ds, 6, 2) . '.' . substr($fer_ds, 4, 2) . '.' . substr($fer_ds, 0, 4) : '-';
     $fer_dt = isset($fer_hw['haus/kalender/datum_text']) ? $fer_hw['haus/kalender/datum_text'] : null;
