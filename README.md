@@ -10,6 +10,10 @@ Bundesländern/Kantonen.
 
 Kompatibel mit LoxBerry 3.x und **LoxBerry 4** (reines PHP, PHP 7.4 und 8.x).
 
+## Neu in 1.2.43
+
+- **Testansage mit übernommenem Sprechtoken:** Ist das Sprechtoken für Alexa-NG oder Chromecast 4 Lox NG hier leer, holt die echte Ansage es aus dem Nachbar-Plugin, die Testansage im Reiter *Test* tat das nicht. Echo- und Google-Lautsprecher blieben dort stumm mit „kein Token“, obwohl die Ansage sie erreicht hätte. Jetzt spricht die Testansage mit demselben Block wie die echte Ansage; gespeichert wird dabei nichts. Derselbe Fehler ist an AWM-Abfuhr am LoxBerry gemessen (13.11.2026); hier am Code festgestellt, am Gerät nicht gemessen.
+
 ## Neu in 1.2.42
 
 - **Reiter Test ohne die PHP-Erweiterung ctype:** Eine Prüfzeile des Selbsttests (Datum des Hauskalenders) benutzte `ctype_digit()`. Diese Erweiterung steht nicht in `dpkg/apt` und ist auf einem LoxBerry nicht zugesichert; fehlte sie, brach der Reiter *Test* unter PHP 8 an dieser Stelle ab, unter PHP 7.4 kam eine Warnung und die Zeile meldete fälschlich einen Fehler. Jetzt prüft dieselbe Zeile mit einem regulären Ausdruck. Am gemessenen LoxBerry ist ctype geladen; dort ändert sich nichts. Gemessen auf dem Arbeitsrechner unter PHP 7.4 und 8.4 mit abgeschalteter Funktion, nicht am Gerät.

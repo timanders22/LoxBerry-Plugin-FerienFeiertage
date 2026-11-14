@@ -537,9 +537,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && (isset($_POST['ansage_test']) || is
     if (isset($_POST['ansage_test_ziel']) && $fe_tnur === 0) {
         $fe_tr = array('stand' => 0, 'kennung' => 'ZIEL_UNBEKANNT|-', 'art' => '-', 'http' => 0, 'zeile' => '', 'zeichen' => 0);
     } elseif ($fe_tnur >= 1) {
-        $fe_tr = ansage_testansage($fe_tcfg['tts'], $fe_tk, $fe_tnur);
+        $fe_tr = ansage_testansage(fer_ansage_vor_ort($fe_tcfg), $fe_tk, $fe_tnur);
     } else {
-        $fe_tr = ansage_testansage($fe_tcfg['tts'], $fe_tk);
+        $fe_tr = ansage_testansage(fer_ansage_vor_ort($fe_tcfg), $fe_tk);
     }
     fer_log('Testansage' . ($fe_tnur >= 1 ? ' an Ziel ' . $fe_tnur : '') . ': ' . ansage_kurz($fe_tr));
     if ($fe_tr['stand'] === 1) {
