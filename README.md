@@ -10,6 +10,22 @@ Bundesländern/Kantonen.
 
 Kompatibel mit LoxBerry 3.x und **LoxBerry 4** (reines PHP, PHP 7.4 und 8.x).
 
+## Neu in 1.2.44
+
+- **Verhalten geändert – Einstellungen sichern und zurückspielen nach der gemeinsamen Vorlage:** Die Knöpfe „Einstellungen sichern“ und „Einstellungen zurückspielen“ arbeiten jetzt mit demselben Sicherungsmodul (1.2.2) wie die übrigen Plugins dieser Reihe.
+  - Die Sicherung trägt jetzt einen lesbaren Kopf mit dem Kennzeichen `LoxBerry-Plugin-FerienFeiertage`, der Fassung und dem Zeitpunkt. Eine Datei eines anderen Plugins und eine Datei ohne Kennzeichen werden als Ganzes abgewiesen – ausgenommen eine ältere Sicherung dieses Plugins (nächster Punkt).
+  - **Sicherungen aus 1.2.43 und früher lassen sich weiter zurückspielen.** Keine frühere Fassung schrieb einen Kopf. Eine solche Datei wird an den 24 Einstellungen erkannt, die jede dieser Fassungen geschrieben hat, von Land und Region (`country`, `subdivision`, `subdivision2`) bis zu den Brückentagen (`bridge`, `bridge_mode`, `bridge_luecke`); keines der übrigen Plugins dieser Reihe führt mehr als fünf davon zusammen. Die Meldung sagt dann, dass eine ältere Sicherung erkannt wurde. Fehlt einer Datei ohne Kopf eine dieser Einstellungen, wird sie als Ganzes abgewiesen.
+  - Eine Einstellung, die diese Fassung nicht kennt, wird nicht übernommen und mit ihrem Namen gemeldet, nie mit ihrem Wert – oben in der Datei, in den Blöcken (Meldungen, Sprachansage, Regeln der Ansage) und in den eigenen Zeiträumen. Die übrigen Einstellungen werden zurückgespielt. Bisher wies ein unbekannter Name die ganze Datei ab.
+  - Ein leerer Wert in der Sicherung überschreibt keinen bestehenden; der bisherige Wert bleibt, und die Meldung nennt den Namen. Bisher galt das nur für das Aktionstoken; bei einer Einstellung, die keinen leeren Wert zulässt (etwa dem MQTT-Präfix), wies ein leerer Wert die ganze Datei ab.
+  - Der Vermerk, welches Sprechtoken aus einem Nachbar-Plugin übernommen ist, bleibt beim Zurückspielen erhalten. Bisher fehlte er danach in der Konfiguration und in der Zweitschrift.
+  - Das Sprechtoken für HomePod bleibt beim Zurückspielen wie die beiden anderen erhalten; bisher ging es verloren.
+  - Fehlen in einer Sicherung die Regeln der Sprachansage, behalten sie ihren geltenden Wert, und die Meldung nennt sie; bisher fielen sie still auf die Werkseinstellung.
+  - Einstellungen, die in der Konfiguration stehen, aber keine Einstellung dieser Fassung sind, gehen nicht mehr in die Sicherung, ebenso der interne Merker `_haus_frueher`.
+  - Die Meldung sagt nach dem Zurückspielen, was mit dem Minutenlauf geschieht: er rechnet innerhalb einer Minute mit den zurückgespielten Einstellungen neu und sendet bei eingeschaltetem MQTT alle Werte neu.
+- **Verhalten geändert – Zurückspielen nur mit Haken:** Zwischen dem Feld für die Sicherungsdatei und dem Knopf „Einstellungen zurückspielen“ steht ein Haken „Ja, die geltenden Einstellungen durch die Sicherung ersetzen“, ab Werk aus. Ohne ihn wird die Datei nicht gelesen und nichts geändert, und die Meldung sagt es. Haken, Text und die Prüfung der hochgeladenen Datei (über das Formular gekommen, höchstens 256 KB) kommen aus dem gemeinsamen Sicherungsmodul und sind in allen Plugins dieser Reihe gleich.
+- Unverändert: Eine Datei mit einem unzulässigen Wert ändert gar nichts, alle Beanstandungen werden genannt. Das Aktionstoken und die Kalender-Adresse gehören in die Datei, die Sprechtoken nicht; eine Datei mit Sprechtoken wird abgewiesen. Einstellungen, die eine frühere Fassung nicht kannte, behalten ihren geltenden Wert. Die Zweitschrift zieht mit, und die Befehlsbrücke wird sofort geschaltet.
+- Am Gerät nicht gemessen. Gemessen wurde mit einem Prüfstand unter PHP 7.4 und 8.4 auf dem Arbeitsrechner, der über einen Webserver die echten Knöpfe drückt, mit den Sicherungen aller 36 Vorfassungen von 1.2.8 bis 1.2.43.
+
 ## Neu in 1.2.43
 
 - **Testansage mit übernommenem Sprechtoken:** Ist das Sprechtoken für Alexa-NG oder Chromecast 4 Lox NG hier leer, holt die echte Ansage es aus dem Nachbar-Plugin, die Testansage im Reiter *Test* tat das nicht. Echo- und Google-Lautsprecher blieben dort stumm mit „kein Token“, obwohl die Ansage sie erreicht hätte. Jetzt spricht die Testansage mit demselben Block wie die echte Ansage; gespeichert wird dabei nichts. Derselbe Fehler ist an AWM-Abfuhr am LoxBerry gemessen (13.11.2026); hier am Code festgestellt, am Gerät nicht gemessen.

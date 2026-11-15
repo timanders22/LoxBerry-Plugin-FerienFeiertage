@@ -971,26 +971,13 @@ $fe_host = fe_e(isset($_SERVER['HTTP_HOST']) ? $_SERVER['HTTP_HOST'] : '<loxberr
  * kaeme trotzdem nicht an die Anlage; die Datei waere wertlos. Damit
  * traegt sie ein Geheimnis, und der Hinweis am Knopf sagt das. */
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['fer_sichern'])) {
-    /* X-3 (Verbesserungsbau 01.10.2026): wuerde das eigene Zurueckspielen die
-     * Datei abweisen, sagt es der Kopf "_warnung" - nur mit den NAMEN der
-     * Einstellungen. Geliefert wird trotzdem vollstaendig (Entscheidung 13):
-     * wer umzieht, braucht die Datei, und die Werte lassen sich darin
-     * berichtigen. fer_sicherung_lesen() uebergeht Schluessel mit "_". */
-    $fer_voll = fer_config();
-    /* 1.2.37: der Vermerk, welches Sprechtoken vom Nachbarn uebernommen ist, geht nie in eine Sicherung (Stamm;
-     * fer_sicherung_lesen() uebergeht ihn ohnehin). Bis 1.2.36 stand er darin (gemessen 07.11.2026). */
-    unset($fer_voll['ansage_token_herkunft']);
-    /* Ansage-2: das Alexa-NG-Sprechtoken wird wie ein Kennwort behandelt und
-     * geht NICHT mit; das Zurueckspielen behaelt das geltende. */
-    // Ansage-3: ebenso das Sprechtoken fuer Google-Lautsprecher (Nr. 36 b: eine Quelle).
-    if (isset($fer_voll['tts']) && is_array($fer_voll['tts'])) { $fer_voll['tts'] = ansage_sicherung_bereinigen($fer_voll['tts']); }
-    $fer_altw = fer_rueckspiel_altwerte($fer_voll);
-    if ($fer_altw) {
-        $fer_voll = array('_warnung' => sprintf(fer_t('SICHWARN.KOPF'), implode(', ', $fer_altw))) + $fer_voll;
-    }
-    $fer_js = json_encode($fer_voll,
-        JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
-    if ($fer_js !== false) {
+    /* 1.2.44: Kopf und Inhalt baut das gemeinsame Sicherungsmodul (fer_sicherung_bauen(), sicherung_bauen()): der
+     * Kopf traegt _hinweis, _plugin, _fassung und _stand. Nie ein Sprechtoken, nie der Vermerk
+     * ansage_token_herkunft (bis 1.2.36 stand er darin). X-3 (Verbesserungsbau 01.10.2026) wie bisher: wuerde das
+     * eigene Zurueckspielen die Datei abweisen, sagt es der Kopf "_warnung" - nur mit den NAMEN der
+     * Einstellungen; geliefert wird trotzdem vollstaendig (Entscheidung 13). */
+    $fer_js = sicherung_json(fer_sicherung_bauen(fer_config()));
+    if ($fer_js !== '') {
         while (ob_get_level() > 0) { @ob_end_clean(); }
         header('Content-Type: application/json; charset=utf-8');
         header('Content-Disposition: attachment; filename="ferienfeiertage_einstellungen_'
@@ -1003,73 +990,78 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['fer_sichern'])) {
 
 /* ---------------- Einstellungen zurueckspielen ----------------
  *
- * is_uploaded_file() ZUERST: ohne diese Pruefung liesse sich jede Datei
- * des Servers unterschieben. Dann die Groessengrenze - eine Sicherung
- * dieses Plugins ist wenige Kilobyte gross; alles darueber wird gar
- * nicht erst gelesen. */
+ * 1.2.44: den Eingang prueft das gemeinsame Sicherungsmodul (sicherung_eingang(), Modul 1.1.0, Entscheidung des
+ * Hausherrn 12.11.2026) - in jeder Linie gleich: zuerst der Haken zurueck_ok (ohne ihn wird nichts gelesen und nichts
+ * geaendert), dann is_uploaded_file() (sonst liesse sich jede Datei des Servers unterschieben) und die Groessengrenze
+ * des Moduls; erst danach wird die Datei gelesen. */
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['fer_zurueck'])) {
-    if (!isset($_FILES['fer_sicherung']) || !is_array($_FILES['fer_sicherung'])
-        || !isset($_FILES['fer_sicherung']['tmp_name'])
-        || !@is_uploaded_file($_FILES['fer_sicherung']['tmp_name'])) {
-        $fe_err = fer_t('TEXT.SICH_KEINE_DATEI');
-    } elseif ((int) $_FILES['fer_sicherung']['size'] > 262144) {
-        $fe_err = fer_t('TEXT.SICH_ZU_GROSS');
+    /* Die Meldungen sind reiner Text, die Seite maskiert sie genau einmal (O3) - das Modul bekommt deshalb 'e' ohne
+     * Maskierung (Regeln/05 "Meldungen als Klartext"). */
+    $fer_b = array('e' => function ($s) { return $s; }) + fer_sicherung_beschreibung();
+    list($fer_roh, $fer_ab) = sicherung_eingang($fer_b, $_POST, $_FILES, 'fer_sicherung');
+    if ($fer_ab !== null) {
+        $fer_m = sicherung_meldungen($fer_b, $fer_ab);
+        $fe_err = implode(' ', $fer_m['fehler']);
     } else {
-        $fe_rueck_alt = fer_config();
-        $fer_erg = fer_sicherung_lesen(
-            (string) @file_get_contents($_FILES['fer_sicherung']['tmp_name']), $fe_rueck_alt);
-        $fer_neu = $fer_erg[0];
-        $fer_fehler = $fer_erg[1];
-        $fer_n = $fer_erg[2];
-        $fer_hin = isset($fer_erg[3]) ? (array) $fer_erg[3] : array();
-        if ($fer_neu === null) {
-            /* ALLE Beanstandungen, nicht nur die erste - und geaendert
-             * wird nichts. O3 (1.2.16): als Fehler, nicht im gruenen Kasten,
-             * und genau einmal maskiert. */
-            $fe_err = fer_t('TEXT.SICH_ABGELEHNT') . ' ' . implode(' ', $fer_fehler);
-        } elseif (fer_config_speichern($fer_neu)) {
-            /* Die Zweitschrift mitziehen. Bis 1.2.13 blieb sie auf dem Stand
-             * VOR dem Zurueckspielen stehen, und die naechste Selbstheilung
-             * (abgeschnittene Konfiguration, Upgrade-Luecke) holte genau
-             * diesen alten Stand zurueck - das Zurueckspielen war still
-             * rueckgaengig gemacht, samt altem Aktionstoken. Gemessen
-             * 18.09.2026 unter php-cgi 7.4.33 und 8.4.24
-             * (Pruefung-FerienFeiertage-1.2.14, R1/R2). Die Wache in
-             * fe_zweitschrift() gilt auch hier: eine Datei ohne Aktionstoken
-             * ersetzt keine Zweitschrift mit (R3). */
-            fe_zweitschrift($fe_cfgfile, $fe_bkfile, $fer_neu);
-            /* C1/C2 (1.2.16): "uebernommen" erst, wenn Konfiguration UND
-             * Zweitschrift geschrieben sind und das Ruecklesen den Stand
-             * zeigt. Bis 1.2.15 meldete die Seite "24 Werte uebernommen",
-             * waehrend die naechste fer_config() aus der alten Zweitschrift
-             * heilte. */
-            $fer_ist = fer_inhalt_oder_null($fe_cfgfile);
-            $fer_zw = fer_inhalt_oder_null($fe_bkfile);
-            if ($fer_ist == $fer_neu && $fer_zw == $fer_neu) {
-                $fe_note = sprintf(fer_t('TEXT.SICH_UEBERNOMMEN'), $fer_n);
-                $fe_hinweise = array_merge($fe_hinweise, $fer_hin);
-                @unlink(fer_tmpdir() . '/state.json');
-                @unlink(fer_tmpdir() . '/mqtt_sig.txt');
-                /* Gruppe 19 (1.2.28, FE3, Entscheidung 1 "nur fer_bruecke_schalten()"): die Bruecke sofort schalten wie
-                 * beim Speichern im Reiter MQTT - bis 1.2.27 erst der Waechter (<= 60 s, nach einem Start bis 600 s). */
-                list($fer_brc, $fer_bart, $fer_baus) = fer_bruecke_schalten($fer_neu);
-                if ($fer_bart === 'start' && $fer_brc === 0) {
-                    $fe_hinweise[] = fer_t('BEFEHL.M_EIN') . ' ' . $fer_baus;
-                } elseif ($fer_bart === 'start') {
-                    $fe_fehler[] = sprintf(fer_t('BEFEHL.M_START_FEHL'), $fer_baus);
-                } elseif ($fer_bart === 'stop' && $fer_brc === 0) {
-                    $fe_hinweise[] = fer_t('BEFEHL.M_AUS');
-                } elseif ($fer_bart === 'stop') {
-                    $fe_fehler[] = sprintf(fer_t('BEFEHL.M_STOP_FEHL'), $fer_baus);
-                }
-                /* V1 (Entwurf 2.6 c): schaltet die Sicherung haus_kalender_ein oder MQTT aus, raeumt eine (ehemalige)
-                 * Anbieter-Installation die Themen haus/kalender ab. Der alte Stand traegt den Merker _haus_frueher. */
-                fe_haus_folgen($fe_rueck_alt, $fer_neu);
-            } else {
-                $fe_err = fer_t('TEXT.SICH_NICHT_ANGEKOMMEN');
+        /* 1.2.44: das gemeinsame Sicherungsmodul (sicherung_zurueckspielen(), Beschreibung
+         * fer_sicherung_beschreibung()) liest, prueft, verwirft Unbekanntes mit Namen, laesst leere Werte den
+         * bisherigen stehen und aendert bei einer Beanstandung GAR NICHTS (alle Beanstandungen, nicht nur die erste).
+         * Die Schritte dieser Linie davor und danach stehen in den Rueckrufen, dieselben wie bis 1.2.43. */
+        $fer_b['speichern'] = function ($neu) use ($fe_cfgfile, $fe_bkfile) {
+            if (!fer_config_speichern($neu)) { return false; }
+            /* Die Zweitschrift mitziehen. Bis 1.2.13 blieb sie auf dem Stand VOR dem Zurueckspielen stehen, und die
+             * naechste Selbstheilung holte genau diesen alten Stand zurueck (Pruefung-FerienFeiertage-1.2.14, R1/R2).
+             * Die Wache in fe_zweitschrift() gilt auch hier: eine Datei ohne Aktionstoken ersetzt keine Zweitschrift
+             * mit (R3). Ob sie danach inhaltsgleich ist, misst das Modul ('zweitschrift') und sagt es. */
+            fe_zweitschrift($fe_cfgfile, $fe_bkfile, $neu);
+            /* C1/C2 (1.2.16): gespeichert heisst, das Ruecklesen der Konfiguration zeigt den zurueckgespielten
+             * Stand - sonst meldet das Modul den Schreibfehler, und der Dienst wird nicht nachgezogen. */
+            return fer_inhalt_oder_null($fe_cfgfile) == $neu;
+        };
+        $fer_b['zweitschrift'] = function () use ($fe_cfgfile, $fe_bkfile) { return array($fe_cfgfile, $fe_bkfile); };
+        $fer_b['nachziehen'] = function ($neu, $vorher) {
+            global $fe_hinweise, $fe_fehler;
+            $h = array();
+            /* Die Sprechtoken stehen nicht in der Sicherung; die geltenden bleiben (fer_sicherung_vorbereiten()). */
+            $vt = (is_array($vorher) && isset($vorher['tts']) && is_array($vorher['tts'])) ? $vorher['tts'] : array();
+            if (isset($vt['alexa_token']) && ansage_token_ok($vt['alexa_token'])) { $h[] = fer_t('ALEXA.SICH_BLEIBT'); }
+            if (isset($vt['google_token']) && ansage_token_ok($vt['google_token'])) { $h[] = fer_t('GOOGLE.SICH_BLEIBT'); }
+            /* Den Dienst nachziehen: Zwischenstand und MQTT-Signatur gehoeren zur alten Konfiguration. Der naechste
+             * Minutenlauf (bin/cron.php) rechnet neu und sendet bei eingeschaltetem MQTT alle Werte neu. */
+            @unlink(fer_tmpdir() . '/state.json');
+            @unlink(fer_tmpdir() . '/mqtt_sig.txt');
+            /* Gruppe 19 (1.2.28, FE3, Entscheidung 1 "nur fer_bruecke_schalten()"): die Bruecke sofort schalten wie
+             * beim Speichern im Reiter MQTT - bis 1.2.27 erst der Waechter (<= 60 s, nach einem Start bis 600 s). */
+            list($fer_brc, $fer_bart, $fer_baus) = fer_bruecke_schalten($neu);
+            if ($fer_bart === 'start' && $fer_brc === 0) {
+                $h[] = fer_t('BEFEHL.M_EIN') . ' ' . $fer_baus;
+            } elseif ($fer_bart === 'start') {
+                $fe_fehler[] = sprintf(fer_t('BEFEHL.M_START_FEHL'), $fer_baus);
+            } elseif ($fer_bart === 'stop' && $fer_brc === 0) {
+                $h[] = fer_t('BEFEHL.M_AUS');
+            } elseif ($fer_bart === 'stop') {
+                $fe_fehler[] = sprintf(fer_t('BEFEHL.M_STOP_FEHL'), $fer_baus);
             }
+            /* V1 (Entwurf 2.6 c): schaltet die Sicherung haus_kalender_ein oder MQTT aus, raeumt eine (ehemalige)
+             * Anbieter-Installation die Themen haus/kalender ab. Der alte Stand traegt den Merker _haus_frueher. */
+            $fe_vor = $fe_hinweise;
+            $fe_hinweise = array();
+            fe_haus_folgen($vorher, $neu);
+            $h = array_merge($h, $fe_hinweise);
+            $fe_hinweise = $fe_vor;
+            $h[] = fer_t('TEXT.SICH_DIENST');
+            return $h;
+        };
+        $fer_b['log'] = 'fer_log';
+        $fer_r = sicherung_zurueckspielen($fer_b, $fer_roh);
+        $fer_m = sicherung_meldungen($fer_b, $fer_r);
+        if ($fer_r['gespeichert']) {
+            /* O3 (1.2.16): "uebernommen" im gruenen Kasten, was dazu gesagt werden muss, darunter. */
+            $fe_note = (string) array_shift($fer_m['hinweise']);
+            $fe_hinweise = array_merge($fe_hinweise, $fer_m['hinweise']);
+            foreach ($fer_m['fehler'] as $fer_x) { $fe_fehler[] = $fer_x; }
         } else {
-            $fe_err = fer_t('TEXT.SICH_SCHREIBFEHLER');
+            $fe_err = implode(' ', $fer_m['fehler']);
         }
     }
 }
@@ -2431,6 +2423,7 @@ if ($fe_altw) { ?>
     <?php echo fer_fmt(); ?>
     <input data-role="none" type="hidden" name="activetab" value="tab-settings">
     <input data-role="none" type="file" name="fer_sicherung" accept=".json">
+    <?= sicherung_haken_zeile(fer_sicherung_beschreibung()) ?>
     <button data-role="none" class="sm-btn sm-b-aktion" type="submit" name="fer_zurueck" value="1"><?= fer_t('TEXT.K_ZURUECK') ?></button>
   </form>
 </div>

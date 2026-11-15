@@ -58,6 +58,11 @@ function fer_zone_aus($alt)
  * gegen doppeltes Laden. Was dort laeuft (fer_data(), fer_day(), fer_state() und
  * fer_config()), ruft deshalb nur Modulfunktionen, die es schon in 1.0.2 gab. */
 require_once __DIR__ . '/sprachausgabe.php';
+/* Gemeinsames Sicherungsmodul (Abschrift von Werkzeuge/gemeinsam/sicherung.php, seit 1.2.44): "Einstellungen
+ * sichern" und "Einstellungen zurueckspielen" verhalten sich in allen Plugins des Hauses gleich. Liegt neben
+ * dieser Datei und schuetzt sich selbst gegen doppeltes Laden (laedt ein anderes Plugin diese Bibliothek und hat
+ * es schon eine Abschrift geladen, gilt jene). */
+require_once __DIR__ . '/sicherung.php';
 
 /** Die Ausgabearten, die dieses Plugin anbietet: wie bis 1.2.22, dazu "aus" und seit 1.2.28 Sonos4Lox und SonoX
  *  (Pflegewelle 22, Modul 1.1.4; ungemessen, kein Sonos im Haus - das Modul prueft Installation und Zone). Keine
@@ -4205,222 +4210,248 @@ function fer_config_speichern($cfg)
 
 
 /**
- * Eine Sicherungsdatei einlesen - und dabei NICHTS durchgehen lassen.
+ * 1.2.44: Die Beschreibung dieser Linie fuer das gemeinsame Sicherungsmodul
+ * (Werkzeuge/gemeinsam/sicherung.php, Auftrag des Hausherrn 12.11.2026). Lesen,
+ * Pruefen und Zurueckspielen macht das Modul; bis 1.2.43 stand hier eine eigene
+ * Schleife (fer_sicherung_lesen()): ein unbekannter Schluessel oben oder in einem
+ * Block (notify, tts, ansage_regeln) wies die ganze Datei ab, ein leerer Wert
+ * (ausser dem Aktionstoken) ebenso, und die Datei trug keinen Kopf - eine fremde
+ * Datei wurde gelesen wie eine eigene (gemessen 14.11.2026 an 1.2.43 mit
+ * Werkzeuge/sicherung_pruefstand.py --profil ist).
  *
- * Der wichtigste Punkt: eine halb gueltige Datei ueberschreibt GAR NICHTS.
- * Wer eine Sicherung zurueckspielt, will entweder den ganzen Stand oder
- * gar keinen - eine zur Haelfte uebernommene Konfiguration ist schlimmer
- * als die alte, und man sieht es ihr nicht an.
+ * Seither: der Kopf traegt _hinweis, _plugin (Kennzeichen
+ * 'LoxBerry-Plugin-FerienFeiertage', der Name des Repositorys), _fassung und
+ * _stand; eine Datei mit fremdem oder ohne Kennzeichen wird abgewiesen. Ausgenommen
+ * ist eine Sicherung bis 1.2.43, denn keine dieser Fassungen schrieb einen Kopf mit
+ * _plugin: fer_sicherung_alt_erkennen() erkennt sie an den Schluesseln, die jede von
+ * ihnen schrieb und die keine andere Linie zusammen fuehrt (Entscheidung des
+ * Hausherrn 14.11.2026 "Ja, erkennen", Regeln/05 Regel 1). Unbekannte
+ * Schluessel oben, in den Bloecken und in den eigenen Zeitraeumen werden verworfen
+ * und mit Namen gemeldet; ein leerer Wert ueberschreibt keinen bestehenden.
  *
- * Unbekannte Schluessel sind eine Beanstandung, kein stiller Verlust: sie
- * stammen aus einer anderen Fassung oder einem anderen Plugin.
+ * Wie bisher: jeder Wert geht durch fer_wert_pruefen() (dieselbe Pruefung wie das
+ * Formular) und wird in deren Form gespeichert; ansage_regeln durch
+ * ansage_regeln_wert(); zwei gleiche Regionen werden beanstandet; eine halb
+ * gueltige Datei aendert nichts, alle Beanstandungen werden gesammelt; eine Datei
+ * mit Sprechtoken wird abgewiesen, die geltenden Sprechtoken bleiben
+ * (fer_sicherung_vorbereiten()); was eine fruehere Fassung nicht kannte
+ * (fer_spaet_schluessel(), die weiteren Ausgabeziele tts.ziele, ansage_regeln),
+ * behaelt den geltenden Wert; jeder andere fehlende Schluessel ist eine
+ * Beanstandung. Der Vermerk ansage_token_herkunft kommt nie aus einer Datei und
+ * behaelt seinen geltenden Wert ('nie_aus_datei', Modul 1.2.1; bis 1.2.43 fehlte
+ * er nach dem Zurueckspielen in Konfiguration und Zweitschrift). Der Merker
+ * _haus_frueher ist keine Einstellung und steht nicht in der Sicherung; nach dem
+ * Zurueckspielen entscheidet fer_haus_folgen() ueber ihn wie bisher.
  *
- * Rueckgabe: array(Konfiguration|null, Beanstandungen[], uebernommene Werte).
- *
- * X-3 (Verbesserungsbau 01.10.2026): $namen (optional, per Verweis) bekommt
- * die NAMEN der beanstandeten Einstellungen (bei notify/tts die Unterfelder,
- * z. B. "tts.port") - fuer die Warnung am Knopf "Einstellungen sichern". Die
- * Namen tragen nie einen Wert. Schluessel, die mit "_" beginnen, sind
- * Kopfzeilen und werden uebergangen (bis dahin: "fremd").
+ * Die Meldungen sind reiner Text: die Oberflaeche maskiert sie genau einmal (O3,
+ * fe_e()). Der Handler fer_zurueck gibt dem Modul deshalb 'e' ohne Maskierung
+ * mit (Regeln/05 "Meldungen als Klartext"); die Haken-Zeile bekommt diese
+ * Beschreibung unveraendert und bleibt maskiert.
  */
-function fer_sicherung_lesen($roh, $geltend = null, &$namen = null)
+function fer_sicherung_beschreibung()
 {
-    if (!is_array($namen)) { $namen = array(); }
-    $mangel = array();
-    $hinweise = array();
-    $daten = json_decode((string) $roh, true);
-    if (!is_array($daten) || ($daten !== array() && array_keys($daten) === range(0, count($daten) - 1))) {
-        return array(null, array(fer_t('TEXT.SICH_KEIN_JSON')), 0, array());
+    $p = fer_paths();
+    $ziele = fer_mit_zielen()
+        ? array('ziele' => sicherung_liste(array('art', 'wo', 'laut', 'sprache', 'ein')) + array('fehlt' => 'behalten'))
+        : array();
+    $tts = array_values(array_diff(array_merge(fer_ansage_schluessel(), ansage_geheim()), array('ziele')));
+    $schluessel = array(
+        'tts' => sicherung_block($tts, $ziele) + array(
+            'sichern' => 'ansage_sicherung_bereinigen',
+            'pruefen' => 'fer_sicherung_tts_pruefen',
+            'wandeln' => function ($w) {
+                list(, $v) = fer_wert_pruefen('tts', ansage_sicherung_bereinigen($w));
+                return $v;
+            }),
+        'notify' => sicherung_block(array('audio', 'push', 'time', 'freetag', 'ferienstart', 'bridge_month')),
+        'own' => sicherung_liste(array('name', 'von', 'bis', 'typ')),
+        'ansage_regeln' => sicherung_block(array_keys(ansage_regeln_vorgaben())) + array(
+            'fehlt' => 'behalten',
+            'pruefen' => function ($w) {
+                $g = '';
+                if (ansage_regeln_wert($w, $g) !== null) { return ''; }
+                return sprintf(fer_t('TEXT.SICH_WERT'), 'ansage_regeln',
+                               ansage_kennung_text($g !== '' ? $g : 'M_R_BLOCK', fer_ansage_k()));
+            },
+            'wandeln' => function ($w) {
+                $g = '';
+                return ansage_regeln_wert($w, $g);
+            }),
+    );
+    /* Jeder uebrige Wert in der Form, die fer_wert_pruefen() liefert (getrimmt, Zahlen als Zahl) - wie bis 1.2.43. */
+    foreach (array('notify', 'own') as $k) {
+        $schluessel[$k]['wandeln'] = function ($w) use ($k) {
+            list(, $v) = fer_wert_pruefen($k, $w);
+            return $v;
+        };
     }
-    $neu = fer_vorgaben();
-    $bekannt = array_keys($neu);
-    $anzahl = 0;
-    foreach ($daten as $k => $w) {
-        $k = (string) $k;
-        if ($k !== '' && $k[0] === '_') {
-            continue;       // Kopfzeile (_warnung), keine Einstellung
-        }
-        if ($k === 'ansage_token_herkunft') { continue; }     // S2: nie aus einer Datei
-        if ($k === 'ansage_regeln') {     // S2: ungueltig = abgewiesen, gueltig = uebernommen
-            $s2_g = '';
-            $s2_r = ansage_regeln_wert($w, $s2_g);
-            if ($s2_r === null) {     // 1.2.34: bis 1.2.33 stillschweigend uebergangen, die Datei galt als heil
-                $mangel[] = sprintf(fer_t('TEXT.SICH_WERT'), 'config.ansage_regeln', ansage_kennung_text($s2_g !== '' ? $s2_g : 'M_R_BLOCK', fer_ansage_k()));
-                $namen[] = 'config.ansage_regeln';
-                continue;
+    foreach (array_keys(fer_vorgaben()) as $k) {
+        if (isset($schluessel[$k])) { continue; }
+        $schluessel[$k] = array('art' => 'wert', 'wandeln' => function ($w) use ($k) {
+            list(, $v) = fer_wert_pruefen($k, $w);
+            return $v;
+        });
+    }
+    foreach (fer_spaet_schluessel() as $k) {
+        $schluessel[$k]['fehlt'] = 'behalten';
+    }
+    return array(
+        'kennzeichen' => 'LoxBerry-Plugin-FerienFeiertage',
+        'hinweis' => fer_t('TEXT.SICH_KOPF'),
+        /* Die Fassung im Kopf kommt aus der Plugin-Datenbank bzw. plugin.cfg - keine fuenfte Stelle neben den
+         * vier, die Werkzeuge/fassung_setzen.py pflegt. */
+        'home' => (string) $p['lbhome'], 'ordner' => (string) $p['plugin'],
+        'plugin_cfg' => dirname(dirname(__DIR__)) . '/plugin.cfg',
+        /* ansage_regeln steht nicht in fer_vorgaben() (fer_config() ergaenzt es nicht; fer_ansage_regeln() nimmt
+         * sonst die Vorgaben des Moduls), gehoert aber seit 1.2.30 zur Sicherung. */
+        'vorgaben' => fer_vorgaben() + array('ansage_regeln' => ansage_regeln_vorgaben()),
+        'schluessel' => $schluessel,
+        'nie_aus_datei' => array('ansage_token_herkunft'),
+        'uebersetzer' => 'fer_sicherung_alt_erkennen',
+        'pruefen' => function ($k, $w) {
+            list($ok, , $grund) = fer_wert_pruefen($k, $w);
+            return $ok ? '' : sprintf(fer_t('TEXT.SICH_WERT'), $k, $grund);
+        },
+        'quer' => function ($neu) {
+            /* Wie das Formular: die zweite Region darf nicht die erste sein. */
+            if (is_string($neu['subdivision2']) && $neu['subdivision2'] !== ''
+                && $neu['subdivision2'] === $neu['subdivision']) {
+                return array(array('subdivision2',
+                    sprintf(fer_t('TEXT.SICH_WERT'), 'subdivision2', fer_t('MELD.W_REGION2_GLEICH'))));
             }
-            $neu['ansage_regeln'] = $s2_r;
-            
-            continue;
-        }
-        if (!in_array($k, $bekannt, true)) {
-            $mangel[] = sprintf(fer_t('TEXT.SICH_FREMD'), $k);
-            $namen[] = $k;
-            continue;
-        }
-        /* C2 (Durchgang 30.09.2026): ein LEERES Token aus einer Sicherung.
-         * Bis 1.2.15 wurde es angenommen; die Zweitschrift-Wache liess die
-         * alte Zweitschrift stehen, die naechste fer_config() heilte daraus,
-         * und das Zurueckspielen war still rueckgaengig gemacht - waehrend die
-         * Seite "24 Werte uebernommen" meldete. Jetzt: das GELTENDE Token
-         * bleibt, und die Meldung sagt es (Muster Ecowitt 0.9.15: uebernehmen
-         * und benennen). Ist keines eingerichtet, wird abgewiesen. */
-        if ($k === 'aktionstoken' && is_string($w) && trim($w) === '') {
-            $g = (is_array($geltend) && isset($geltend['aktionstoken']) && is_string($geltend['aktionstoken']))
-                ? trim($geltend['aktionstoken']) : '';
-            if ($g === '') {
-                $mangel[] = fer_t('TEXT.SICH_TOKEN_LEER_KEINS');
-                $namen[] = $k;
-                continue;
-            }
-            $neu[$k] = $g;
-            $hinweise[] = fer_t('TEXT.SICH_TOKEN_LEER');
-            $anzahl++;
-            continue;
-        }
-        /* Ansage-3: ebenso das Sprechtoken fuer Google-Lautsprecher - benannt,
-         * nie mit dem Wert; "" ist keines. Weiter unten (nach dem Alexa-NG-Block,
-         * damit beide genannt werden) wird der Schluessel dann uebergangen. */
-        $fer_gtm = false;
-        if ($k === 'tts' && is_array($w) && array_key_exists('google_token', $w)) {
-            if ($w['google_token'] !== '') {
-                $mangel[] = fer_t('GOOGLE.SICH_TOKEN');
-                $namen[] = 'tts.google_token';
-                $fer_gtm = true;
-            } else {
-                unset($w['google_token']);
-            }
-        }
-        /* Ansage-2: das Alexa-NG-Sprechtoken steht in keiner Sicherung dieses
-         * Plugins. Bringt eine Datei eines mit, wird sie abgewiesen - benannt,
-         * nie mit dem Wert; ein leeres Feld ist keines. Das geltende bleibt
-         * (unten, nach der Schleife). */
-        if ($k === 'tts' && is_array($w) && array_key_exists('alexa_token', $w)) {
-            if ($w['alexa_token'] !== '') {
-                $mangel[] = fer_t('ALEXA.SICH_TOKEN');
-                $namen[] = 'tts.alexa_token';
-                continue;
-            }
-            unset($w['alexa_token']);
-        }
-        if ($fer_gtm) { continue; }
-        /* C1: jeder Wert wie im Formular - Typ, Muster, Bereich, Auswahl.
-         * Bis 1.2.15 wurde nur der SCHLUESSEL geprueft: ein Token als Liste
-         * wurde am Endpunkt zu "Array" und oeffnete ihn, ein Land als Liste
-         * brachte unter PHP 8.5 jeden Seitenaufbau zum Absturz. */
-        list($ok, $wert, $grund) = fer_wert_pruefen($k, $w);
-        if (!$ok) {
-            $mangel[] = sprintf(fer_t('TEXT.SICH_WERT'), $k, $grund);
-            /* X-3: bei notify/tts die Unterfelder benennen - mit derselben
-             * Pruefung, nur ohne den Grund (der zeigt den Wert). */
-            $unter = array();
-            if (($k === 'notify' || $k === 'tts') && is_array($w)) {
-                foreach ($w as $uk => $uw) {
-                    list($uok) = fer_wert_pruefen($k . '.' . $uk, $uw);
-                    if (!$uok) { $unter[] = $k . '.' . $uk; }
-                }
-            }
-            $namen = array_merge($namen, $unter ? $unter : array($k));
-            continue;
-        }
-        $neu[$k] = $wert;
-        $anzahl++;
+            return array();
+        },
+        'vorbereiten' => 'fer_sicherung_vorbereiten',
+        'jetzt' => 'fer_config',
+        't' => 'fer_t',
+    );
+}
+
+/**
+ * 1.2.44: Woran eine Sicherung bis 1.2.43 erkannt wird (Entscheidung des
+ * Hausherrn 14.11.2026, "Ja, erkennen"). Keine dieser Fassungen schrieb einen
+ * Kopf mit _plugin, jede aber diese 24 Schluessel. Gemessen 15.11.2026 mit dem
+ * Code aller 36 Vorfassungen 1.2.8 bis 1.2.43 (je drei Lagen, PHP 7.4 und 8.4,
+ * 216 Sicherungen: jede traegt alle 24) und gegen 59 andere Linien
+ * (Vorgabenfunktionen, mitgelieferte Konfiguration, 107 Sicherungen ueber den
+ * Pruefstand, die Sicherungen aller Vorfassungen der Ecowitt-Weiche): keine
+ * fuehrt mehr als fuenf davon zusammen. Belege im Pruefordner
+ * Pruefung-FerienFeiertage-1.2.44/ohne_kopf/.
+ */
+function fer_sicherung_alt_merkmal()
+{
+    return array('aktionstoken', 'bridge', 'bridge_luecke', 'bridge_mode', 'country', 'group', 'halbtag_frei',
+                 'ics_filter', 'ics_typ', 'ics_url', 'lang', 'local_holidays', 'locality', 'mqtt_enabled',
+                 'mqtt_topic', 'notify', 'own', 'public', 'school', 'subdivision', 'subdivision2', 'tts',
+                 'typ_streng', 'urlaub_vorlauf');
+}
+
+/**
+ * 1.2.44: Die Kopfschluessel, die eine Fassung bis 1.2.43 schreiben konnte:
+ * _warnung (seit 1.2.17, bei einem Wert, den das eigene Zurueckspielen
+ * abwiese) und der Merker _haus_frueher (seit 1.2.28, stand in der
+ * Konfiguration und ging mit in die Sicherung; gemessen 15.11.2026 an 1.2.28
+ * und 1.2.43). Ein anderer Schluessel mit Unterstrich (_hinweis, _fassung,
+ * _stand) stammt aus einer Fassung mit Kopf, die immer _plugin schreibt - ohne
+ * _plugin ist eine solche Datei keine aeltere eigene.
+ */
+function fer_sicherung_alt_kopf()
+{
+    return array('_warnung', '_haus_frueher');
+}
+
+/**
+ * 1.2.44: Der Uebersetzer fuer das Sicherungsmodul ('uebersetzer'; das Modul
+ * ruft ihn nur fuer eine Datei ohne _plugin). Angenommen wird sie nur, wenn
+ * jeder Schluessel aus fer_sicherung_alt_merkmal() oben steht und sie keinen
+ * anderen Kopfschluessel als die aus fer_sicherung_alt_kopf() traegt; die
+ * Meldung sagt dann "aeltere Sicherung erkannt" (Modultext K_ALT_ERKANNT).
+ * Sonst null, und das Modul weist die Datei als Ganzes ab. Umgeschrieben wird
+ * nichts; _haus_frueher uebergeht das Modul wie jeden Kopfschluessel. Rueckgabe:
+ * die Daten oder null.
+ */
+function fer_sicherung_alt_erkennen($d)
+{
+    if (!is_array($d) || array_key_exists('_plugin', $d)) { return null; }
+    foreach (array_keys($d) as $k) {
+        if (is_string($k) && $k !== '' && $k[0] === '_' && !in_array($k, fer_sicherung_alt_kopf(), true)) { return null; }
     }
-    if ($anzahl > 0 && $neu['subdivision2'] !== '' && $neu['subdivision2'] === $neu['subdivision']) {
-        $mangel[] = sprintf(fer_t('TEXT.SICH_WERT'), 'subdivision2', fer_t('MELD.W_REGION2_GLEICH'));
-        $namen[] = 'subdivision2';
+    foreach (fer_sicherung_alt_merkmal() as $k) {
+        if (!array_key_exists($k, $d)) { return null; }
     }
-    if ($anzahl === 0) {
-        $mangel[] = fer_t('TEXT.SICH_LEER');
-    }
-    /* FEHLENDE Schluessel sind eine Beanstandung, kein stiller Rueckfall.
-     *
-     * Bis hierher war die Vorgabenliste der Ausgangspunkt, und nur was in
-     * der Datei stand wurde darueber geschrieben. Eine Datei mit einem
-     * einzigen Schluessel lief damit ohne Beanstandung durch, wurde
-     * gespeichert, und alle uebrigen Einstellungen fielen auf Werk
-     * zurueck - quittiert mit "1 Wert uebernommen".
-     *
-     * Gemessen an VolkswagenID 0.9.11 am 03.09.2026 unter PHP 7.4 und 8.4:
-     * dort fiel dabei auch das Aktionstoken auf '', und jede im Miniserver
-     * eingetragene Adresse war stumm ungueltig. Am 07.09.2026 ueber den
-     * Bestand ausgerollt (30 Linien).
-     *
-     * Der Hausstandard sagt: eine halb gueltige Datei aendert gar nichts. */
-    /* Gruppe 19 (1.2.28, N1/E-E14): Schluessel, die die Fassung der Sicherung noch nicht kannte
-     * (fer_spaet_schluessel()), sind keine Beanstandung - es gilt der GELTENDE Wert (sonst die Vorgabe), und der
-     * Hinweis nennt sie. Bis 1.2.27 liess sich deshalb schon keine 1.2.26-Sicherung zurueckspielen (befehle_mqtt_ein). */
-    $fehlend = array();
-    $spaet = array();
-    foreach (array_keys(fer_vorgaben()) as $fk) {
-        if (!array_key_exists($fk, $daten)) {
-            if (in_array($fk, fer_spaet_schluessel(), true)) {
-                if (is_array($geltend) && array_key_exists($fk, $geltend)) {
-                    list($gok, $gw) = fer_wert_pruefen($fk, $geltend[$fk]);
-                    if ($gok) { $neu[$fk] = $gw; }
-                }
-                $spaet[] = $fk;
-                continue;
-            }
-            $fehlend[] = $fk;
+    return $d;
+}
+
+/**
+ * 1.2.44: Der Block tts einer Sicherung. Eine Sicherung dieses Plugins traegt nie
+ * ein Sprechtoken; traegt die Datei eines, wird sie abgewiesen - gemessen am Block
+ * der DATEI ($roh), denn Regel 3 des Moduls setzt ein leeres Feld vorher auf den
+ * geltenden Wert. Sonst dieselbe Pruefung wie das Formular (fer_wert_pruefen()).
+ */
+function fer_sicherung_tts_pruefen($w, $k = '', $neu = null, $roh = null)
+{
+    $aus = array();
+    foreach (ansage_sicherung_mangel($roh) as $n) {
+        if ($n === 'tts.alexa_token') {
+            $aus[] = fer_t('ALEXA.SICH_TOKEN');
+        } elseif ($n === 'tts.google_token') {
+            $aus[] = fer_t('GOOGLE.SICH_TOKEN');
+        } else {
+            $aus[] = sprintf(fer_t('TEXT.SICH_FREMD'), $n);     // wie bis 1.2.43 (homepod_token)
         }
     }
-    /* Welle Mehrfach-Ziele (Sprachmodul 1.2.1, Spaetliste): fehlt die Liste der weiteren Ziele in der Sicherung (Datei einer
-     * aelteren Fassung), gelten die jetzigen weiteren Ziele weiter - genannt im Hinweis. Eine Sicherung MIT leerer Liste
-     * heisst "keine weiteren Ziele" und wird so uebernommen. */
-    $fe_spaete = array();
-    if (array_key_exists('tts', $daten) && is_array($neu['tts']) && function_exists('ansage_sicherung_spaet')) {
-        list($neu['tts'], $fe_spaete) = ansage_sicherung_spaet($neu['tts'],
-            (isset($geltend['tts']) && is_array($geltend['tts'])) ? $geltend['tts'] : null);
+    if ($aus) { return $aus; }
+    list($ok, , $grund) = fer_wert_pruefen('tts', ansage_sicherung_bereinigen($w));
+    return $ok ? '' : sprintf(fer_t('TEXT.SICH_WERT'), 'tts', $grund);
+}
+
+/**
+ * 1.2.44: Vor dem Speichern (Rueckruf 'vorbereiten' des Moduls): die geltenden
+ * Sprechtoken bleiben, die Sicherung traegt keine. Bis 1.2.43 galt das fuer die
+ * Token von Alexa-NG und Chromecast 4 Lox NG; das HomePod-Token ging beim
+ * Zurueckspielen verloren. Jetzt bleiben alle drei (ansage_geheim()).
+ */
+function fer_sicherung_vorbereiten($neu, $jetzt)
+{
+    if (isset($neu['tts']) && is_array($neu['tts'])) {
+        $jt = (is_array($jetzt) && isset($jetzt['tts']) && is_array($jetzt['tts'])) ? $jetzt['tts'] : array();
+        $neu['tts'] = ansage_sicherung_tokens_behalten($neu['tts'], $jt);
     }
-    foreach ($fe_spaete as $fe_sn) { $spaet[] = $fe_sn; }     // Welle Mehrfach-Ziele: tts.ziele (Spaetliste)
-    if ($spaet) { $hinweise[] = sprintf(fer_t('TEXT.SICH_SPAET'), implode(', ', $spaet)); }
-    if ($fehlend) {
-        $mangel[] = sprintf(fer_t('TEXT.SICH_FEHLEND'), count($fehlend), implode(', ', $fehlend));
-        $namen = array_merge($namen, $fehlend);
-    }
-    /* Die Meldungen sind reiner Text: die Oberflaeche maskiert sie genau
-     * einmal (O3 - bis 1.2.15 wurde ein fremder Schluessel zweimal maskiert). */
-    /* Ansage-2: das geltende Sprechtoken bleibt (es steht in keiner Sicherung). */
-    if (!$mangel && is_array($neu['tts'])) {
-        $alt_tok = (is_array($geltend) && isset($geltend['tts']) && is_array($geltend['tts'])
-            && isset($geltend['tts']['alexa_token']) && ansage_token_ok($geltend['tts']['alexa_token']))
-            ? $geltend['tts']['alexa_token'] : '';
-        $neu['tts']['alexa_token'] = $alt_tok;
-        if ($alt_tok !== '') { $hinweise[] = fer_t('ALEXA.SICH_BLEIBT'); }
-        /* Ansage-3: ebenso das geltende Sprechtoken fuer Google-Lautsprecher. */
-        $alt_gtok = (is_array($geltend) && isset($geltend['tts']) && is_array($geltend['tts'])
-            && isset($geltend['tts']['google_token']) && ansage_token_ok($geltend['tts']['google_token']))
-            ? $geltend['tts']['google_token'] : '';
-        $neu['tts']['google_token'] = $alt_gtok;
-        if ($alt_gtok !== '') { $hinweise[] = fer_t('GOOGLE.SICH_BLEIBT'); }
-    }
-    return array($mangel ? null : $neu, $mangel, $anzahl, $hinweise);
+    return $neu;
+}
+
+/**
+ * 1.2.44: Die Sicherung, die "Einstellungen sichern" liefert - lesbarer Kopf
+ * (_hinweis, _plugin, _fassung, _stand, bei Bedarf _warnung) und alle Schluessel
+ * der Vorgaben aus $cfg, gebaut vom gemeinsamen Sicherungsmodul. Nie ein
+ * Sprechtoken, nie der Vermerk ansage_token_herkunft, nie der Merker
+ * _haus_frueher (keine Einstellung; bis 1.2.43 stand er darin und wurde beim
+ * Zurueckspielen uebergangen). Wuerde das eigene Zurueckspielen die Datei
+ * abweisen, nennt _warnung die Namen, nie Werte; geliefert wird sie trotzdem.
+ * Rueckgabe: das Feld.
+ */
+function fer_sicherung_bauen($cfg = null)
+{
+    if (!is_array($cfg)) { $cfg = fer_config(); }
+    return sicherung_bauen(fer_sicherung_beschreibung(), $cfg);
 }
 
 /**
  * X-3 (Verbesserungsbau 01.10.2026): Welche gespeicherten Einstellungen wuerde
- * das eigene Zurueckspielen abweisen?
- *
- * Gefragt wird DIESELBE Funktion wie beim Zurueckspielen (fer_sicherung_lesen())
- * mit genau dem Inhalt, den "Einstellungen sichern" liefert - der vollen
- * Konfiguration. Rueckgabe: die Namen (leer: die Sicherung liesse sich
- * zurueckspielen). Nie Werte. Anlass: ein Wert aus einer frueheren Fassung
- * (etwa ein Port 70000 oder eine webcal://-Adresse) stand bis dahin
- * unbemerkt in jeder Sicherung, und aufgefallen waere es erst beim Umzug.
+ * das eigene Zurueckspielen abweisen? Seit 1.2.44 dieselbe Pruefung wie beim
+ * Zurueckspielen ueber das Sicherungsmodul (sicherung_selbstpruefung()) an genau
+ * der Datei, die "Einstellungen sichern" liefert. Rueckgabe: die Namen (leer: die
+ * Sicherung liesse sich zurueckspielen), nie Werte. Anlass: ein Wert aus einer
+ * frueheren Fassung (etwa ein Port 70000 oder eine webcal://-Adresse) stand bis
+ * dahin unbemerkt in jeder Sicherung, und aufgefallen waere es erst beim Umzug.
  */
 function fer_rueckspiel_altwerte($voll = null)
 {
-    if ($voll === null) { $voll = fer_config(); }
-    // Ansage-2/3: wie "Einstellungen sichern" ohne die Sprechtoken (Nr. 36 b: eine Quelle).
-    unset($voll['ansage_token_herkunft']);     // 1.2.30
-    if (isset($voll['tts']) && is_array($voll['tts'])) { $voll['tts'] = ansage_sicherung_bereinigen($voll['tts']); }
-    $js = json_encode($voll, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
-    if ($js === false) { return array('(JSON)'); }
-    $namen = array();
-    $erg = fer_sicherung_lesen($js, $voll, $namen);
-    if ($erg[0] === null && !$namen) { $namen[] = '?'; }
-    return array_values(array_unique($namen));
+    if (!is_array($voll)) { $voll = fer_config(); }
+    $b = fer_sicherung_beschreibung();
+    $d = sicherung_bauen($b, $voll);
+    unset($d['_warnung']);
+    return sicherung_selbstpruefung($b, $d, $voll);
 }
 
 /** Die angebotenen Laender (Formular und Sicherung). */
@@ -4537,7 +4568,7 @@ function fer_wert_pruefen($k, $w)
             /* Nr. 36 b, Stufe 2: dieselbe Pruefung wie beim Speichern und vor dem Senden
              * (ansage_wert_pruefen(): Ausgabeart aus fer_ansage_modi(), Adresse und Vorlage
              * im Heimnetz, Zonen, Lautstaerke 1-100). Der Grund nennt nie den Wert. Die
-             * Sprechtoken kommen hier nie an: fer_sicherung_lesen() weist sie vorher ab. */
+             * Sprechtoken kommen hier nie an: fer_sicherung_tts_pruefen() weist sie vorher ab. */
             $ag = '';
             $s = substr($k, 4);
             $p = ansage_wert_pruefen(array($s => $w), $ag, fer_ansage_modi());
@@ -5596,7 +5627,7 @@ function fer_haus_sitzung_datei()
 }
 
 /** Den Merker "war Anbieter" (_haus_frueher) in der Konfiguration setzen oder entfernen - mit Zweitschrift. Unterstrich:
- *  fer_sicherung_lesen() uebergeht ihn, fer_vorgaben() kennt ihn nicht. Rueckgabe true, wenn geschrieben wurde. */
+ *  keine Einstellung, fer_vorgaben() kennt ihn nicht, die Sicherung traegt ihn seit 1.2.44 nicht. Rueckgabe true, wenn geschrieben wurde. */
 function fer_haus_frueher_setzen($ja)
 {
     $p = fer_paths();
