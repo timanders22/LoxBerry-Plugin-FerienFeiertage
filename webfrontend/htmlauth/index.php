@@ -1140,7 +1140,8 @@ if (is_array($fe_x2)) {
 }
 
 /* Gruppe 19 (1.2.28, E5): der Hilfelink zeigt auf die eigene Wiki-Seite (seit 01.10.2026), nicht auf die Startseite. */
-if ($fe_frame) { LBWeb::lbheader('Ferien und Feiertage', 'https://wiki.loxberry.de/plugins/ferienfeiertage/start', 'help.html'); }
+require_once __DIR__ . '/fassung.php';   // Fassung im Titel: gemeinsames Stueck fassung.php (21.11.2026)
+if ($fe_frame) { LBWeb::lbheader(plugin_kopftitel('Ferien und Feiertage', __DIR__), 'https://wiki.loxberry.de/plugins/ferienfeiertage/start', 'help.html'); }
 
 ?>
 <style>
