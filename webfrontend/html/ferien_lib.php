@@ -307,6 +307,11 @@ function fer_vorgaben()
      * in die Ferienliste (Wecker, Briefing, Schulfrei-Logik). Ab Werk 1 = wie bisher; wer FERIEN nur fuer Schulferien
      * will, nimmt den Haken heraus. Dann bleiben auch FERIEN, Ferientext und Feriendauer vom Urlaub unberuehrt. */
     'urlaub_als_ferien' => 1,
+    /* --- neu in 1.2.49 (Entscheidung des Hausherrn 22.11.2026) ----------------------------------------------------
+     * haus_nachtruhe_frei_bis: "Nachtruhe an Nicht-Schultagen bis" (Reiter MQTT), HH:MM oder leer (ab Werk). Geht als
+     *   retained haus/ansage/nachtruhe_frei_bis an die Plugins mit Sprachmodul 1.5.0 (dort Vorgabe fuer das Ende der
+     *   Nachtruhe an Tagen mit haus/kalender/heute/frei = 1), nur mit haus_kalender_ein und MQTT. Leer = keine Vorgabe. */
+    'haus_nachtruhe_frei_bis' => '',
 );
 }
 
@@ -3320,6 +3325,11 @@ function fer_selbsttest($basis = '', $vorher = null) {
     $fer_hf = array_merge(array_keys(array_diff_key($fer_ht, $fer_hw)), array_keys(array_diff_key($fer_hw, $fer_ht)));
     foreach ($fer_hw as $fer_hk => $fer_v) {
         if ($fer_hk === 'haus/kalender/datum_text') { continue; }
+        if ($fer_hk === 'haus/ansage/nachtruhe_frei_bis') {     // 1.2.49: leer oder HH:MM, gleich der Einstellung
+            $fer_nsoll = (isset($cfg['haus_nachtruhe_frei_bis']) && is_string($cfg['haus_nachtruhe_frei_bis'])) ? $cfg['haus_nachtruhe_frei_bis'] : '';
+            if (!is_string($fer_v) || ($fer_v !== '' && !preg_match('/^([01][0-9]|2[0-3]):[0-5][0-9]\z/', $fer_v)) || $fer_v !== $fer_nsoll) { $fer_hf[] = $fer_hk; }
+            continue;
+        }
         if (!is_int($fer_v) || (string) $fer_v === '') { $fer_hf[] = $fer_hk; }
     }
     /* 1.2.36: datum_text ist derselbe Tag wie datum als TT.MM.JJJJ - hier ohne fer_haus_datum_text() aus den Ziffern
@@ -4541,6 +4551,8 @@ function fer_wert_pruefen($k, $w)
             return $zahl($w, 0, 14);
         case 'ics_typ':
             return $auswahl($w, array('ferien', 'feiertag', 'urlaub'));
+        case 'haus_nachtruhe_frei_bis':     // 1.2.49: leer oder HH:MM, zweistellig wie im Sprachmodul (ansage_hm_ok())
+            return $text($w, '/^([01][0-9]|2[0-3]):[0-5][0-9]\z/', fer_t('MELD.FORM_UHRZEIT'), true);
         case 'ics_url':
             return $text($w, '#^https?://[^\s\x00-\x1F\x7F]{1,2040}\z#i', fer_t('MELD.FORM_URL'), true);
         case 'ics_filter':
@@ -5124,7 +5136,8 @@ function fer_quellprobe()
 function fer_spaet_schluessel()
 {
     // urlaub_als_ferien seit 1.2.39: eine aeltere Sicherung behaelt den geltenden Wert (ab Werk 1 = bisheriges Verhalten).
-    return array('befehle_mqtt_ein', 'endpunkt_ein', 'haus_kalender_ein', 'ics_jaehrlich', 'urlaub_als_ferien');
+    // haus_nachtruhe_frei_bis seit 1.2.49: eine aeltere Sicherung behaelt den geltenden Wert.
+    return array('befehle_mqtt_ein', 'endpunkt_ein', 'haus_kalender_ein', 'ics_jaehrlich', 'urlaub_als_ferien', 'haus_nachtruhe_frei_bis');
 }
 
 /**
@@ -5358,6 +5371,10 @@ function fer_haus_themen()
     $t['haus/kalender/ferien_in'] = true;
     $t['haus/kalender/ferien_rest'] = true;
     $t['haus/kalender/feiertag_in'] = true;
+    /* 1.2.49 (Hausherr 22.11.2026): das Ende der Nachtruhe an Nicht-Schultagen fuer die Plugins mit Sprachmodul - HH:MM,
+     * ohne Einstellung leer (leere retained Nutzlast: am Broker steht dann nichts). Kein haus/kalender-Thema, aber derselbe
+     * Satz: gesendet, abgeraeumt und geprueft wie die uebrigen. */
+    $t['haus/ansage/nachtruhe_frei_bis'] = true;
     $t['haus/kalender/zaehler'] = false;
     return $t;
 }
@@ -5420,6 +5437,8 @@ function fer_haus_werte($st, $cfg, $zaehler)
     $w['haus/kalender/ferien_rest'] = $ok ? ($in === 0 ? (int) $st['naechste']['rest'] : 0) : -1;
     $w['haus/kalender/feiertag_in'] = $ok
         ? (isset($st['feiertag_naechster']['in']) ? (int) $st['feiertag_naechster']['in'] : -1) : -1;
+    $nf = (isset($cfg['haus_nachtruhe_frei_bis']) && is_string($cfg['haus_nachtruhe_frei_bis'])) ? $cfg['haus_nachtruhe_frei_bis'] : '';
+    $w['haus/ansage/nachtruhe_frei_bis'] = preg_match('/^([01][0-9]|2[0-3]):[0-5][0-9]\z/', $nf) ? $nf : '';      // 1.2.49
     $w['haus/kalender/zaehler'] = ((int) $zaehler >= 0 && (int) $zaehler <= 999) ? (int) $zaehler : 0;
     return $w;
 }
@@ -5791,5 +5810,8 @@ function fer_haus_testzeile($cfg)
         $g('haus/kalender/datum'), $g('haus/kalender/datum_text'), $g('haus/kalender/heute/frei'),
         $g('haus/kalender/morgen/frei'),
         date('H:i:s', (int) $sz['zeit']), (string) $sz['lage']);
+    /* 1.2.49: die Vorgabe fuer das Ende der Nachtruhe an Nicht-Schultagen, wie zuletzt gesendet. */
+    $nv = $g('haus/ansage/nachtruhe_frei_bis');
+    $txt .= ' ' . ($nv === '' || $nv === '-' ? fer_t('MQTT.HAUS_T_NACHT_LEER') : sprintf(fer_t('MQTT.HAUS_T_NACHT'), $nv));
     return array($sz['lage'] === 'ok' && time() - (int) $sz['zeit'] <= 150 ? 1 : 0, $txt);
 }

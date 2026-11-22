@@ -233,7 +233,8 @@ function fe_x2_felder($form)
     if ($form === 'mqtt_save') {
         /* Gruppe 1 (1.2.27): dazu der Haken "Befehle ueber MQTT annehmen" (Befehlsbruecke); Gruppe 19 (1.2.28, V1):
          * "Kalendertage an andere Plugins geben". */
-        return array(array('mqtt_topic'), array('mqtt_enabled', 'befehle_mqtt_ein', 'haus_kalender_ein'));
+        /* 1.2.49: dazu das Feld "Nachtruhe an Nicht-Schultagen bis". */
+        return array(array('mqtt_topic', 'haus_nachtruhe_frei_bis'), array('mqtt_enabled', 'befehle_mqtt_ein', 'haus_kalender_ein'));
     }
     if ($form === 'endpunkt_save') {
         /* Gruppe 19 (1.2.28, Entwurf 3.2): "HTTP-Weg fuer Loxone annehmen" (Reiter Einbindung). */
@@ -569,6 +570,19 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['mqtt_save'])) {
     /* Gruppe 19 (1.2.28, V1): "Kalendertage an andere Plugins geben (haus/kalender/...)", ab Werk aus. */
     $fe_mqtt_alt = $fe_new;
     $fe_new['haus_kalender_ein'] = isset($_POST['haus_kalender_ein']) ? 1 : 0;
+    /* 1.2.49 (Hausherr 22.11.2026): "Nachtruhe an Nicht-Schultagen bis" - leer oder HH:MM; abweisen statt verbiegen. Fehlt das
+     * Feld (aelteres Formular), bleibt der gespeicherte Wert. */
+    if (array_key_exists('haus_nachtruhe_frei_bis', $_POST)) {
+        list($fe_nok, $fe_nw, $fe_ng) = fer_wert_pruefen('haus_nachtruhe_frei_bis', $_POST['haus_nachtruhe_frei_bis']);
+        if ($fe_nok) {
+            $fe_new['haus_nachtruhe_frei_bis'] = $fe_nw;
+        } else {
+            $fe_fehler[] = sprintf(fer_t('MELD.ABGEWIESEN'), fer_t('MQTT.HAUS_NACHT_L'), $fe_ng,
+                (isset($fe_new['haus_nachtruhe_frei_bis']) && is_string($fe_new['haus_nachtruhe_frei_bis']) && $fe_new['haus_nachtruhe_frei_bis'] !== '')
+                    ? $fe_new['haus_nachtruhe_frei_bis'] : fer_t('MELD.LEER'));
+            $fe_x2bean[] = 'haus_nachtruhe_frei_bis';
+        }
+    }
     /* O2 (1.2.16): abweisen statt verbiegen. Bis 1.2.15 wurde "ferien/kueche"
      * still zu "ferien/kche", "ferien test" zu "ferientest" und "haus/ferien/#"
      * zu "haus/ferien/" - und alle Themen wanderten ohne ein Wort. Ein leeres
@@ -718,6 +732,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['save'])) {
      * Neuinstallation still ein. */
     $fe_new['endpunkt_ein'] = isset($fe_vorher['endpunkt_ein']) ? (int) $fe_vorher['endpunkt_ein'] : 0;
     $fe_new['haus_kalender_ein'] = isset($fe_vorher['haus_kalender_ein']) ? (int) $fe_vorher['haus_kalender_ein'] : 0;
+    $fe_new['haus_nachtruhe_frei_bis'] = (isset($fe_vorher['haus_nachtruhe_frei_bis']) && is_string($fe_vorher['haus_nachtruhe_frei_bis']))
+        ? $fe_vorher['haus_nachtruhe_frei_bis'] : '';        // 1.2.49, wie die Haken darueber
     if (!empty($fe_vorher['_haus_frueher'])) { $fe_new['_haus_frueher'] = 1; }
     // Dasselbe gilt fuer das Aktionstoken (ab 1.1.7). $fe_new wird hier von
     // Grund auf neu gebaut - genau daran gingen am 13.08.2026 in drei anderen
@@ -895,6 +911,7 @@ $fe_cfg += array('country' => 'DE', 'subdivision' => 'DE-BY', 'lang' => 'DE', 's
     'locality' => '', 'local_holidays' => 0, 'bridge' => 1, 'own' => array(), 'mqtt_enabled' => 1, 'mqtt_topic' => 'ferien',
     'befehle_mqtt_ein' => 0,      // Gruppe 1 (1.2.27): wie fer_vorgaben() - MQTT ab Werk ein (E4), Befehle aus
     'endpunkt_ein' => 0, 'haus_kalender_ein' => 0, 'ics_jaehrlich' => 0,     // Gruppe 19 (1.2.28): wie fer_vorgaben()
+    'haus_nachtruhe_frei_bis' => '',     // 1.2.49: wie fer_vorgaben()
     'notify' => array(), 'tts' => array(), 'aktionstoken' => '',
     'subdivision2' => '', 'group' => '', 'bridge_mode' => 'klassisch', 'bridge_luecke' => 4,
     'typ_streng' => 0, 'halbtag_frei' => 1, 'ics_url' => '', 'ics_typ' => 'urlaub',
@@ -1136,6 +1153,7 @@ if (is_array($fe_x2)) {
         if (isset($fe_xw['mqtt_enabled'])) { $fe_anz['mqtt_enabled'] = (int) $fe_xw['mqtt_enabled']; }
         if (isset($fe_xw['befehle_mqtt_ein'])) { $fe_anz['befehle_mqtt_ein'] = (int) $fe_xw['befehle_mqtt_ein']; }
         if (isset($fe_xw['haus_kalender_ein'])) { $fe_anz['haus_kalender_ein'] = (int) $fe_xw['haus_kalender_ein']; }
+        if (isset($fe_xw['haus_nachtruhe_frei_bis'])) { $fe_anz['haus_nachtruhe_frei_bis'] = (string) $fe_xw['haus_nachtruhe_frei_bis']; }
     }
 }
 
@@ -1705,6 +1723,14 @@ echo ansage_regeln_html(fer_ansage_regeln(), array(), array(), array(
 </label>
 <div class="sm-small"><?php echo fe_e(fer_t('MQTT.HAUS_WIRKT')); ?></div>
 <div class="sm-hilfe"><?php echo fe_e(fer_t('MQTT.HAUS_HINWEIS')); ?></div>
+<?php /* 1.2.49 (Hausherr 22.11.2026): Vorgabe fuer das Ende der Nachtruhe der Ansagen an Nicht-Schultagen, ab Werk leer. */ ?>
+<div class="sm-row" style="margin-top:12px;">
+    <div>
+        <label for="haus_nachtruhe_frei_bis"><?php echo fe_e(fer_t('MQTT.HAUS_NACHT_L')); ?></label>
+        <input data-role="none" type="time" id="haus_nachtruhe_frei_bis" name="haus_nachtruhe_frei_bis"<?= fe_x2m('haus_nachtruhe_frei_bis') ?> value="<?= fe_e(isset($fe_anz['haus_nachtruhe_frei_bis']) ? (string) $fe_anz['haus_nachtruhe_frei_bis'] : '') ?>">
+        <div class="sm-hilfe"><?php echo fe_e(fer_t('MQTT.HAUS_NACHT_H')); ?></div>
+    </div>
+</div>
 
 <button data-role="none" class="sm-btn sm-b-aktion" type="submit"><?php echo fer_t('TEXT.SPEICHERN'); ?></button>
 </form>
