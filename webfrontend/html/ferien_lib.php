@@ -58,11 +58,13 @@ function fer_zone_aus($alt)
  * gegen doppeltes Laden. Was dort laeuft (fer_data(), fer_day(), fer_state() und
  * fer_config()), ruft deshalb nur Modulfunktionen, die es schon in 1.0.2 gab. */
 require_once __DIR__ . '/sprachausgabe.php';
+require_once __DIR__ . '/meldung.php';     // Statusmeldungen an SignalBot (seit 1.2.50)
 /* Gemeinsames Sicherungsmodul (Abschrift von Werkzeuge/gemeinsam/sicherung.php, seit 1.2.44): "Einstellungen
  * sichern" und "Einstellungen zurueckspielen" verhalten sich in allen Plugins des Hauses gleich. Liegt neben
  * dieser Datei und schuetzt sich selbst gegen doppeltes Laden (laedt ein anderes Plugin diese Bibliothek und hat
  * es schon eine Abschrift geladen, gilt jene). */
 require_once __DIR__ . '/sicherung.php';
+require_once __DIR__ . '/haus_bereiche.php';     // gemeinsame Bereiche unter haus/ (seit 1.2.50, Regeln/07)
 
 /** Die Ausgabearten, die dieses Plugin anbietet: wie bis 1.2.22, dazu "aus" und seit 1.2.28 Sonos4Lox und SonoX
  *  (Pflegewelle 22, Modul 1.1.4; ungemessen, kein Sonos im Haus - das Modul prueft Installation und Zone). Keine
@@ -243,6 +245,7 @@ function fer_vorgaben()
     'mqtt_topic' => 'ferien',
     'notify' => array(),
     'tts' => array(),
+    'meldung' => meld_vorgaben(fer_meld_anlaesse(), fer_meld_haken_vorgabe()),     // 1.2.50: Meldungen an SignalBot, ab Werk aus
     'aktionstoken' => '',        // schuetzt ?say= und ?ptest= (unangemeldeter Endpunkt)
 
     /* --- ab 1.2.0 ---------------------------------------------------
@@ -2040,6 +2043,7 @@ function fer_mqtt_publish($st = null, $nur_lebenszeichen = false) {
         return 0;
     }
     $prefix = trim((string) $cfg['mqtt_topic']) !== '' ? trim((string) $cfg['mqtt_topic']) : 'ferien';
+    fer_praefix_haus_melden($cfg);   // 1.2.50: Praefix im gemeinsamen Bereich? melden, nicht anhalten
 
     /* Die Nachrichten entstehen seit 1.2.27 in fer_mqtt_nachrichten() (Gruppe 1: dieselbe Menge prueft die
      * Selbstpruefung gegen die MQTT-Vorlage). Die Themenliste kommt dort aus fer_felder() - siehe den langen
@@ -2350,6 +2354,8 @@ function fer_ansage_senden($jetzt = null)
         $conf = fer_config();
         fer_ansage_token_pflegen($conf);
         $conf = fer_config();
+        fer_meld_senden($frisch, $conf);     // 1.2.50: dieselben Anlaesse an SignalBot (eigene Haken)
+        $frisch = fer_meld_nur_ansage($frisch, $conf);     // die Ansage nur mit ihrem eigenen Haken
         $a = ansage_regel_sprechen($frisch, fer_tts($conf), fer_ansage_regeln($conf), fer_ansage_k());
         $erg = $a['regel'] !== '' ? $a['regel'] : 'gesprochen';
         if ($a['r'] !== null) {
@@ -2581,7 +2587,7 @@ function fer_ann_erlaubt($st, $cfg = null) {
 function fer_announce_check() {
     $cfg = fer_config();
     $st = fer_state();
-    if (!empty($cfg['notify']['audio'])) {
+    if (fer_meld_will('tag', $cfg)) {     // 1.2.50: Ansage (notify.audio) oder Meldung an SignalBot
         // Verglichen wird ueber Zeitstempel, NICHT ueber date('H:i').
         //
         // Bis 1.0.1 stand hier date('H:i') === '19:00'. Traf der Cron die
@@ -2622,7 +2628,7 @@ function fer_announce_check() {
             }
             if ($liste) {
                 fer_log('Brueckentage ' . date('Y') . ': ' . implode(', ', $liste));
-                if (!empty($cfg['notify']['audio'])) {
+                if (fer_meld_will('brueckentage', $cfg)) {     // 1.2.50: Ansage oder Meldung
                     fer_ansage_legen(array(array('schluessel' => 'brueckentage', 'text' => 'Hallo! In diesem Jahr gibt es ' . count($liste) . ' Brueckentage: ' . implode(', ', $liste) . '.')));
                 }
             }
@@ -3259,6 +3265,10 @@ function fer_selbsttest($basis = '', $vorher = null) {
     $add(fer_t('PRUEF.F_NAMEN_MQTT'), count($nt) > 0 && count($fremd_t) === 0,
         count($fremd_t) === 0 ? sprintf(fer_t('PRUEF.H_NAMEN_MQTT_OK'), count($nt))
                               : sprintf(fer_t('PRUEF.H_NAMEN_MQTT_FEHL'), implode(', ', $fremd_t)));
+
+    /* 1.2.50: faellt das Themen-Praefix auf einen gemeinsamen Bereich unter haus/ (Regeln/07)? */
+    $fer_hb = fer_pruef_praefix_haus($cfg);
+    $add(fer_t('HAUSBEREICH.F_TEST'), $fer_hb[0] === 1 ? true : ($fer_hb[0] === 0 ? false : null), $fer_hb[1]);
 
     /* --- 4. MQTT ------------------------------------------------------- */
     if (!empty($cfg['mqtt_enabled'])) {
@@ -4274,6 +4284,7 @@ function fer_sicherung_beschreibung()
                 return $v;
             }),
         'notify' => sicherung_block(array('audio', 'push', 'time', 'freetag', 'ferienstart', 'bridge_month')),
+        'meldung' => meld_sicherung_knoten(fer_meld_anlaesse(), fer_meld_k()),     // 1.2.50
         'own' => sicherung_liste(array('name', 'von', 'bis', 'typ')),
         'ansage_regeln' => sicherung_block(array_keys(ansage_regeln_vorgaben())) + array(
             'fehlt' => 'behalten',
@@ -4320,6 +4331,10 @@ function fer_sicherung_beschreibung()
         'uebersetzer' => 'fer_sicherung_alt_erkennen',
         'pruefen' => function ($k, $w) {
             list($ok, , $grund) = fer_wert_pruefen($k, $w);
+            /* 1.2.50: kein Praefix auf einem gemeinsamen Bereich unter haus/ (Regeln/07) - wie im Formular. */
+            if ($ok && $k === 'mqtt_topic' && is_string($w) && hb_bereich(trim($w)) !== '') {
+                return sprintf(fer_t('TEXT.SICH_WERT'), $k, sprintf(fer_t('HAUSBEREICH.SICH_W'), hb_bereich(trim($w))));
+            }
             return $ok ? '' : sprintf(fer_t('TEXT.SICH_WERT'), $k, $grund);
         },
         'quer' => function ($neu) {
@@ -4481,6 +4496,10 @@ function fer_laender() {
  */
 function fer_wert_pruefen($k, $w)
 {
+    if ($k === 'meldung') {     // 1.2.50: Block der Meldungen an SignalBot (gemeinsames Modul meldung.php)
+        $f = meld_block_pruefen($w, fer_meld_anlaesse());
+        return !$f ? array(true, $w, '') : array(false, null, meld_beanstandung_text($f[0], fer_meld_k()));
+    }
     $typ = function ($w) {
         if (is_array($w)) { return fer_t('MELD.TYP_LISTE'); }
         if (is_bool($w)) { return fer_t('MELD.TYP_WAHR'); }
@@ -5814,4 +5833,158 @@ function fer_haus_testzeile($cfg)
     $nv = $g('haus/ansage/nachtruhe_frei_bis');
     $txt .= ' ' . ($nv === '' || $nv === '-' ? fer_t('MQTT.HAUS_T_NACHT_LEER') : sprintf(fer_t('MQTT.HAUS_T_NACHT'), $nv));
     return array($sz['lage'] === 'ok' && time() - (int) $sz['zeit'] <= 150 ? 1 : 0, $txt);
+}
+
+/**
+ * 1.2.50 (Entscheidung des Hausherrn 23.11.2026 "Nur gemeinsame Bereiche", Regeln/07): Zeile im Reiter Test -
+ * faellt das gespeicherte Themen-Praefix auf einen gemeinsamen Bereich unter haus/? Speichern und Zurueckspielen
+ * weisen ein solches Praefix ab; ein schon gespeichertes bleibt in Betrieb und ist hier rot, grau bei ausgeschaltetem MQTT.
+ * Liste und Pruefung aus dem gemeinsamen Modul haus_bereiche.php. Rueckgabe array(stand, html).
+ */
+function fer_pruef_praefix_haus($cfg)
+{
+    $p = fer_mqtt_praefix($cfg);
+    $b = hb_bereich($p);
+    if ($b !== '') {
+        if (!(!empty($cfg['mqtt_enabled']))) {
+            return array(-1, sprintf(fer_t('HAUSBEREICH.A_AUS'), strval($p), strval($b)));
+        }
+        return array(0, sprintf(fer_t('HAUSBEREICH.A_NEIN'), strval($p), strval($b)));
+    }
+    return array(1, sprintf(fer_t('HAUSBEREICH.A_JA'), strval($p)));
+}
+
+/**
+ * 1.2.50: einmal je Aenderung eine Protokollzeile, solange das Praefix auf einen gemeinsamen Bereich faellt; der
+ * Versand bleibt, wie er ist. Gemerkt in praefix_haus_gemeldet.txt im Datenordner. Rueckgabe der Bereich oder ''.
+ */
+function fer_praefix_haus_melden($cfg, $merk = null)
+{
+    $p = fer_mqtt_praefix($cfg);
+    if ($merk === null) {
+        $merk = fer_paths()['datadir'] . '/praefix_haus_gemeldet.txt';
+    }
+    $b = hb_melden_faellig($p, $merk);
+    if ($b !== '') {
+        fer_log(hb_logtext($p, $b));
+    }
+    return $b;
+}
+
+if (!function_exists('fer_meld_block')) {
+
+/* ---------------- Statusmeldungen an SignalBot (1.2.50, gemeinsames Modul meldung.php) ----------------
+ *
+ * Auftrag des Hausherrn 23.11.2026, Entscheidungen 23./24.11.2026: dieselben Anlaesse wie die Ansage, eigener Haken je
+ * Anlass, ab Werk aus; Sperre, Bremse und Versand im Modul. Die Erkennung laeuft auch ohne Ausgabeart, wenn eine Meldung
+ * eingeschaltet ist (fer_meld_aktiv()), und legt einen Anlass hin, wenn Ansage ODER Meldung ihn will
+ * (fer_meld_will()); der Sender trennt die Wege wieder (fer_meld_nur_ansage()).
+ */
+
+/** Die meldbaren Anlaesse: Name => Beschriftung (dieselben wie die Ansage). */
+function fer_meld_anlaesse()
+{
+    return array('tag' => fer_t('TTS.N_TAG'), 'brueckentage' => fer_t('TTS.N_BRUECKENTAGE'));
+}
+
+/** Die ab-Werk-Haken der Ansage dieser Linie: so stehen auch die Haken der Meldung, solange der Block nie gespeichert ist. */
+function fer_meld_haken_vorgabe()
+{
+    return array('tag' => 1, 'brueckentage' => 1);
+}
+
+/** Ist der Haken dieses Anlasses fuer die ANSAGE gesetzt? */
+function fer_ansage_anlass_sprache($a, $cfg = null)
+{
+    if ($cfg === null) { $cfg = fer_config(); }
+    return in_array((string) $a, array('tag', 'brueckentage'), true) && is_array($cfg) && !empty($cfg['notify']['audio']);
+}
+
+/** Der wirksame Block 'meldung' fuer den Betrieb (ungueltig gespeichert gilt als aus und wird im Formular genannt). */
+function fer_meld_block($cfg = null)
+{
+    if ($cfg === null) { $cfg = fer_config(); }
+    list($b) = meld_block(is_array($cfg) && array_key_exists('meldung', $cfg) ? $cfg['meldung'] : null, fer_meld_anlaesse(), fer_meld_haken_vorgabe());
+    return $b;
+}
+
+/** Die Beanstandungen eines gespeicherten Blocks (leer = gueltig). */
+function fer_meld_bean($cfg = null)
+{
+    if ($cfg === null) { $cfg = fer_config(); }
+    list(, $f) = meld_block(is_array($cfg) && array_key_exists('meldung', $cfg) ? $cfg['meldung'] : null, fer_meld_anlaesse(), fer_meld_haken_vorgabe());
+    return $f;
+}
+
+/** Ist irgendein Anlass zur Meldung eingeschaltet? Dann laeuft die Erkennung auch ohne Ausgabeart. */
+function fer_meld_aktiv($cfg = null)
+{
+    return meld_irgendein_an(fer_meld_block($cfg));
+}
+
+/** Will die Ansage ODER die Meldung diesen Anlass? */
+function fer_meld_will($a, $cfg = null)
+{
+    if ($cfg === null) { $cfg = fer_config(); }
+    return fer_ansage_anlass_sprache($a, $cfg) || meld_anlass_an(fer_meld_block($cfg), (string) $a);
+}
+
+/** Der Kontext des Moduls: Datenordner (data/plugins/<ordner>, daraus der Absender) und Texte - wie bei der Ansage. */
+function fer_meld_k()
+{
+    return (function () { $p = fer_paths(); return array('plugin' => (string) $p['plugin'], 'ordner' => @is_dir($p['datadir']) ? $p['datadir'] : fer_tmpdir()) + fer_ansage_k(); })();
+}
+
+/** Fuer die Ansage nur Eintraege, deren Ansage-Haken gesetzt ist; ein Eintrag ohne bekannten Anlass bleibt wie bisher. */
+function fer_meld_nur_ansage(array $l, $cfg = null)
+{
+    if ($cfg === null) { $cfg = fer_config(); }
+    $anl = fer_meld_anlaesse();
+    $aus = array();
+    foreach ($l as $e) {
+        if (is_array($e) && array_key_exists(meld_anlass_von($e), $anl) && !fer_ansage_anlass_sprache(meld_anlass_von($e), $cfg)) { continue; }
+        $aus[] = $e;
+    }
+    return $aus;
+}
+
+/** Die Eintraege an SignalBot melden. Protokoll: eine Zeile, wenn gesendet oder gescheitert (nie der Text). */
+function fer_meld_senden(array $l, $cfg = null)
+{
+    if ($cfg === null) { $cfg = fer_config(); }
+    $b = fer_meld_block($cfg);
+    if (empty($b['ein']) || !$l) { return null; }
+    $a = meld_regel_senden($l, $b, fer_meld_k());
+    if ($a['regel'] === '' || in_array($a['regel'], array('BREMSE', 'STAND', 'ORDNER'), true)) {
+        fer_log(meld_regel_kurz($a));
+    }
+    return $a;
+}
+
+/** Der Knopf "Testmeldung senden": array(angenommen, Satz). Geht an Haken, Sperre und Bremse vorbei. */
+function fer_meld_test()
+{
+    $r = meld_testmeldung(fer_meld_k());
+    fer_log('Testmeldung an SignalBot: ' . ($r[0] ? 'angenommen' : 'nicht angenommen'));
+    return $r;
+}
+
+/** Der Block im Einstellungsformular (unter den Ansage-Regeln, im selben Formular), mit Lage und Knopf. */
+function fer_meld_form_html($cfg = null)
+{
+    if ($cfg === null) { $cfg = fer_config(); }
+    $e = function ($s) { return htmlspecialchars((string) $s, ENT_QUOTES, 'UTF-8'); };
+    $k = fer_meld_k();
+    $o = array();
+    /* 1.2.50: unsichtbarer Doppel des Speicherknopfs VOR dem Knopf Testmeldung - die Eingabetaste in einem Textfeld
+     * loest den ersten Absendeknopf des Formulars aus; sie soll speichern wie bisher, nicht die Testmeldung senden. */
+    $o[] = '<button data-role="none" type="submit" tabindex="-1" aria-hidden="true" style="position:absolute;left:-10000px;top:auto;width:1px;height:1px;overflow:hidden"></button>';
+    $o[] = '<h3>' . $e(meld_t('TITEL', $k)) . '</h3>';
+    $o[] = meld_formular_html(fer_meld_block($cfg), fer_meld_anlaesse(), array(), $k);
+    list(, $lage) = meld_pruefzeile(fer_meld_block($cfg), fer_meld_bean($cfg), $k);
+    $o[] = '<div class="sm-hilfe">' . $e(meld_t('F_TEST', $k) . ' ' . $lage) . '</div>';
+    $o[] = '<div class="sm-knopfreihe"><button data-role="none" class="sm-btn sm-b-aktion" type="submit" name="meld_test" value="1">'
+         . $e(meld_t('K_TEST', $k)) . '</button></div>';
+    return implode("\n", $o) . "\n";
+}
 }

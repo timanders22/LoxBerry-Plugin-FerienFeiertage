@@ -531,6 +531,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['quellprobe']) && func
  * Protokoll und Meldung nennen nie Text oder Token. */
 /* Welle Mehrfach-Ziele (Sprachmodul 1.2.1): die Knoepfe "Testansage an Ziel n" schicken ansage_test_ziel=n - es spricht
  * nur dieses Ziel; der bisherige Knopf spricht an alle Ziele gleichzeitig. Eine unbrauchbare Nummer spricht nichts. */
+/* 1.2.50: Testmeldung an SignalBot (Knopf unter den Ansage-Regeln). */
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['meld_test'])) {
+    list($meld_ok, $meld_satz) = fer_meld_test();
+    if ($meld_ok) { $fe_note_art = 'ok'; $fe_note = $meld_satz; } else { $fe_note_art = 'err'; $fe_note = $meld_satz; }
+    $fe_tab = 'tab-test';
+}
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && (isset($_POST['ansage_test']) || isset($_POST['ansage_test_ziel']))) {
     $fe_tcfg = fer_config();
     $fe_tk = fer_ansage_k();
@@ -590,7 +596,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['mqtt_save'])) {
     $fe_te = isset($_POST['mqtt_topic']) ? $_POST['mqtt_topic'] : 'ferien';
     if (is_string($fe_te) && trim($fe_te) === '') { $fe_te = 'ferien'; }
     list($fe_tok, $fe_tw, $fe_tg) = fer_wert_pruefen('mqtt_topic', $fe_te);
-    if ($fe_tok) {
+    if ($fe_tok && hb_bereich($fe_tw) !== '' && $fe_tw !== trim((string) fer_config()['mqtt_topic'])) {   // nur NEUE Eingaben: ein schon gespeichertes Praefix sperrt das Speichern
+        // des Reiters nicht (Regeln/07; Bauart Einspeisebremse 0.9.25)
+        /* 1.2.50 (Entscheidung des Hausherrn 23.11.2026 "Nur gemeinsame Bereiche", Regeln/07): kein Praefix auf einem
+         * gemeinsamen Bereich unter haus/ - nur hier und beim Zurueckspielen, nicht in der Pruefung beim Lesen der
+         * Konfiguration: ein schon gespeichertes bleibt in Betrieb, der Reiter Test meldet es. */
+        $fe_fehler[] = sprintf(fer_t('HAUSBEREICH.FEHLER'), $fe_tw, hb_bereich($fe_tw));
+        $fe_x2bean[] = 'mqtt_topic';
+    } elseif ($fe_tok) {
         $fe_new['mqtt_topic'] = $fe_tw;
     } else {
         $fe_fehler[] = sprintf(fer_t('MELD.ABGEWIESEN'), fer_t('TEXT.TOPIC_PRFIX'), $fe_tg,
@@ -638,7 +651,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['mqtt_save'])) {
     $fe_tab = 'tab-mqtt';
 }
 
-if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['save'])) {
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['save']) && !isset($_POST['meld_test'])) {     // 1.2.50: der Knopf Testmeldung (im selben Formular) speichert nicht
     // Der Stand VOR dem Speichern - daran wird spaeter erkannt, ob sich die
     // Region geaendert hat und die Termine neu geholt werden muessen.
     $fe_vorher = function_exists('fer_config') ? fer_config() : array();
@@ -816,6 +829,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['save'])) {
     $fe_new['tts'] = ansage_formular_lesen($_POST, $fe_tts_alt, $fe_tmangel, $fe_tbean,
         array('modi' => fer_ansage_modi(), 'ziele' => fer_mit_zielen(), 'token_vor_ort' => true, 'aus_gewinnt' => true), fer_ansage_k(), $fe_thinw);
     list($fe_new['ansage_regeln']) = ansage_regeln_formular($_POST, fer_ansage_regeln(), array(), $fe_tmangel, $fe_tbean, fer_ansage_k());     // S2: Wann gesprochen wird (Stamm)
+    // 1.2.50: der Block 'Meldungen an SignalBot' (eine Beanstandung haelt das Speichern an, wie die Ansage)
+    $fe_new['meldung'] = meld_formular_lesen($_POST, isset($fe_vorher['meldung']) ? $fe_vorher['meldung'] : null, fer_meld_anlaesse(), $fe_tmangel, $fe_tbean, fer_meld_k(), fer_meld_haken_vorgabe());
     // 1.2.34: ein eingetipptes oder geloeschtes Sprechtoken ist nicht mehr vom Nachbarn; bis 1.2.33 verlor das Speichern den Vermerk ganz.
     $fe_new['ansage_token_herkunft'] = ansage_token_herkunft_formular($_POST, isset($fe_vorher['ansage_token_herkunft']) ? $fe_vorher['ansage_token_herkunft'] : array());
     foreach ($fe_tmangel as $fe_tm) { $fe_fehler[] = $fe_tm['text']; }
@@ -1677,6 +1692,7 @@ echo ansage_regeln_html(fer_ansage_regeln(), array(), array(), array(
             ? $fe_x2['werte'][$n] === '1' : (bool) $g;
     },
     'token_vor_ort' => true), fer_ansage_k()); ?>
+<?= fer_meld_form_html(fer_config()) ?>
 <div class="sm-hilfe"><?= fe_e(fer_t('TTS.H_TESTANSAGE')) ?></div>
 
 <button data-role="none" class="sm-btn sm-b-aktion" type="submit"><?php echo fer_t('TEXT.SPEICHERN'); ?></button>
